@@ -1,6 +1,11 @@
 # ---- build stage ----------------------------------------------------------------
-FROM node:20-noble-slim AS builder
+FROM node:20-slim AS builder
 WORKDIR /build
+
+# Build tools needed to compile sqlite3 from source
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install bun (used by the build scripts and bundler)
 RUN npm install -g bun
@@ -8,11 +13,14 @@ RUN npm install -g bun
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
+# Recompile sqlite3 against this image's glibc so it works in the runtime stage
+RUN npm rebuild sqlite3 --build-from-source
+
 COPY . .
 RUN bun run build
 
 # ---- runtime stage --------------------------------------------------------------
-FROM node:20-noble-slim
+FROM node:20-slim
 WORKDIR /app
 
 # wget is used by the HEALTHCHECK
