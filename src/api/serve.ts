@@ -61,6 +61,10 @@ function requestHost(c: Context): string | undefined {
 export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
   const app = new Hono();
 
+  // ---- Health check (no auth) ---------------------------------------------------
+
+  app.get("/healthz", (c) => c.text("ok"));
+
   // ---- Auth (login / logout / dashboard) — only wired when auth is configured ----
 
   if (auth) {

@@ -128,6 +128,54 @@ sudo systemctl enable --now argus-hub
 sudo journalctl -fu argus-hub    # follow logs
 ```
 
+### Docker
+
+```bash
+docker build -t argus-hub .
+
+docker run -d \
+  --name argus-hub \
+  -p 4343:4343 \
+  -v argus-hub-data:/data \
+  argus-hub
+```
+
+On first startup Hub prints the admin password and API key to stdout — retrieve them with:
+
+```bash
+docker logs argus-hub 2>&1 | grep -E "Hub API key|Admin password"
+```
+
+**Environment variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HUB_PORT` | `4343` | Port inside the container |
+| `HUB_DATA_DIR` | `/data` | Directory for `hub.db` |
+| `ADMIN_PASSWORD` | _(generated)_ | Pin the dashboard password across restarts |
+
+Pass them with `-e NAME=value` or `--env-file hub.env`. The data volume (`/data`) holds `hub.db`; mount a named volume or bind mount there to persist data across container restarts.
+
+**Docker Compose** — save as `compose.yml` and run `docker compose up -d`:
+
+```yaml
+services:
+  argus-hub:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "4343:4343"
+    volumes:
+      - argus-hub-data:/data
+
+volumes:
+  argus-hub-data:
+```
+
+Hub exposes `GET /healthz` (plain `200 ok`, no auth) for Docker `HEALTHCHECK` and Kubernetes liveness probes.
+
+---
+
 ### launchd (macOS)
 
 Save as `~/Library/LaunchAgents/co.agentdeployment.argus-hub.plist`:
