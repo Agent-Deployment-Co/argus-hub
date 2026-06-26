@@ -6,8 +6,10 @@ import type { Context } from "hono";
 
 // Argus client store schema versions this Hub can ingest. Bump the upper bound when a new client
 // adds columns the Hub knows how to read; the lower bound matches what `hub-store.ts` expects.
+// v17 added only the client-side `hub_session_cursors` table (per-Hub upload cursors); it changed
+// none of the uploaded `resolved_*` row shapes, so it ingests identically to v16.
 export const HUB_MIN_CLIENT_SCHEMA_VERSION = 10;
-export const HUB_MAX_CLIENT_SCHEMA_VERSION = 16;
+export const HUB_MAX_CLIENT_SCHEMA_VERSION = 17;
 
 const CLIENT_ID_HEADER = "X-Argus-Client";
 
