@@ -2,6 +2,9 @@ name: Publish Docker Image to GHCR
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - jchen/5-publish-docker-image-to-ghcr
 
 env:
   REGISTRY: ghcr.io
