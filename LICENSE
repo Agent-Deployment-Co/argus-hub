@@ -1,0 +1,111 @@
+Functional Source License, Version 1.1, MIT Future License
+
+Copyright 2026 The Agent Deployment Company
+
+Parameters
+
+Licensor:             The Agent Deployment Company
+Licensed Work:        Argus Hub
+                      The Licensed Work is (c) 2026 The Agent Deployment Company
+Change Date:          Two years from the date each version of the Licensed Work
+                      is first publicly distributed.
+Change License:       MIT License
+
+For information about alternative licensing arrangements for the Licensed Work,
+please contact support@agentdeployment.co.
+
+---
+
+Functional Source License, Version 1.1
+
+TERMS AND CONDITIONS
+
+1. Grant of Rights
+
+   Subject to the terms and conditions of this License, the Licensor hereby
+   grants you a non-exclusive, worldwide, royalty-free right to use, copy,
+   modify, create derivative works of, publicly display, publicly perform, and
+   redistribute the Licensed Work, for any purpose other than a Competing Use.
+
+2. Competing Use
+
+   A "Competing Use" means making the Licensed Work — or any substantially
+   similar version or derivative thereof — available to third parties as a
+   hosted or managed service on a paid basis, where the primary value
+   proposition of that service is the same as, or substantially the same as,
+   the primary value proposition of the Licensed Work (i.e., auditing,
+   monitoring, or reporting on local AI agent usage).
+
+   For the avoidance of doubt: incorporating the Licensed Work into a larger
+   product or service where agent-usage auditing is not the primary value
+   proposition is NOT a Competing Use.
+
+3. Conversion
+
+   On the Change Date applicable to a given version of the Licensed Work, this
+   License for that version automatically converts to the Change License
+   (MIT License), and you may thereafter use that version under the terms of
+   the MIT License.
+
+4. Grant of Patent Rights
+
+   Subject to the terms and conditions of this License, the Licensor hereby
+   grants you a non-exclusive, worldwide, royalty-free patent license under
+   the Licensor's Essential Patent Claims, to make, use, sell, offer for sale,
+   import, and otherwise transfer the Licensed Work. This patent license
+   terminates immediately if you bring any patent claim against the Licensor
+   or any contributor alleging that the Licensed Work infringes a patent.
+
+5. Notices
+
+   You must retain all copyright, patent, trademark, and attribution notices
+   that are present in the Licensed Work. If you redistribute the Licensed
+   Work, you must include a copy of this License.
+
+6. No Other Rights
+
+   This License does not grant any rights in the trademarks, service marks, or
+   logos of the Licensor, except as required for reasonable and customary use
+   in describing the origin of the Licensed Work.
+
+7. Disclaimer of Warranty
+
+   THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN
+   NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+   DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR
+   OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE LICENSED WORK
+   OR THE USE OR OTHER DEALINGS IN THE LICENSED WORK.
+
+8. Limitation of Liability
+
+   IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
+   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+   TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+   PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+   LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+   NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THE LICENSED
+   WORK, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+---
+
+MIT License (the Change License, effective on the Change Date for each version)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

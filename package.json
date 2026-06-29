@@ -18,6 +18,7 @@
     "bump-version": "bun run scripts/bump-version.ts",
     "get-version": "bun run scripts/get-version.ts"
   },
+  "license": "FSL-1.1-MIT",
   "engines": {
     "node": ">=20.17"
   },

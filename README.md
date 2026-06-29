@@ -252,3 +252,34 @@ hub.db  ──►  GET /api/snapshot, /api/sessions, /api/session/:id,
 
 Hub supports multiple orgs via the `organizations` table — each API key is scoped to one org.
 For strict isolation between unrelated tenants, run separate Hub instances.
+
+---
+
+## License
+
+Argus Hub is licensed under the **Functional Source License 1.1 (FSL-1.1)**, converting to **MIT** after two years.
+
+### What you can do
+
+- Use Argus Hub freely for personal, internal, or commercial purposes
+- Modify the source code and build on top of it
+- Distribute copies or derivatives
+- Incorporate Argus Hub into a larger product or service
+
+### What you cannot do (for two years from each release)
+
+Run a **paid hosted service** where the primary thing you're selling is essentially "Argus Hub as a service" — i.e., a product whose core value is auditing or reporting on AI agent usage, built on this codebase.
+
+If you're building a dev-tooling platform, an IDE extension, or a larger product where agent-usage stats are one small feature among many, that's fine.
+
+### After two years
+
+Each released version automatically becomes **MIT-licensed** two years after it was first published. At that point, all restrictions lift and you can do anything MIT allows.
+
+### In short
+
+Free to use and build with. Don't resell it as a hosted Argus Hub clone. After two years, do whatever you want.
+
+---
+
+Questions? Contact support@agentdeployment.co
