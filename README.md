@@ -282,4 +282,4 @@ Free to use and build with. Don't resell it as a hosted Argus Hub clone. After t
 
 ---
 
-Questions? Contact jerry@agentdeployment.co
+Questions? Contact support@agentdeployment.co
