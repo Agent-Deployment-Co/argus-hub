@@ -189,7 +189,6 @@ export function assembleDashboard(agg: DashboardAggregates, plugins: Map<string,
     heaviestToolResults,
     byPlugin,
     byProject,
-    sessions: [],
     frictionTotals: agg.frictionTotals,
     highTokenGrowthSessions: agg.highTokenGrowthSessions,
   };

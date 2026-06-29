@@ -8,8 +8,13 @@ import type { Context } from "hono";
 // adds columns the Hub knows how to read; the lower bound matches what `hub-store.ts` expects.
 // v17 added only the client-side `hub_session_cursors` table (per-Hub upload cursors); it changed
 // none of the uploaded `resolved_*` row shapes, so it ingests identically to v16.
+// v18 added the client-side `resolved_interaction_text` table (never uploaded; push path stays
+// text-free by construction). No row shape changes.
+// v19 added content_indexed_at_ms / interpreted_at_ms / interpretation_version to
+// resolved_sessions (interpretation state); the upload query does not select these columns.
+// No row shape changes.
 export const HUB_MIN_CLIENT_SCHEMA_VERSION = 10;
-export const HUB_MAX_CLIENT_SCHEMA_VERSION = 17;
+export const HUB_MAX_CLIENT_SCHEMA_VERSION = 19;
 
 const CLIENT_ID_HEADER = "X-Argus-Client";
 

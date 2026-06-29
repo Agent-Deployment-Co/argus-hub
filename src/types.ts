@@ -276,6 +276,7 @@ export interface Dashboard {
   byModel: NamedUsage[];
   bySource: NamedUsage[];
   bySkill: NamedUsage[];
+  byUser?: NamedUsage[];
   skillInvocations: Array<{ name: string; count: number; plugin: string | null; sampleArgs: string }>;
   byMcpServer: Array<{
     server: string;
@@ -286,7 +287,6 @@ export interface Dashboard {
   heaviestToolResults: Array<{ tool: string; count: number; approxTokens: number }>;
   byPlugin: PluginRow[];
   byProject: NamedUsage[];
-  sessions: SessionRow[];
   byTool: ToolStat[];
   byToolCategory: ToolCategoryStat[];
   frictionTotals: FrictionTotals;
