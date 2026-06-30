@@ -14,12 +14,27 @@ async function fetchUserInfo(userId: string): Promise<UserInfo> {
   return res.json();
 }
 
-const BrandMark = () => (
-  <svg className="brand-mark" xmlns="http://www.w3.org/2000/svg" viewBox="6 0 128 100" role="img" aria-label="Argus Hub">
-    <polyline points="6,50 38,18 70,50 102,18 134,50" fill="none" stroke="#ef8920" strokeWidth="14" strokeLinejoin="round" strokeLinecap="round" />
-    <polyline points="6,68 38,36 70,68 102,36 134,68" fill="none" stroke="#ef8920" strokeWidth="14" strokeLinejoin="round" strokeLinecap="round" opacity=".45" />
-  </svg>
-);
+const Wordmark = () => {
+  const { theme } = useTheme();
+  const textFill = theme === "dark" ? "#f3d7ba" : "#000";
+  return (
+    <svg className="brand-wordmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 146.6 18.35" overflow="visible" role="img" aria-label="Argus Hub">
+      <g>
+        <path fill="#e2302c" d="M0,18.09v-8.82C0,4.4,3.95.46,8.82.46s8.82,3.95,8.82,8.82v8.82h-1.68v-8.82c0-3.94-3.2-7.14-7.14-7.14S1.68,5.33,1.68,9.27v8.82H0Z"/>
+        <path fill="#ef8920" d="M1.93,18.09v-8.82c0-3.8,3.08-6.88,6.88-6.88s6.88,3.08,6.88,6.88v8.82h-1.68v-8.82c0-2.87-2.33-5.21-5.21-5.21s-5.21,2.33-5.21,5.21v8.82h-1.68Z"/>
+        <path fill="#5dbcdf" d="M3.86,18.09v-8.82c0-2.74,2.22-4.95,4.95-4.95s4.95,2.22,4.95,4.95v8.82h-1.68v-8.82c0-1.81-1.47-3.27-3.27-3.27s-3.27,1.47-3.27,3.27v8.82h-1.68Z"/>
+        <path fill="#286992" d="M5.79,18.09v-8.82c0-1.67,1.35-3.02,3.02-3.02s3.02,1.35,3.02,3.02v8.82h-1.68v-8.82c0-.74-.6-1.34-1.34-1.34s-1.34.6-1.34,1.34v8.82h-1.68Z"/>
+      </g>
+      <text
+        fill={textFill}
+        style={{ fontFamily: "Poppins, 'Avenir Next', Arial, sans-serif", fontSize: "24.69px", fontWeight: 600, letterSpacing: "-0.08em" }}
+        transform="translate(20.02 17.9)"
+      >
+        <tspan x="0" y="0">ARGUS HUB</tspan>
+      </text>
+    </svg>
+  );
+};
 
 function ThemeToggle() {
   const { theme, setTheme } = useTheme();
@@ -69,7 +84,7 @@ export function Layout() {
     <div className="hub-shell">
       <header className="hub-header">
         <div className="hub-brand">
-          <BrandMark />
+          <Wordmark />
           <div>
             <a href="/" className="hub-org-link">← {userInfo.data?.orgName ?? "Users"}</a>
             <h1 className="hub-user">{displayName}</h1>

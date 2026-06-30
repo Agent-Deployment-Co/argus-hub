@@ -64,7 +64,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 "Al
 .hub-shell { display: flex; flex-direction: column; min-height: 100vh; }
 .hub-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 16px 32px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 50%, var(--bg)); position: sticky; top: 0; z-index: 5; }
 .hub-brand { display: flex; align-items: center; gap: 14px; }
-.hub-brand .brand-mark { width: 28px; height: 28px; flex-shrink: 0; }
+.hub-brand .brand-wordmark { height: 28px; width: auto; flex-shrink: 0; padding: 2px 4px 2px 0; }
 .hub-org-link { color: var(--muted); font-size: 12px; text-decoration: none; }
 .hub-org-link:hover { color: var(--accent); }
 .hub-user { font: 700 18px/1.2 "Poppins", "Avenir Next", Arial, sans-serif; color: var(--heading); margin: 2px 0 0; }
@@ -98,7 +98,6 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 "Al
 
 .rail { position: sticky; top: 0; align-self: start; height: 100vh; display: flex; flex-direction: column; gap: 6px; padding: 16px 12px; border-right: 1px solid var(--line); background: var(--surface); overflow-y: auto; }
 .rail-brand { display: flex; align-items: center; gap: 6px; padding: 4px 8px 14px; }
-.brand-mark { display: block; width: auto; height: 20px; flex: 0 0 auto; }
 .rail-wordmark { color: var(--heading); font-family: "Poppins", "Avenir Next", Arial, sans-serif; font-size: 22px; line-height: 1; font-weight: 700; letter-spacing: -0.05em; }
 
 .rail-nav { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; }

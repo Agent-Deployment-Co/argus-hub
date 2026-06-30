@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 146.6 18.35">
+  <!-- Generator: Adobe Illustrator 29.1.0, SVG Export Plug-In . SVG Version: 2.1.0 Build 142)  -->
+  <defs>
+    <style>
+      .st0 {
+        fill: #e2302c;
+      }
+
+      .st1 {
+        fill: #ef8920;
+      }
+
+      .st2 {
+        fill: #5dbcdf;
+      }
+
+      .st3 {
+        font-family: Poppins-SemiBold, Poppins;
+        font-size: 24.69px;
+        font-weight: 600;
+        letter-spacing: -.08em;
+      }
+
+      .st4 {
+        fill: #286992;
+      }
+    </style>
+  </defs>
+  <g>
+    <path class="st0" d="M0,18.09v-8.82C0,4.4,3.95.46,8.82.46s8.82,3.95,8.82,8.82v8.82h-1.68v-8.82c0-3.94-3.2-7.14-7.14-7.14S1.68,5.33,1.68,9.27v8.82H0Z"/>
+    <path class="st1" d="M1.93,18.09v-8.82c0-3.8,3.08-6.88,6.88-6.88s6.88,3.08,6.88,6.88v8.82h-1.68v-8.82c0-2.87-2.33-5.21-5.21-5.21s-5.21,2.33-5.21,5.21v8.82h-1.68Z"/>
+    <path class="st2" d="M3.86,18.09v-8.82c0-2.74,2.22-4.95,4.95-4.95s4.95,2.22,4.95,4.95v8.82h-1.68v-8.82c0-1.81-1.47-3.27-3.27-3.27s-3.27,1.47-3.27,3.27v8.82h-1.68Z"/>
+    <path class="st4" d="M5.79,18.09v-8.82c0-1.67,1.35-3.02,3.02-3.02s3.02,1.35,3.02,3.02v8.82h-1.68v-8.82c0-.74-.6-1.34-1.34-1.34s-1.34.6-1.34,1.34v8.82h-1.68Z"/>
+  </g>
+  <text class="st3" transform="translate(20.02 17.9)"><tspan x="0" y="0">ARGUS HUB</tspan></text>
+</svg>
