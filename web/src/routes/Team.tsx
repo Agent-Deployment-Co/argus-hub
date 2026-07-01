@@ -1,28 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { fmt, usd } from "../lib/format";
-
-interface HubUser {
-  userId: string;
-  displayName: string;
-  email: string | null;
-  lastSyncMs: number;
-  sessionCount: number;
-  clientCount: number;
-  totalTokens: number;
-  cost: number;
-}
-
-async function fetchUsers(): Promise<HubUser[]> {
-  const res = await fetch("/api/users");
-  if (!res.ok) throw new Error(`Failed to load users (${res.status})`);
-  const body = await res.json() as { users: HubUser[] };
-  return body.users;
-}
+import { useUsers } from "../lib/users";
 
 /** Every team member the Hub has heard from, with a link into their individual activity page. */
 export function Team() {
-  const query = useQuery({ queryKey: ["users"], queryFn: fetchUsers, staleTime: 30_000 });
+  const query = useUsers();
 
   return (
     <>

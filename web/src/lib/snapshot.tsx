@@ -32,7 +32,10 @@ function snapshotUrl(filters: SnapshotFilters): string {
 
 async function fetchSnapshot(filters: SnapshotFilters): Promise<Snapshot> {
   const res = await fetch(snapshotUrl(filters));
-  if (!res.ok) throw new Error(`Failed to load data (${res.status})`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as { error?: string } | null;
+    throw new Error(body?.error ?? `Failed to load data (${res.status})`);
+  }
   return res.json();
 }
 

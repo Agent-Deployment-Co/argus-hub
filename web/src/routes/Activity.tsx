@@ -1,6 +1,17 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Dashboard } from "../components/Dashboard";
 import { SnapshotProvider, useSnapshotQuery, type SnapshotFilters } from "../lib/snapshot";
+
+function errorMessage(err: Error): ReactNode {
+  if (err.message === "No data yet.") {
+    return (
+      <>
+        No data yet. Run <code>argus sync</code> from a client to ingest data.
+      </>
+    );
+  }
+  return `Couldn't load data: ${err.message}`;
+}
 
 function daysAgo(n: number): string {
   const d = new Date();
@@ -24,7 +35,7 @@ export function Activity() {
       {query.isPending ? (
         <div className="center-state">Loading…</div>
       ) : query.isError ? (
-        <div className="center-state">Couldn't load data: {(query.error as Error).message}</div>
+        <div className="center-state">{errorMessage(query.error as Error)}</div>
       ) : (
         <SnapshotProvider value={snap!}>
           <Dashboard />

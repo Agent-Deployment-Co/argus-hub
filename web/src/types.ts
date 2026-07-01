@@ -131,3 +131,32 @@ export interface Snapshot {
   recommendations: Recommendation[];
   generatedAtMs: number;
 }
+
+/** Mirrors hub/src/api/task-list.ts's TaskListItem, served at GET /api/tasks. */
+export interface TaskListItem {
+  id: string;
+  source: AgentSource;
+  sessionId: string;
+  project: string;
+  timestampMs: number | null;
+  description: string;
+  outcome?: string;
+  outcomeReason?: string;
+  frustration?: string;
+  signals?: string[];
+}
+
+export interface TaskListCounts {
+  success: number;
+  failure: number;
+  unknown: number;
+}
+
+/** The payload served at GET /api/tasks. */
+export interface TaskListResponse {
+  rows: TaskListItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  counts: TaskListCounts;
+}

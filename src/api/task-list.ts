@@ -55,10 +55,15 @@ function listItem(row: HubTaskRow): TaskListItem {
   };
 }
 
+const NEGATION_RE = /\b(?:un|in|non)\w+|\bnot\s+\w+/;
+
 export function classifyOutcome(outcome?: string): "success" | "failure" | "unknown" {
   const v = (outcome ?? "").toLowerCase();
+  const negated = NEGATION_RE.test(v);
   if (v.includes("fail") || v.includes("abandon") || v.includes("block")) return "failure";
-  if (v.includes("success") || v.includes("complete") || v.includes("done") || v.includes("resolved")) return "success";
+  if (v.includes("success") || v.includes("complete") || v.includes("done") || v.includes("resolved")) {
+    return negated ? "unknown" : "success";
+  }
   return "unknown";
 }
 

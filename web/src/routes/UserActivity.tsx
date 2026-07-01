@@ -1,16 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { Dashboard } from "../components/Dashboard";
-import { SnapshotProvider, useSnapshotQuery, type SnapshotFilters } from "../lib/snapshot";
-
-interface UserInfo { userId: string; email: string; orgId: string; orgName: string; displayName: string }
-
-async function fetchUserInfo(userId: string): Promise<UserInfo> {
-  const res = await fetch(`/api/user/${encodeURIComponent(userId)}`);
-  if (!res.ok) throw new Error(`Failed to load user (${res.status})`);
-  return res.json();
-}
+import { SnapshotProvider, useSnapshotQuery } from "../lib/snapshot";
+import { useUserInfo } from "../lib/users";
 
 function daysAgo(n: number): string {
   const d = new Date();
@@ -20,8 +12,9 @@ function daysAgo(n: number): string {
 
 export function UserActivity() {
   const { userId } = useParams({ from: "/users/$userId" });
-  const userInfo = useQuery({ queryKey: ["user-info", userId], queryFn: () => fetchUserInfo(userId), staleTime: 60_000 });
-  const [filters] = useState<SnapshotFilters>(() => ({ since: daysAgo(30), until: daysAgo(0), userId }));
+  const userInfo = useUserInfo(userId);
+  const [range] = useState(() => ({ since: daysAgo(30), until: daysAgo(0) }));
+  const filters = { ...range, userId };
   const query = useSnapshotQuery(filters);
   const snap = query.data;
   const displayName = userInfo.data?.displayName ?? userId;

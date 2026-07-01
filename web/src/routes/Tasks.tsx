@@ -3,38 +3,10 @@ import { getRouteApi } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { compactProject, dayStamp } from "../lib/format";
 import { StatCards, type Stat } from "../components/StatCards";
+import { useUsers } from "../lib/users";
+import type { TaskListResponse } from "../types";
 
-interface TaskListItem {
-  id: string;
-  source: string;
-  sessionId: string;
-  project: string;
-  timestampMs: number | null;
-  description: string;
-  outcome?: string;
-  outcomeReason?: string;
-  frustration?: string;
-  signals?: string[];
-}
-
-interface TaskListCounts {
-  success: number;
-  failure: number;
-  unknown: number;
-}
-
-interface TaskListResponse {
-  rows: TaskListItem[];
-  total: number;
-  offset: number;
-  limit: number;
-  counts: TaskListCounts;
-}
-
-interface HubUser {
-  userId: string;
-  displayName: string;
-}
+const NEGATION_RE = /\b(?:un|in|non)\w+|\bnot\s+\w+/;
 
 const OUTCOME_OPTIONS: { key: "success" | "failure" | "unknown"; label: string }[] = [
   { key: "success", label: "Success" },
@@ -52,17 +24,11 @@ async function fetchTasks(q: string, outcome: string[], user: string): Promise<T
   return res.json();
 }
 
-async function fetchUsers(): Promise<HubUser[]> {
-  const res = await fetch("/api/users");
-  if (!res.ok) throw new Error(`Failed to load users (${res.status})`);
-  const body = await res.json() as { users: HubUser[] };
-  return body.users;
-}
-
 function outcomePill(outcome?: string): { label: string; cls: string } {
   const v = (outcome ?? "").toLowerCase();
+  const negated = NEGATION_RE.test(v);
   if (v.includes("fail") || v.includes("abandon") || v.includes("block")) return { label: outcome!, cls: "task-failure" };
-  if (v.includes("success") || v.includes("complete") || v.includes("done") || v.includes("resolved")) {
+  if (!negated && (v.includes("success") || v.includes("complete") || v.includes("done") || v.includes("resolved"))) {
     return { label: outcome!, cls: "task-success" };
   }
   return { label: outcome || "Unclear", cls: "task-unclear" };
@@ -93,7 +59,7 @@ export function Tasks() {
     queryFn: () => fetchTasks(q, outcome, user),
     staleTime: 30_000,
   });
-  const usersQuery = useQuery({ queryKey: ["users"], queryFn: fetchUsers, staleTime: 30_000 });
+  const usersQuery = useUsers();
 
   const toggleOutcome = (key: string) => {
     const next = outcome.includes(key) ? outcome.filter((o: string) => o !== key) : [...outcome, key];

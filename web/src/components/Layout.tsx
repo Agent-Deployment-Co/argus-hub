@@ -1,7 +1,8 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { Activity, ListTodo, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Sun, Users, Wrench, type LucideIcon } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTheme } from "../lib/theme";
+import { useUserInfo } from "../lib/users";
 import archMarkUrl from "../assets/arch-mark.svg";
 import wordmarkOnDarkUrl from "../assets/wordmark-on-dark.svg";
 import wordmarkOnLightUrl from "../assets/wordmark-on-light.svg";
@@ -29,6 +30,29 @@ const NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "/users", label: "Team", icon: Users },
 ];
 
+const ROUTE_TITLES: Record<string, string> = {
+  "/": "Argus Hub",
+  "/tasks": "Tasks · Argus Hub",
+  "/tools": "Tools · Argus Hub",
+  "/users": "Team · Argus Hub",
+};
+
+/** Route-aware document.title: per-route labels, plus the loaded display name for a user's
+ *  activity page (read from the react-query cache rather than re-fetching here). */
+function useDocumentTitle() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const params = useRouterState({ select: (s) => s.matches.at(-1)?.params as { userId?: string } | undefined });
+  const userId = params?.userId;
+  const userInfo = useUserInfo(userId ?? "", !!userId);
+  useEffect(() => {
+    if (userId) {
+      document.title = `${userInfo.data?.displayName ?? userId} · Argus Hub`;
+      return;
+    }
+    document.title = ROUTE_TITLES[pathname] ?? "Argus Hub";
+  }, [pathname, userId, userInfo.data]);
+}
+
 function ThemeToggle() {
   const { theme, setTheme } = useTheme();
   const choice = (value: "light" | "dark", Ico: LucideIcon, label: string) => (
@@ -53,6 +77,7 @@ function ThemeToggle() {
 
 export function Layout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  useDocumentTitle();
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const toggleRail = useCallback(() => {
     setCollapsed((c) => {
