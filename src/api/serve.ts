@@ -9,6 +9,7 @@ import { assembleDashboard } from "../reporting/snapshot.ts";
 import { loadPlugins } from "../reporting/inventory.ts";
 import { computeRecommendations } from "./recommendations.ts";
 import { buildSessionList, buildSessionDetail, type SessionListParams } from "./session-list.ts";
+import { buildTaskList, type TaskListParams } from "./task-list.ts";
 import type { ResolvedQuery } from "../types.ts";
 import type { SessionSort } from "./session-list.ts";
 import { cost } from "../pricing.ts";
@@ -198,6 +199,28 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
       includeGenerated: c.req.query("includeGenerated") === "true",
     };
     return c.json(buildSessionList(aggregates, params));
+  });
+
+  // ---- Task list ------------------------------------------------------------------
+  //
+  // Flat, cross-session feed of extracted tasks (what the client's task-extraction pass
+  // inferred the user asked for, plus outcome/frustration signals). Backs the /tasks tab.
+  app.get("/api/tasks", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ rows: [], total: 0, offset: 0, limit: DEFAULT_LIMIT });
+
+    const query = parseResolvedQuery(c);
+    if (typeof query === "string") return c.json({ error: query }, 400);
+
+    const userId = parseUserScope(c);
+    const taskRows = await store.readTaskFacts({ orgId, userId }, query);
+
+    const params: TaskListParams = {
+      limit: Math.min(MAX_LIMIT, Math.max(1, parseIntOr(c.req.query("limit"), DEFAULT_LIMIT))),
+      offset: Math.max(0, parseIntOr(c.req.query("offset"), 0)),
+      q: c.req.query("q") || undefined,
+    };
+    return c.json(buildTaskList(taskRows, params));
   });
 
   // ---- Session detail -----------------------------------------------------------

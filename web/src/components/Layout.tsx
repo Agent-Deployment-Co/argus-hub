@@ -1,5 +1,5 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { Activity, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Sun, Users, type LucideIcon } from "lucide-react";
+import { Activity, ListTodo, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Sun, Users, type LucideIcon } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useTheme } from "../lib/theme";
 import archMarkUrl from "../assets/arch-mark.svg";
@@ -24,6 +24,7 @@ function readCollapsed(): boolean {
 
 const NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "/", label: "Activity", icon: Activity },
+  { to: "/tasks", label: "Tasks", icon: ListTodo },
   { to: "/users", label: "Team", icon: Users },
 ];
 

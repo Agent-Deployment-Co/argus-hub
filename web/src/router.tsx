@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import { Layout } from "./components/Layout";
 import { Activity } from "./routes/Activity";
+import { Tasks } from "./routes/Tasks";
 import { Team } from "./routes/Team";
 import { UserActivity } from "./routes/UserActivity";
 
@@ -8,6 +9,7 @@ const rootRoute = createRootRoute({ component: Layout });
 
 const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: "/", component: Activity }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/tasks", component: Tasks }),
   createRoute({ getParentRoute: () => rootRoute, path: "/users", component: Team }),
   createRoute({ getParentRoute: () => rootRoute, path: "/users/$userId", component: UserActivity }),
 ]);
