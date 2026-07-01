@@ -9,12 +9,13 @@ import { assembleDashboard } from "../reporting/snapshot.ts";
 import { loadPlugins } from "../reporting/inventory.ts";
 import { computeRecommendations } from "./recommendations.ts";
 import { buildSessionList, buildSessionDetail, type SessionListParams } from "./session-list.ts";
+import { buildTaskList, type TaskListParams, type TaskOutcomeFilter } from "./task-list.ts";
 import type { ResolvedQuery } from "../types.ts";
 import type { SessionSort } from "./session-list.ts";
 import { cost } from "../pricing.ts";
 import type { AdminAuth } from "../admin-auth.ts";
 import { verifySession, makeSessionCookie, clearSessionCookie } from "../admin-auth.ts";
-import { LOGIN_PAGE, orgDetailPage, type OrgDetail } from "./pages.ts";
+import { LOGIN_PAGE } from "./pages.ts";
 
 // ---- Query param parsing ----------------------------------------------------------------
 
@@ -46,6 +47,20 @@ function parseResolvedQuery(c: Context): ResolvedQuery | string {
 /** Parse the ?user= query param. Returns undefined (all users) or the specific userId. */
 function parseUserScope(c: Context): string | undefined {
   return c.req.query("user")?.trim() || undefined;
+}
+
+const VALID_OUTCOMES = new Set<TaskOutcomeFilter>(["success", "failure", "unknown"]);
+
+/** Parse the ?outcome= query param (comma-separated success/failure/unknown). Returns
+ *  undefined (no filter) or an error string on an unrecognized value. */
+function parseOutcomeFilter(c: Context): TaskOutcomeFilter[] | string | undefined {
+  const raw = c.req.query("outcome");
+  if (!raw) return undefined;
+  const values = raw.split(",").map((v) => v.trim()).filter(Boolean);
+  for (const v of values) {
+    if (!VALID_OUTCOMES.has(v as TaskOutcomeFilter)) return `Unknown outcome "${v}".`;
+  }
+  return values.length ? (values as TaskOutcomeFilter[]) : undefined;
 }
 
 function requestHost(c: Context): string | undefined {
@@ -91,42 +106,6 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
         headers: { Location: "/login", "Set-Cookie": clearSessionCookie() },
       }),
     );
-
-    // Root — the single org's user list; redirect to login if unauthenticated.
-    app.get("/", async (c) => {
-      if (!verifySession(c.req.header("Cookie"), auth)) {
-        return new Response(null, { status: 302, headers: { Location: "/login" } });
-      }
-      const orgs = await store.listOrgs();
-      const org = orgs[0];
-      if (!org) return c.html("<h1>No data yet. Run <code>argus sync</code> from a client to ingest data.</h1>", 404);
-      const orgId = org.orgId;
-      const userStats = await store.readUserStats(orgId);
-      const users = userStats.map(({ userId, displayName, email, lastSyncMs, sessionCount, clientCount, byModel }) => ({
-        userId,
-        displayName,
-        email,
-        lastSyncMs,
-        sessionCount,
-        clientCount,
-        totalTokens: byModel.reduce((s, m) => s + m.input + m.output + m.cacheRead + m.cacheWrite5m + m.cacheWrite1h, 0),
-        cost: byModel.reduce(
-          (s, m) => s + cost({ input: m.input, output: m.output, cacheRead: m.cacheRead, cacheWrite5m: m.cacheWrite5m, cacheWrite1h: m.cacheWrite1h }, m.model),
-          0,
-        ),
-      }));
-      const detail: OrgDetail = {
-        orgId: org.orgId,
-        name: org.name,
-        createdAt: org.createdAt,
-        userCount: org.userCount,
-        sessionCount: org.sessionCount,
-        totalTokens: org.totalTokens,
-        totalCost: users.reduce((s, u) => s + u.cost, 0),
-        users,
-      };
-      return c.html(orgDetailPage(detail));
-    });
 
     // Auth middleware for all /api/* routes; the sync endpoints are exempt (they use their
     // own API-key auth).
@@ -236,6 +215,40 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     return c.json(buildSessionList(aggregates, params));
   });
 
+  // ---- Task list ------------------------------------------------------------------
+  //
+  // Flat, cross-session feed of extracted tasks (what the client's task-extraction pass
+  // inferred the user asked for, plus outcome/frustration signals). Backs the /tasks tab.
+  app.get("/api/tasks", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) {
+      return c.json({
+        rows: [],
+        total: 0,
+        offset: 0,
+        limit: DEFAULT_LIMIT,
+        counts: { success: 0, failure: 0, unknown: 0 },
+      });
+    }
+
+    const query = parseResolvedQuery(c);
+    if (typeof query === "string") return c.json({ error: query }, 400);
+
+    const outcomes = parseOutcomeFilter(c);
+    if (typeof outcomes === "string") return c.json({ error: outcomes }, 400);
+
+    const userId = parseUserScope(c);
+    const taskRows = await store.readTaskFacts({ orgId, userId }, query);
+
+    const params: TaskListParams = {
+      limit: Math.min(MAX_LIMIT, Math.max(1, parseIntOr(c.req.query("limit"), DEFAULT_LIMIT))),
+      offset: Math.max(0, parseIntOr(c.req.query("offset"), 0)),
+      q: c.req.query("q") || undefined,
+      outcomes,
+    };
+    return c.json(buildTaskList(taskRows, params));
+  });
+
   // ---- Session detail -----------------------------------------------------------
 
   // Requires ?user= because session IDs are per-user UUIDs that may collide across users.
@@ -262,39 +275,36 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     return c.json({ session });
   });
 
-  // ---- Per-user SPA -------------------------------------------------------------
+  // ---- SPA ------------------------------------------------------------------------
   //
-  // The React SPA built from hub/web lives under /users/:userId/. It reads userId from the URL at
-  // startup and calls /api/snapshot?user=<id> for its data. The SPA's own assets are emitted with
-  // relative URLs (vite base "./"), so they resolve under any prefix.
+  // The React SPA built from hub/web is a client-routed app (side nav: team-wide Activity at
+  // "/", per-user activity at "/users/$userId"). It's served at the root with absolute asset
+  // URLs (vite base "/"), so every unmatched GET either resolves to a static asset in the web
+  // root or falls back to index.html for the client-side router to handle.
 
   const webRoot = findWebRoot();
 
-  app.get("/users/:userId/*", async (c) => {
-    if (auth && !verifySession(c.req.header("Cookie"), auth)) {
-      return new Response(null, { status: 302, headers: { Location: "/login" } });
-    }
+  app.get("*", async (c) => {
     if (!webRoot) return c.html(spaPlaceholderHtml());
-    // Strip the per-user prefix to find the asset request, if any. Use the raw (still-encoded)
-    // pathname so the prefix match isn't thrown off by %-encoded characters in the user id
-    // (e.g. `jerry%40apache.org`).
     const url = new URL(c.req.url);
-    const m = url.pathname.match(/^\/users\/[^/]+\/(.*)$/);
-    const rel = m ? decodeURIComponent(m[1]!) : "";
+    const rel = decodeURIComponent(url.pathname.replace(/^\//, ""));
+    // Static assets are served unauthenticated (they're just app code, not data) and checked
+    // before the session redirect below, so an expired/missing cookie can't turn a CSS/JS
+    // request into a redirect to /login — the browser would then refuse to apply the HTML
+    // response as a stylesheet/script ("non CSS MIME types are not allowed").
     const asset = rel ? resolveAsset(webRoot, rel) : null;
     if (asset) {
       return c.body(readFileSync(asset), 200, {
         "Content-Type": MIME[extname(asset).toLowerCase()] ?? "application/octet-stream",
       });
     }
-    return c.body(readFileSync(join(webRoot, "index.html")), 200, { "Content-Type": MIME[".html"]! });
-  });
-  // Trailing slash with no further path: serve index.html.
-  app.get("/users/:userId/", async (c) => {
+    // A path that looks like a static asset (has a file extension) but doesn't resolve to a
+    // real file — usually a stale reference to something removed by a rebuild — must 404 rather
+    // than fall through to the SPA shell or login page, for the same reason as above.
+    if (rel && extname(rel)) return c.notFound();
     if (auth && !verifySession(c.req.header("Cookie"), auth)) {
       return new Response(null, { status: 302, headers: { Location: "/login" } });
     }
-    if (!webRoot) return c.html(spaPlaceholderHtml());
     return c.body(readFileSync(join(webRoot, "index.html")), 200, { "Content-Type": MIME[".html"]! });
   });
 

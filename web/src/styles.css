@@ -59,18 +59,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 "Al
 .app-shell.rail-collapsed { --rail-w: 60px; }
 .content { min-width: 0; --filter-bar-h: 53px; }
 
-/* Hub per-user dashboard shell — single column (no rail). The header pins to the top, the main
-   content is the dashboard sections. */
-.hub-shell { display: flex; flex-direction: column; min-height: 100vh; }
-.hub-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 16px 32px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 50%, var(--bg)); position: sticky; top: 0; z-index: 5; }
-.hub-brand { display: flex; align-items: center; gap: 14px; }
-.hub-brand .brand-wordmark { height: 28px; width: auto; flex-shrink: 0; padding: 2px 4px 2px 0; }
 .hub-org-link { color: var(--muted); font-size: 12px; text-decoration: none; }
 .hub-org-link:hover { color: var(--accent); }
-.hub-user { font: 700 18px/1.2 "Poppins", "Avenir Next", Arial, sans-serif; color: var(--heading); margin: 2px 0 0; }
-.hub-header-actions { display: flex; align-items: center; gap: 16px; }
-.hub-range { font-size: 12px; color: var(--muted); }
-.hub-main { padding: 24px 32px; }
 
 /* Global filter bar pinned above every view. Fixed height so the full-height Sessions split can
    subtract it (see .sessions-split) without overflowing the viewport. */
@@ -92,13 +82,21 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 "Al
 .filter-reset { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
 .filter-reset:hover:not(:disabled) { color: var(--heading); border-color: var(--accent); }
 .filter-reset:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.filter-search { position: relative; display: inline-flex; align-items: center; }
+.filter-search > .filter-input { padding-right: 26px; }
+.filter-clear { position: absolute; right: 6px; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: none; border-radius: 50%; background: transparent; color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer; }
+.filter-clear:hover { color: var(--heading); }
+.filter-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .filter-reset:disabled { opacity: .4; cursor: default; }
 .filter-spinner { color: var(--muted); animation: filter-spin 1s linear infinite; }
 @keyframes filter-spin { to { transform: rotate(360deg); } }
 
 .rail { position: sticky; top: 0; align-self: start; height: 100vh; display: flex; flex-direction: column; gap: 6px; padding: 16px 12px; border-right: 1px solid var(--line); background: var(--surface); overflow-y: auto; }
 .rail-brand { display: flex; align-items: center; gap: 6px; padding: 4px 8px 14px; }
-.rail-wordmark { color: var(--heading); font-family: "Poppins", "Avenir Next", Arial, sans-serif; font-size: 22px; line-height: 1; font-weight: 700; letter-spacing: -0.05em; }
+/* Expanded rail shows the full wordmark (arch + "ARGUS HUB"); the bare arch is for the collapsed rail. */
+.brand-mark { display: none; width: auto; height: 22px; flex: 0 0 auto; }
+.brand-wordmark { display: block; width: auto; height: 22px; flex: 0 0 auto; }
 
 .rail-nav { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; }
 .rail-link { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; color: var(--muted); text-decoration: none; font: 600 13px "Poppins", "Avenir Next", Arial, sans-serif; letter-spacing: .01em; white-space: nowrap; }
@@ -120,12 +118,21 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 "Al
 .theme-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Collapsed rail: hide text, center icons. */
-.rail-collapsed .rail-wordmark, .rail-collapsed .rail-label { display: none; }
+.rail-collapsed .brand-wordmark, .rail-collapsed .rail-label { display: none; }
+.rail-collapsed .brand-mark { display: block; }
 .rail-collapsed .rail-brand { justify-content: center; padding-left: 0; padding-right: 0; }
 .rail-collapsed .rail-link { justify-content: center; padding-left: 0; padding-right: 0; }
 .rail-collapsed .rail-footer { flex-direction: column-reverse; }
 
 main { padding: 30px 32px 64px; }
+
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.page-head h1 { margin: 2px 0 0; font: 700 22px/1.2 "Poppins", "Avenir Next", Arial, sans-serif; color: var(--heading); }
+.page-range { flex: 0 0 auto; margin-top: 4px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.task-filters { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: -12px 0 20px; }
+.task-filters-outcomes { display: flex; align-items: center; gap: 8px; }
+.task-filters-right { display: flex; align-items: center; gap: 10px; }
+.task-filters .select-wrap > select.filter-input { width: 180px; }
 
 /* Sessions: a full-height two-pane (selector list + detail). Drop main's padding for this route
    only so the list sits flush against the rail instead of floating inside the page gutters. */
@@ -312,7 +319,8 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 @media (max-width: 640px) {
   /* Force the rail to its icon-only width on narrow screens. */
   .app-shell { --rail-w: 60px; }
-  .rail-wordmark, .rail-label { display: none; }
+  .brand-wordmark, .rail-label { display: none; }
+  .brand-mark { display: block; }
   .rail-brand, .rail-link { justify-content: center; padding-left: 0; padding-right: 0; }
   .rail-footer { flex-direction: column-reverse; }
   main { padding-left: 18px; padding-right: 18px; }

@@ -405,3 +405,126 @@ describe("GET /api/session/:id", () => {
     }
   });
 });
+
+// ---- GET /api/tasks --------------------------------------------------------------------
+
+/** Like syncAs, but attaches one extracted task to the (single) session synced. */
+async function syncWithTask(
+  env: TestEnv,
+  email: string,
+  sessionId: string,
+  task: { outcome?: string; frustration?: string; description?: string },
+): Promise<string> {
+  const app = createHubApp(env.store);
+  const clientId = env.clientFor(email);
+  const payload = buildUploadPayload([{ id: sessionId }]);
+  payload.rows.tasks.push({
+    session_id: sessionId,
+    seq: 0,
+    source: "claude",
+    ts: 1_000_000,
+    task_json: JSON.stringify({
+      id: `${sessionId}-task-0`,
+      source: "claude",
+      sourceSessionId: sessionId,
+      timestampMs: 1_000_000,
+      description: task.description ?? "Fix the flaky test",
+      evidence: "user said please fix the flaky test",
+      evidenceKind: "user_message",
+      outcome: task.outcome,
+      frustration: task.frustration,
+      position: { originKey: sessionId, recordIndex: 0, itemIndex: 0 },
+    }),
+  });
+  const res = await app.request("/api/sync", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.apiKey}`,
+      "X-Argus-Client": clientId,
+      "Content-Type": "application/json",
+      "X-Argus-Client-Fingerprint": "claude.oauth.email",
+    },
+    body: JSON.stringify({
+      ...payload,
+      fingerprint: [{ key: "claude.oauth.email", value: email, tsMs: 1_000_000 }],
+    }),
+  });
+  if (res.status !== 200) throw new Error(`sync failed: ${res.status} ${await res.text()}`);
+  const body = await res.json() as { userId: string };
+  return body.userId;
+}
+
+describe("GET /api/tasks", () => {
+  test("returns empty list when no data has been synced", async () => {
+    const { store } = await openTestEnv();
+    const app = createHubApp(store);
+    try {
+      const res = await app.request("/api/tasks");
+      expect(res.status).toBe(200);
+      const body = await res.json() as { rows: unknown[]; total: number };
+      expect(body.rows).toEqual([]);
+      expect(body.total).toBe(0);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("returns a task with its session's project and outcome/frustration signals", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncWithTask(env, "alice@example.com", "task-sess", {
+        outcome: "success",
+        frustration: "none",
+        description: "Refactor the parser",
+      });
+
+      const res = await app.request("/api/tasks");
+      expect(res.status).toBe(200);
+      const body = await res.json() as {
+        rows: Array<{ description: string; project: string; sessionId: string; outcome?: string; frustration?: string }>;
+        total: number;
+      };
+      expect(body.total).toBe(1);
+      expect(body.rows[0]!.description).toBe("Refactor the parser");
+      expect(body.rows[0]!.sessionId).toBe("task-sess");
+      expect(body.rows[0]!.project).toBe("/Users/you/proj");
+      expect(body.rows[0]!.outcome).toBe("success");
+      expect(body.rows[0]!.frustration).toBe("none");
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("?user= scopes tasks to one user", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const aliceId = await syncWithTask(env, "alice@example.com", "alice-task-sess", {});
+      await syncWithTask(env, "bob@example.com", "bob-task-sess", {});
+
+      const res = await app.request(`/api/tasks?user=${encodeURIComponent(aliceId)}`);
+      const body = await res.json() as { rows: Array<{ sessionId: string }>; total: number };
+      expect(body.total).toBe(1);
+      expect(body.rows[0]!.sessionId).toBe("alice-task-sess");
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("?q= filters by task description", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncWithTask(env, "alice@example.com", "s1", { description: "Fix the login bug" });
+      await syncWithTask(env, "alice@example.com", "s2", { description: "Write onboarding docs" });
+
+      const res = await app.request("/api/tasks?q=login");
+      const body = await res.json() as { rows: Array<{ description: string }>; total: number };
+      expect(body.total).toBe(1);
+      expect(body.rows[0]!.description).toBe("Fix the login bug");
+    } finally {
+      await env.store.close();
+    }
+  });
+});

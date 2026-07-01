@@ -527,6 +527,12 @@ export interface HubScope {
   clientId?: string;
 }
 
+export interface HubTaskRow {
+  task: TaskFact;
+  project: string;
+  sessionId: string;
+}
+
 export class HubStore {
   private queue: Promise<void> = Promise.resolve();
   private closed = false;
@@ -1486,6 +1492,51 @@ export class HubStore {
         [...scopeParams(expanded), sessionId],
       );
       return rows.map((r) => JSON.parse(r.task_json) as TaskFact);
+    });
+  }
+
+  /** Every extracted task across the scope, newest first, with the owning session's project
+   *  attached. Backs the /tasks tab — a flat feed rather than a per-session drill-down. */
+  async readTaskFacts(scope: HubScope, query?: ResolvedQuery): Promise<HubTaskRow[]> {
+    const expanded = await this.expandScope(scope);
+    if (expanded.empty) return [];
+    return this.schedule(async () => {
+      const conds = [scopeWhereSql(expanded, "t"), "s.archived = 0"];
+      const params: unknown[] = [...scopeParams(expanded)];
+
+      if (query?.sources?.length) {
+        conds.push(`t.source IN (${query.sources.map(() => "?").join(", ")})`);
+        params.push(...query.sources);
+      }
+      if (query?.projectSubstring) {
+        conds.push("instr(s.cwd, ?) > 0");
+        params.push(query.projectSubstring);
+      }
+      const dateConds: string[] = [];
+      const dateParams: unknown[] = [];
+      if (query?.since) { dateConds.push("m.date >= ?"); dateParams.push(query.since); }
+      if (query?.until) { dateConds.push("m.date <= ?"); dateParams.push(query.until); }
+      if (dateConds.length) {
+        conds.push(
+          `EXISTS (SELECT 1 FROM resolved_usage m WHERE m.org_id = s.org_id AND m.client_id = s.client_id AND m.session_id = s.session_id AND ${dateConds.join(" AND ")})`,
+        );
+        params.push(...dateParams);
+      }
+
+      const rows = await all<{ task_json: string; project: string; session_id: string }>(
+        this.db,
+        `SELECT t.task_json AS task_json, s.project AS project, t.session_id AS session_id
+         FROM resolved_tasks t
+         JOIN resolved_sessions s ON s.org_id = t.org_id AND s.client_id = t.client_id AND s.session_id = t.session_id
+         WHERE ${conds.join(" AND ")}
+         ORDER BY t.ts IS NULL, t.ts DESC, t.seq DESC`,
+        params,
+      );
+      return rows.map((r) => ({
+        task: JSON.parse(r.task_json) as TaskFact,
+        project: r.project,
+        sessionId: r.session_id,
+      }));
     });
   }
 

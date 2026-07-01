@@ -1,12 +1,13 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createContext, useContext, type ReactNode } from "react";
 import type { Dashboard, Snapshot } from "../types";
-import { useScope } from "./scope";
 
 export interface SnapshotFilters {
   since?: string;
   until?: string;
   source?: string;
+  /** Scope to one user's data. Omit for the org-wide team rollup. */
+  userId?: string;
 }
 
 export const KNOWN_SOURCES = ["claude", "codex", "gemini", "cowork"] as const;
@@ -15,13 +16,13 @@ function sanitizedSource(source: string | undefined): string | null {
   return source && (KNOWN_SOURCES as readonly string[]).includes(source) ? source : null;
 }
 
-function snapshotQueryKey(userId: string, filters: SnapshotFilters) {
-  return ["snapshot", userId, filters.since ?? null, filters.until ?? null, sanitizedSource(filters.source)] as const;
+function snapshotQueryKey(filters: SnapshotFilters) {
+  return ["snapshot", filters.userId ?? null, filters.since ?? null, filters.until ?? null, sanitizedSource(filters.source)] as const;
 }
 
-function snapshotUrl(userId: string, filters: SnapshotFilters): string {
+function snapshotUrl(filters: SnapshotFilters): string {
   const params = new URLSearchParams();
-  params.set("user", userId);
+  if (filters.userId) params.set("user", filters.userId);
   if (filters.since) params.set("since", filters.since);
   if (filters.until) params.set("until", filters.until);
   const source = sanitizedSource(filters.source);
@@ -29,17 +30,19 @@ function snapshotUrl(userId: string, filters: SnapshotFilters): string {
   return `/api/snapshot?${params.toString()}`;
 }
 
-async function fetchSnapshot(userId: string, filters: SnapshotFilters): Promise<Snapshot> {
-  const res = await fetch(snapshotUrl(userId, filters));
-  if (!res.ok) throw new Error(`Failed to load data (${res.status})`);
+async function fetchSnapshot(filters: SnapshotFilters): Promise<Snapshot> {
+  const res = await fetch(snapshotUrl(filters));
+  if (!res.ok) {
+    const body = await res.json().catch(() => null) as { error?: string } | null;
+    throw new Error(body?.error ?? `Failed to load data (${res.status})`);
+  }
   return res.json();
 }
 
 export function useSnapshotQuery(filters: SnapshotFilters, enabled = true) {
-  const { userId } = useScope();
   return useQuery({
-    queryKey: snapshotQueryKey(userId, filters),
-    queryFn: () => fetchSnapshot(userId, filters),
+    queryKey: snapshotQueryKey(filters),
+    queryFn: () => fetchSnapshot(filters),
     staleTime: 30_000,
     placeholderData: keepPreviousData,
     enabled,
