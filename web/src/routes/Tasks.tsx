@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { compactProject, dayStamp } from "../lib/format";
+import { StatCards, type Stat } from "../components/StatCards";
 
 interface TaskListItem {
   id: string;
@@ -15,11 +16,18 @@ interface TaskListItem {
   signals?: string[];
 }
 
+interface TaskListCounts {
+  success: number;
+  failure: number;
+  unknown: number;
+}
+
 interface TaskListResponse {
   rows: TaskListItem[];
   total: number;
   offset: number;
   limit: number;
+  counts: TaskListCounts;
 }
 
 async function fetchTasks(q: string): Promise<TaskListResponse> {
@@ -67,6 +75,19 @@ export function Tasks() {
           aria-label="Search tasks"
         />
       </div>
+      {query.data && (
+        <section>
+          <StatCards
+            stats={
+              [
+                { label: "Success", value: query.data.counts.success },
+                { label: "Failure", value: query.data.counts.failure },
+                { label: "Unknown", value: query.data.counts.unknown },
+              ] satisfies Stat[]
+            }
+          />
+        </section>
+      )}
       {query.isPending ? (
         <div className="center-state">Loading…</div>
       ) : query.isError ? (

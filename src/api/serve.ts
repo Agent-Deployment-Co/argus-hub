@@ -207,7 +207,15 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
   // inferred the user asked for, plus outcome/frustration signals). Backs the /tasks tab.
   app.get("/api/tasks", async (c) => {
     const orgId = await store.getDefaultOrgId();
-    if (!orgId) return c.json({ rows: [], total: 0, offset: 0, limit: DEFAULT_LIMIT });
+    if (!orgId) {
+      return c.json({
+        rows: [],
+        total: 0,
+        offset: 0,
+        limit: DEFAULT_LIMIT,
+        counts: { success: 0, failure: 0, unknown: 0 },
+      });
+    }
 
     const query = parseResolvedQuery(c);
     if (typeof query === "string") return c.json({ error: query }, 400);

@@ -14,11 +14,18 @@ export interface TaskListItem {
   signals?: string[];
 }
 
+export interface TaskListCounts {
+  success: number;
+  failure: number;
+  unknown: number;
+}
+
 export interface TaskListResponse {
   rows: TaskListItem[];
   total: number;
   offset: number;
   limit: number;
+  counts: TaskListCounts;
 }
 
 export interface TaskListParams {
@@ -43,6 +50,19 @@ function listItem(row: HubTaskRow): TaskListItem {
   };
 }
 
+export function classifyOutcome(outcome?: string): "success" | "failure" | "unknown" {
+  const v = (outcome ?? "").toLowerCase();
+  if (v.includes("fail") || v.includes("abandon") || v.includes("block")) return "failure";
+  if (v.includes("success") || v.includes("complete") || v.includes("done") || v.includes("resolved")) return "success";
+  return "unknown";
+}
+
+function countOutcomes(items: TaskListItem[]): TaskListCounts {
+  const counts: TaskListCounts = { success: 0, failure: 0, unknown: 0 };
+  for (const it of items) counts[classifyOutcome(it.outcome)]++;
+  return counts;
+}
+
 export function buildTaskList(rows: HubTaskRow[], params: TaskListParams): TaskListResponse {
   const term = params.q?.trim().toLowerCase();
   let items = rows.map(listItem);
@@ -54,5 +74,5 @@ export function buildTaskList(rows: HubTaskRow[], params: TaskListParams): TaskL
   const total = items.length;
   const offset = Math.max(0, params.offset);
   const page = items.slice(offset, offset + params.limit);
-  return { rows: page, total, offset, limit: params.limit };
+  return { rows: page, total, offset, limit: params.limit, counts: countOutcomes(items) };
 }
