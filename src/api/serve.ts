@@ -285,17 +285,25 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
   const webRoot = findWebRoot();
 
   app.get("*", async (c) => {
-    if (auth && !verifySession(c.req.header("Cookie"), auth)) {
-      return new Response(null, { status: 302, headers: { Location: "/login" } });
-    }
     if (!webRoot) return c.html(spaPlaceholderHtml());
     const url = new URL(c.req.url);
     const rel = decodeURIComponent(url.pathname.replace(/^\//, ""));
+    // Static assets are served unauthenticated (they're just app code, not data) and checked
+    // before the session redirect below, so an expired/missing cookie can't turn a CSS/JS
+    // request into a redirect to /login — the browser would then refuse to apply the HTML
+    // response as a stylesheet/script ("non CSS MIME types are not allowed").
     const asset = rel ? resolveAsset(webRoot, rel) : null;
     if (asset) {
       return c.body(readFileSync(asset), 200, {
         "Content-Type": MIME[extname(asset).toLowerCase()] ?? "application/octet-stream",
       });
+    }
+    // A path that looks like a static asset (has a file extension) but doesn't resolve to a
+    // real file — usually a stale reference to something removed by a rebuild — must 404 rather
+    // than fall through to the SPA shell or login page, for the same reason as above.
+    if (rel && extname(rel)) return c.notFound();
+    if (auth && !verifySession(c.req.header("Cookie"), auth)) {
+      return new Response(null, { status: 302, headers: { Location: "/login" } });
     }
     return c.body(readFileSync(join(webRoot, "index.html")), 200, { "Content-Type": MIME[".html"]! });
   });
