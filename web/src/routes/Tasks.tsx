@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { getRouteApi } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { compactProject, dayStamp } from "../lib/format";
 import { StatCards, type Stat } from "../components/StatCards";
 
@@ -57,23 +58,55 @@ function frustPill(frustration?: string): { label: string; cls: string } | null 
 
 /** Flat, cross-session feed of extracted tasks — what the team has been asking their agents
  *  to do, with outcome + frustration signals surfaced for quick scanning. */
+const routeApi = getRouteApi("/tasks");
+
 export function Tasks() {
-  const [q, setQ] = useState("");
+  const search = routeApi.useSearch();
+  const navigate = routeApi.useNavigate();
+  const q = search.q ?? "";
+  const [draft, setDraft] = useState(q);
   const [openId, setOpenId] = useState<string | null>(null);
   const query = useQuery({ queryKey: ["tasks", q], queryFn: () => fetchTasks(q), staleTime: 30_000 });
+
+  // Keep the input in sync if the URL changes out from under us (back/forward nav).
+  useEffect(() => setDraft(q), [q]);
+
+  useEffect(() => {
+    const trimmed = draft.trim();
+    if (trimmed === q) return;
+    const handle = setTimeout(() => {
+      navigate({ to: ".", search: { q: trimmed || undefined }, replace: true });
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [draft, q, navigate]);
 
   return (
     <>
       <div className="page-head">
         <h1>Tasks</h1>
-        <input
-          className="filter-input"
-          type="search"
-          placeholder="Search tasks…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          aria-label="Search tasks"
-        />
+        <div className="filter-search">
+          <input
+            className="filter-input"
+            type="search"
+            placeholder="Search tasks…"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            aria-label="Search tasks"
+          />
+          {draft && (
+            <button
+              type="button"
+              className="filter-clear"
+              aria-label="Clear search"
+              onClick={() => {
+                setDraft("");
+                navigate({ to: ".", search: { q: undefined }, replace: true });
+              }}
+            >
+              ×
+            </button>
+          )}
+        </div>
       </div>
       {query.data && (
         <section>
