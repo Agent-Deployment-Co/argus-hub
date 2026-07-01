@@ -9,7 +9,7 @@ import { assembleDashboard } from "../reporting/snapshot.ts";
 import { loadPlugins } from "../reporting/inventory.ts";
 import { computeRecommendations } from "./recommendations.ts";
 import { buildSessionList, buildSessionDetail, type SessionListParams } from "./session-list.ts";
-import { buildTaskList, type TaskListParams } from "./task-list.ts";
+import { buildTaskList, type TaskListParams, type TaskOutcomeFilter } from "./task-list.ts";
 import type { ResolvedQuery } from "../types.ts";
 import type { SessionSort } from "./session-list.ts";
 import { cost } from "../pricing.ts";
@@ -47,6 +47,20 @@ function parseResolvedQuery(c: Context): ResolvedQuery | string {
 /** Parse the ?user= query param. Returns undefined (all users) or the specific userId. */
 function parseUserScope(c: Context): string | undefined {
   return c.req.query("user")?.trim() || undefined;
+}
+
+const VALID_OUTCOMES = new Set<TaskOutcomeFilter>(["success", "failure", "unknown"]);
+
+/** Parse the ?outcome= query param (comma-separated success/failure/unknown). Returns
+ *  undefined (no filter) or an error string on an unrecognized value. */
+function parseOutcomeFilter(c: Context): TaskOutcomeFilter[] | string | undefined {
+  const raw = c.req.query("outcome");
+  if (!raw) return undefined;
+  const values = raw.split(",").map((v) => v.trim()).filter(Boolean);
+  for (const v of values) {
+    if (!VALID_OUTCOMES.has(v as TaskOutcomeFilter)) return `Unknown outcome "${v}".`;
+  }
+  return values.length ? (values as TaskOutcomeFilter[]) : undefined;
 }
 
 function requestHost(c: Context): string | undefined {
@@ -220,6 +234,9 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     const query = parseResolvedQuery(c);
     if (typeof query === "string") return c.json({ error: query }, 400);
 
+    const outcomes = parseOutcomeFilter(c);
+    if (typeof outcomes === "string") return c.json({ error: outcomes }, 400);
+
     const userId = parseUserScope(c);
     const taskRows = await store.readTaskFacts({ orgId, userId }, query);
 
@@ -227,6 +244,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
       limit: Math.min(MAX_LIMIT, Math.max(1, parseIntOr(c.req.query("limit"), DEFAULT_LIMIT))),
       offset: Math.max(0, parseIntOr(c.req.query("offset"), 0)),
       q: c.req.query("q") || undefined,
+      outcomes,
     };
     return c.json(buildTaskList(taskRows, params));
   });

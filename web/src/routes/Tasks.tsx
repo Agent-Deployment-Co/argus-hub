@@ -31,12 +31,32 @@ interface TaskListResponse {
   counts: TaskListCounts;
 }
 
-async function fetchTasks(q: string): Promise<TaskListResponse> {
+interface HubUser {
+  userId: string;
+  displayName: string;
+}
+
+const OUTCOME_OPTIONS: { key: "success" | "failure" | "unknown"; label: string }[] = [
+  { key: "success", label: "Success" },
+  { key: "failure", label: "Failure" },
+  { key: "unknown", label: "Unknown" },
+];
+
+async function fetchTasks(q: string, outcome: string[], user: string): Promise<TaskListResponse> {
   const params = new URLSearchParams({ limit: "100" });
   if (q) params.set("q", q);
+  if (outcome.length) params.set("outcome", outcome.join(","));
+  if (user) params.set("user", user);
   const res = await fetch(`/api/tasks?${params}`);
   if (!res.ok) throw new Error(`Failed to load tasks (${res.status})`);
   return res.json();
+}
+
+async function fetchUsers(): Promise<HubUser[]> {
+  const res = await fetch("/api/users");
+  if (!res.ok) throw new Error(`Failed to load users (${res.status})`);
+  const body = await res.json() as { users: HubUser[] };
+  return body.users;
 }
 
 function outcomePill(outcome?: string): { label: string; cls: string } {
@@ -64,9 +84,21 @@ export function Tasks() {
   const search = routeApi.useSearch();
   const navigate = routeApi.useNavigate();
   const q = search.q ?? "";
+  const outcome = search.outcome ?? [];
+  const user = search.user ?? "";
   const [draft, setDraft] = useState(q);
   const [openId, setOpenId] = useState<string | null>(null);
-  const query = useQuery({ queryKey: ["tasks", q], queryFn: () => fetchTasks(q), staleTime: 30_000 });
+  const query = useQuery({
+    queryKey: ["tasks", q, outcome, user],
+    queryFn: () => fetchTasks(q, outcome, user),
+    staleTime: 30_000,
+  });
+  const usersQuery = useQuery({ queryKey: ["users"], queryFn: fetchUsers, staleTime: 30_000 });
+
+  const toggleOutcome = (key: string) => {
+    const next = outcome.includes(key) ? outcome.filter((o: string) => o !== key) : [...outcome, key];
+    navigate({ to: ".", search: { ...search, outcome: next.length ? next : undefined }, replace: true });
+  };
 
   // Keep the input in sync if the URL changes out from under us (back/forward nav).
   useEffect(() => setDraft(q), [q]);
@@ -75,7 +107,7 @@ export function Tasks() {
     const trimmed = draft.trim();
     if (trimmed === q) return;
     const handle = setTimeout(() => {
-      navigate({ to: ".", search: { q: trimmed || undefined }, replace: true });
+      navigate({ to: ".", search: { ...search, q: trimmed || undefined }, replace: true });
     }, 300);
     return () => clearTimeout(handle);
   }, [draft, q, navigate]);
@@ -84,28 +116,59 @@ export function Tasks() {
     <>
       <div className="page-head">
         <h1>Tasks</h1>
-        <div className="filter-search">
-          <input
-            className="filter-input"
-            type="search"
-            placeholder="Search tasks…"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            aria-label="Search tasks"
-          />
-          {draft && (
-            <button
-              type="button"
-              className="filter-clear"
-              aria-label="Clear search"
-              onClick={() => {
-                setDraft("");
-                navigate({ to: ".", search: { q: undefined }, replace: true });
-              }}
+      </div>
+      <div className="task-filters">
+        <div className="task-filters-outcomes" role="group" aria-label="Filter by outcome">
+          {OUTCOME_OPTIONS.map((opt) => (
+            <label key={opt.key} className="filter-toggle">
+              <input
+                type="checkbox"
+                checked={outcome.includes(opt.key)}
+                onChange={() => toggleOutcome(opt.key)}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+        <div className="task-filters-right">
+          <div className="select-wrap">
+            <select
+              className="filter-input"
+              aria-label="Filter by user"
+              value={user}
+              onChange={(e) =>
+                navigate({ to: ".", search: { ...search, user: e.target.value || undefined }, replace: true })
+              }
             >
-              ×
-            </button>
-          )}
+              <option value="">All users</option>
+              {usersQuery.data?.map((u) => (
+                <option key={u.userId} value={u.userId}>{u.displayName}</option>
+              ))}
+            </select>
+          </div>
+          <div className="filter-search">
+            <input
+              className="filter-input"
+              type="search"
+              placeholder="Search tasks…"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              aria-label="Search tasks"
+            />
+            {draft && (
+              <button
+                type="button"
+                className="filter-clear"
+                aria-label="Clear search"
+                onClick={() => {
+                  setDraft("");
+                  navigate({ to: ".", search: { ...search, q: undefined }, replace: true });
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
         </div>
       </div>
       {query.data && (

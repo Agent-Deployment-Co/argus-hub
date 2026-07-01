@@ -129,6 +129,10 @@ main { padding: 30px 32px 64px; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .page-head h1 { margin: 2px 0 0; font: 700 22px/1.2 "Poppins", "Avenir Next", Arial, sans-serif; color: var(--heading); }
 .page-range { flex: 0 0 auto; margin-top: 4px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.task-filters { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: -12px 0 20px; }
+.task-filters-outcomes { display: flex; align-items: center; gap: 8px; }
+.task-filters-right { display: flex; align-items: center; gap: 10px; }
+.task-filters .select-wrap > select.filter-input { width: 180px; }
 
 /* Sessions: a full-height two-pane (selector list + detail). Drop main's padding for this route
    only so the list sits flush against the rail instead of floating inside the page gutters. */

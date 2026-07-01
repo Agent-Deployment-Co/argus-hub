@@ -28,10 +28,15 @@ export interface TaskListResponse {
   counts: TaskListCounts;
 }
 
+export type TaskOutcomeFilter = "success" | "failure" | "unknown";
+
 export interface TaskListParams {
   limit: number;
   offset: number;
   q?: string;
+  /** When set, only rows classifying to one of these outcomes are returned. The top-of-page
+   *  counts are computed from this same filtered set, so they reflect the active filters. */
+  outcomes?: TaskOutcomeFilter[];
 }
 
 function listItem(row: HubTaskRow): TaskListItem {
@@ -71,8 +76,13 @@ export function buildTaskList(rows: HubTaskRow[], params: TaskListParams): TaskL
       it.description.toLowerCase().includes(term) || it.project.toLowerCase().includes(term),
     );
   }
+  if (params.outcomes?.length) {
+    const allowed = new Set(params.outcomes);
+    items = items.filter((it) => allowed.has(classifyOutcome(it.outcome)));
+  }
+  const counts = countOutcomes(items);
   const total = items.length;
   const offset = Math.max(0, params.offset);
   const page = items.slice(offset, offset + params.limit);
-  return { rows: page, total, offset, limit: params.limit, counts: countOutcomes(items) };
+  return { rows: page, total, offset, limit: params.limit, counts };
 }
