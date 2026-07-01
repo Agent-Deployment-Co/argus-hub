@@ -72,6 +72,7 @@ CLI flags — highest precedence last.
 | `--port` | `HUB_PORT` | `port` | `4343` | Port to listen on |
 | `--data-dir` | `HUB_DATA_DIR` | `dataDir` | `./data` | Directory for `hub.db` |
 | —        | `ADMIN_PASSWORD` | —     | _(random)_ | Dashboard login password (pinned across restarts when set) |
+| —        | `HUB_INSECURE_COOKIE_HOSTS` | — | _(none)_ | Comma-separated hostnames (no port) that get a non-`Secure` session cookie, for plain-HTTP-only deployments (e.g. a cluster-internal address reachable only via a private network). **Never** list a host reachable from the public internet. |
 
 Example `hub.json`:
 
@@ -153,6 +154,7 @@ docker logs argus-hub 2>&1 | grep -E "Hub API key|Admin password"
 | `HUB_PORT` | `4343` | Port inside the container |
 | `HUB_DATA_DIR` | `/data` | Directory for `hub.db` |
 | `ADMIN_PASSWORD` | _(generated)_ | Pin the dashboard password across restarts |
+| `HUB_INSECURE_COOKIE_HOSTS` | _(none)_ | Comma-separated hostnames that skip the `Secure` cookie flag, for plain-HTTP-only deployments. Never use for a publicly reachable host. |
 
 Pass them with `-e NAME=value` or `--env-file hub.env`. The data volume (`/data`) holds `hub.db`; mount a named volume or bind mount there to persist data across container restarts.
 

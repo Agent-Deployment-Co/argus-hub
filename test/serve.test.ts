@@ -176,6 +176,38 @@ describe("POST /login", () => {
     expect(res.status).toBe(302);
     expect(res.headers.get("Set-Cookie")).not.toContain("; Secure");
   });
+
+  test("omits Secure on the session cookie for an allowlisted host", async () => {
+    const app = createHubApp(
+      {} as HubStore,
+      createAdminAuth("secret", ["hub.your-tailnet.ts.net"]),
+    );
+
+    const res = await app.request("http://hub.your-tailnet.ts.net/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "password=secret",
+    });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Set-Cookie")).not.toContain("; Secure");
+  });
+
+  test("keeps Secure on the session cookie for a non-allowlisted host", async () => {
+    const app = createHubApp(
+      {} as HubStore,
+      createAdminAuth("secret", ["hub.your-tailnet.ts.net"]),
+    );
+
+    const res = await app.request("https://hub.example.com/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "password=secret",
+    });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Set-Cookie")).toContain("; Secure");
+  });
 });
 
 // ---- GET /api/users --------------------------------------------------------------------

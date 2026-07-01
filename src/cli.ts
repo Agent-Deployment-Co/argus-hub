@@ -20,7 +20,11 @@ const serve = defineCommand({
   },
   async run({ args }) {
     const port = Number(args.port);
-    const auth = createAdminAuth(process.env.ADMIN_PASSWORD);
+    const insecureCookieHosts = process.env.HUB_INSECURE_COOKIE_HOSTS
+      ?.split(",")
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean);
+    const auth = createAdminAuth(process.env.ADMIN_PASSWORD, insecureCookieHosts);
     const store = await openHubStore(args["data-dir"]);
 
     if (!process.env.ADMIN_PASSWORD) {
