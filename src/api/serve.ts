@@ -14,7 +14,7 @@ import type { SessionSort } from "./session-list.ts";
 import { cost } from "../pricing.ts";
 import type { AdminAuth } from "../admin-auth.ts";
 import { verifySession, makeSessionCookie, clearSessionCookie } from "../admin-auth.ts";
-import { LOGIN_PAGE, orgDetailPage, type OrgDetail } from "./pages.ts";
+import { LOGIN_PAGE } from "./pages.ts";
 
 // ---- Query param parsing ----------------------------------------------------------------
 
@@ -91,42 +91,6 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
         headers: { Location: "/login", "Set-Cookie": clearSessionCookie() },
       }),
     );
-
-    // Root — the single org's user list; redirect to login if unauthenticated.
-    app.get("/", async (c) => {
-      if (!verifySession(c.req.header("Cookie"), auth)) {
-        return new Response(null, { status: 302, headers: { Location: "/login" } });
-      }
-      const orgs = await store.listOrgs();
-      const org = orgs[0];
-      if (!org) return c.html("<h1>No data yet. Run <code>argus sync</code> from a client to ingest data.</h1>", 404);
-      const orgId = org.orgId;
-      const userStats = await store.readUserStats(orgId);
-      const users = userStats.map(({ userId, displayName, email, lastSyncMs, sessionCount, clientCount, byModel }) => ({
-        userId,
-        displayName,
-        email,
-        lastSyncMs,
-        sessionCount,
-        clientCount,
-        totalTokens: byModel.reduce((s, m) => s + m.input + m.output + m.cacheRead + m.cacheWrite5m + m.cacheWrite1h, 0),
-        cost: byModel.reduce(
-          (s, m) => s + cost({ input: m.input, output: m.output, cacheRead: m.cacheRead, cacheWrite5m: m.cacheWrite5m, cacheWrite1h: m.cacheWrite1h }, m.model),
-          0,
-        ),
-      }));
-      const detail: OrgDetail = {
-        orgId: org.orgId,
-        name: org.name,
-        createdAt: org.createdAt,
-        userCount: org.userCount,
-        sessionCount: org.sessionCount,
-        totalTokens: org.totalTokens,
-        totalCost: users.reduce((s, u) => s + u.cost, 0),
-        users,
-      };
-      return c.html(orgDetailPage(detail));
-    });
 
     // Auth middleware for all /api/* routes; the sync endpoints are exempt (they use their
     // own API-key auth).
@@ -262,39 +226,28 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     return c.json({ session });
   });
 
-  // ---- Per-user SPA -------------------------------------------------------------
+  // ---- SPA ------------------------------------------------------------------------
   //
-  // The React SPA built from hub/web lives under /users/:userId/. It reads userId from the URL at
-  // startup and calls /api/snapshot?user=<id> for its data. The SPA's own assets are emitted with
-  // relative URLs (vite base "./"), so they resolve under any prefix.
+  // The React SPA built from hub/web is a client-routed app (side nav: team-wide Activity at
+  // "/", per-user activity at "/users/$userId"). It's served at the root with absolute asset
+  // URLs (vite base "/"), so every unmatched GET either resolves to a static asset in the web
+  // root or falls back to index.html for the client-side router to handle.
 
   const webRoot = findWebRoot();
 
-  app.get("/users/:userId/*", async (c) => {
+  app.get("*", async (c) => {
     if (auth && !verifySession(c.req.header("Cookie"), auth)) {
       return new Response(null, { status: 302, headers: { Location: "/login" } });
     }
     if (!webRoot) return c.html(spaPlaceholderHtml());
-    // Strip the per-user prefix to find the asset request, if any. Use the raw (still-encoded)
-    // pathname so the prefix match isn't thrown off by %-encoded characters in the user id
-    // (e.g. `jerry%40apache.org`).
     const url = new URL(c.req.url);
-    const m = url.pathname.match(/^\/users\/[^/]+\/(.*)$/);
-    const rel = m ? decodeURIComponent(m[1]!) : "";
+    const rel = decodeURIComponent(url.pathname.replace(/^\//, ""));
     const asset = rel ? resolveAsset(webRoot, rel) : null;
     if (asset) {
       return c.body(readFileSync(asset), 200, {
         "Content-Type": MIME[extname(asset).toLowerCase()] ?? "application/octet-stream",
       });
     }
-    return c.body(readFileSync(join(webRoot, "index.html")), 200, { "Content-Type": MIME[".html"]! });
-  });
-  // Trailing slash with no further path: serve index.html.
-  app.get("/users/:userId/", async (c) => {
-    if (auth && !verifySession(c.req.header("Cookie"), auth)) {
-      return new Response(null, { status: 302, headers: { Location: "/login" } });
-    }
-    if (!webRoot) return c.html(spaPlaceholderHtml());
     return c.body(readFileSync(join(webRoot, "index.html")), 200, { "Content-Type": MIME[".html"]! });
   });
 
