@@ -67,25 +67,18 @@ export function classifyOutcome(outcome?: string): "success" | "failure" | "unkn
   return "unknown";
 }
 
-function countOutcomes(items: TaskListItem[]): TaskListCounts {
-  const counts: TaskListCounts = { success: 0, failure: 0, unknown: 0 };
-  for (const it of items) counts[classifyOutcome(it.outcome)]++;
-  return counts;
-}
-
 export function buildTaskList(rows: HubTaskRow[], params: TaskListParams): TaskListResponse {
   const term = params.q?.trim().toLowerCase();
-  let items = rows.map(listItem);
-  if (term) {
-    items = items.filter((it) =>
-      it.description.toLowerCase().includes(term) || it.project.toLowerCase().includes(term),
-    );
+  const allowed = params.outcomes?.length ? new Set(params.outcomes) : null;
+  const counts: TaskListCounts = { success: 0, failure: 0, unknown: 0 };
+  const items: TaskListItem[] = [];
+  for (const row of rows) {
+    if (term && !row.task.description.toLowerCase().includes(term) && !row.project.toLowerCase().includes(term)) continue;
+    const outcome = classifyOutcome(row.task.outcome);
+    if (allowed && !allowed.has(outcome)) continue;
+    counts[outcome]++;
+    items.push(listItem(row));
   }
-  if (params.outcomes?.length) {
-    const allowed = new Set(params.outcomes);
-    items = items.filter((it) => allowed.has(classifyOutcome(it.outcome)));
-  }
-  const counts = countOutcomes(items);
   const total = items.length;
   const offset = Math.max(0, params.offset);
   const page = items.slice(offset, offset + params.limit);
