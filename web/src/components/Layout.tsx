@@ -1,26 +1,31 @@
-import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Moon, Sun, type LucideIcon } from "lucide-react";
-import { SnapshotProvider, useSnapshotQuery, type SnapshotFilters } from "../lib/snapshot";
+import { Link, Outlet, useRouterState } from "@tanstack/react-router";
+import { Activity, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Sun, Users, type LucideIcon } from "lucide-react";
+import { useCallback, useState } from "react";
 import { useTheme } from "../lib/theme";
-import { useScope } from "../lib/scope";
-import { Activity } from "../routes/Activity";
+import archMarkUrl from "../assets/arch-mark.svg";
 import wordmarkOnDarkUrl from "../assets/wordmark-on-dark.svg";
 import wordmarkOnLightUrl from "../assets/wordmark-on-light.svg";
 
-interface UserInfo { userId: string; email: string; orgId: string; orgName: string }
-
-async function fetchUserInfo(userId: string): Promise<UserInfo> {
-  const res = await fetch(`/api/user/${encodeURIComponent(userId)}`);
-  if (!res.ok) throw new Error(`Failed to load user (${res.status})`);
-  return res.json();
-}
+// The Argus Hub arch mark — just the four colored arcs from the wordmark, with no text. Shown
+// alone when the rail is collapsed; the full wordmark (arch + "ARGUS HUB") is shown expanded.
+const ArchMark = () => <img className="brand-mark" src={archMarkUrl} alt="Argus Hub" />;
 
 function Wordmark() {
   const { theme } = useTheme();
   const src = theme === "dark" ? wordmarkOnDarkUrl : wordmarkOnLightUrl;
   return <img className="brand-wordmark" src={src} alt="Argus Hub" />;
 }
+
+const RAIL_KEY = "argus-hub-rail-collapsed";
+
+function readCollapsed(): boolean {
+  try { return localStorage.getItem(RAIL_KEY) === "1"; } catch { return false; }
+}
+
+const NAV: { to: string; label: string; icon: LucideIcon }[] = [
+  { to: "/", label: "Activity", icon: Activity },
+  { to: "/users", label: "Team", icon: Users },
+];
 
 function ThemeToggle() {
   const { theme, setTheme } = useTheme();
@@ -44,54 +49,62 @@ function ThemeToggle() {
   );
 }
 
-function daysAgo(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 export function Layout() {
-  const scope = useScope();
-  const [filters] = useState<SnapshotFilters>(() => ({ since: daysAgo(30), until: daysAgo(0) }));
-  const query = useSnapshotQuery(filters);
-  const userInfo = useQuery({
-    queryKey: ["user-info", scope.userId],
-    queryFn: () => fetchUserInfo(scope.userId),
-    staleTime: 60_000,
-  });
-  const snap = query.data;
-  const displayName = userInfo.data?.email ?? scope.userId;
-
-  useEffect(() => {
-    document.title = `${displayName} · Argus Hub`;
-  }, [displayName]);
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const toggleRail = useCallback(() => {
+    setCollapsed((c) => {
+      const next = !c;
+      try { localStorage.setItem(RAIL_KEY, next ? "1" : "0"); } catch {}
+      return next;
+    });
+  }, []);
 
   return (
-    <div className="hub-shell">
-      <header className="hub-header">
-        <div className="hub-brand">
+    <div className={`app-shell${collapsed ? " rail-collapsed" : ""}`}>
+      <aside className="rail">
+        <div className="rail-brand">
+          <ArchMark />
           <Wordmark />
-          <div>
-            <a href="/" className="hub-org-link">← {userInfo.data?.orgName ?? "Users"}</a>
-            <h1 className="hub-user">{displayName}</h1>
-          </div>
         </div>
-        <div className="hub-header-actions">
-          <span className="hub-range">{filters.since} → {filters.until}</span>
+        <nav className="rail-nav" aria-label="Hub sections">
+          {NAV.map((item) => {
+            const Ico = item.icon;
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                className="rail-link"
+                activeOptions={{ exact: item.to === "/" }}
+                aria-current={pathname === item.to || (item.to === "/users" && pathname.startsWith("/users")) ? "page" : undefined}
+              >
+                <Ico className="rail-icon" size={18} strokeWidth={1.75} aria-hidden />
+                <span className="rail-label">{item.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
+        <div className="rail-footer">
           <ThemeToggle />
+          <a href="/logout" className="rail-icon-btn" title="Sign out" aria-label="Sign out">
+            <LogOut size={16} strokeWidth={1.75} />
+          </a>
+          <button
+            className="rail-icon-btn rail-toggle"
+            type="button"
+            onClick={toggleRail}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? <PanelLeftOpen size={18} strokeWidth={1.75} /> : <PanelLeftClose size={18} strokeWidth={1.75} />}
+          </button>
         </div>
-      </header>
-      <main className="hub-main">
-        {query.isPending ? (
-          <div className="center-state">Loading…</div>
-        ) : query.isError ? (
-          <div className="center-state">Couldn't load data: {(query.error as Error).message}</div>
-        ) : (
-          <SnapshotProvider value={snap!}>
-            <Activity />
-          </SnapshotProvider>
-        )}
-      </main>
+      </aside>
+      <div className="content">
+        <main>
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }
