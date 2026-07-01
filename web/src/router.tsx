@@ -3,6 +3,7 @@ import { Layout } from "./components/Layout";
 import { Activity } from "./routes/Activity";
 import { Tasks } from "./routes/Tasks";
 import { Team } from "./routes/Team";
+import { Tools } from "./routes/Tools";
 import { UserActivity } from "./routes/UserActivity";
 
 const rootRoute = createRootRoute({ component: Layout });
@@ -17,6 +18,7 @@ const routeTree = rootRoute.addChildren([
       q: typeof search.q === "string" && search.q.length > 0 ? search.q : undefined,
     }),
   }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/tools", component: Tools }),
   createRoute({ getParentRoute: () => rootRoute, path: "/users", component: Team }),
   createRoute({ getParentRoute: () => rootRoute, path: "/users/$userId", component: UserActivity }),
 ]);
