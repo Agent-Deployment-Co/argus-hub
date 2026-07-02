@@ -147,34 +147,8 @@ On first startup Hub prints the admin password and API key to stdout — retriev
 docker logs argus-hub 2>&1 | grep -E "Hub API key|Admin password"
 ```
 
-**Environment variables:**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `HUB_PORT` | `4343` | Port inside the container |
-| `HUB_DATA_DIR` | `/data` | Directory for `hub.db` |
-| `ADMIN_PASSWORD` | _(generated)_ | Pin the dashboard password across restarts |
-| `HUB_INSECURE_COOKIE_HOSTS` | _(none)_ | Comma-separated hostnames that skip the `Secure` cookie flag, for plain-HTTP-only deployments. Never use for a publicly reachable host. |
-
-Pass them with `-e NAME=value` or `--env-file hub.env`. The data volume (`/data`) holds `hub.db`; mount a named volume or bind mount there to persist data across container restarts.
-
-**Docker Compose** — save as `compose.yml` and run `docker compose up -d`:
-
-```yaml
-services:
-  argus-hub:
-    build: .
-    restart: unless-stopped
-    ports:
-      - "4343:4343"
-    volumes:
-      - argus-hub-data:/data
-
-volumes:
-  argus-hub-data:
-```
-
-Hub exposes `GET /healthz` (plain `200 ok`, no auth) for Docker `HEALTHCHECK` and Kubernetes liveness probes.
+See **[DOCKER.md](DOCKER.md)** for environment variables, Docker Compose, health checks,
+persisting data, and running behind a reverse proxy.
 
 ---
 
