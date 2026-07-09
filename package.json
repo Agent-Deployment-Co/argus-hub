@@ -1,6 +1,6 @@
 {
   "name": "@agentdeploymentco/argus-hub",
-  "version": "0.1.15",
+  "version": "0.1.19",
   "description": "Self-hosted Argus Hub server: collects usage data from multiple Argus clients and presents an org-wide dashboard.",
   "type": "module",
   "bin": {
