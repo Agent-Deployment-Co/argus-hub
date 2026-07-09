@@ -13,8 +13,12 @@ import type { Context } from "hono";
 // v19 added content_indexed_at_ms / interpreted_at_ms / interpretation_version to
 // resolved_sessions (interpretation state); the upload query does not select these columns.
 // No row shape changes.
+// v20 added session search (FTS tables + a file-path index), all local-only. No row shape changes.
+// v21 added title / summary columns to resolved_sessions (session interpretation 2.0) plus a
+// title/summary FTS index; the upload query does not select these columns. No row shape changes.
+// v22 added session/task labels as two new local-only tables (not uploaded). No row shape changes.
 export const HUB_MIN_CLIENT_SCHEMA_VERSION = 10;
-export const HUB_MAX_CLIENT_SCHEMA_VERSION = 19;
+export const HUB_MAX_CLIENT_SCHEMA_VERSION = 22;
 
 const CLIENT_ID_HEADER = "X-Argus-Client";
 
