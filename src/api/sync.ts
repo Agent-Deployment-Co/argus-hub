@@ -17,8 +17,10 @@ import type { Context } from "hono";
 // v21 added title / summary columns to resolved_sessions (session interpretation 2.0) plus a
 // title/summary FTS index; the upload query does not select these columns. No row shape changes.
 // v22 added session/task labels as two new local-only tables (not uploaded). No row shape changes.
+// v23 added is_hidden to resolved_sessions (local-only UI state); the upload query does not select
+// this column. No row shape changes.
 export const HUB_MIN_CLIENT_SCHEMA_VERSION = 10;
-export const HUB_MAX_CLIENT_SCHEMA_VERSION = 22;
+export const HUB_MAX_CLIENT_SCHEMA_VERSION = 23;
 
 const CLIENT_ID_HEADER = "X-Argus-Client";
 
