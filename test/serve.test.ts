@@ -380,6 +380,48 @@ describe("GET /api/sessions", () => {
       await store.close();
     }
   });
+
+  test("`file:` search token filters to sessions that touched a matching path", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncAs(env, "alice@example.com", [{ id: "sf1" }, { id: "sf2" }]);
+      const clientId = env.clientFor("alice@example.com");
+      // Invocation rows are only ingested for session_ids present in the same batch's
+      // `sessions` array, so re-send sf1's session row alongside its invocation.
+      const invocationRes = await app.request("/api/sync", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.apiKey}`,
+          "X-Argus-Client": clientId,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          schemaVersion: 23,
+          rows: {
+            ...buildUploadPayload([{ id: "sf1" }]).rows,
+            invocations: [{
+              session_id: "sf1", seq: 0, source: "claude", interaction_seq: null,
+              tool: "Edit", category: "file-io", mcp_server: null, mcp_tool: null, skill: null,
+              file_path: "src/auth/login.ts", date: "2026-01-01", cwd: "/Users/you/proj", args: null,
+              approx_result_tokens: 0,
+            }],
+          },
+        }),
+      });
+      expect(invocationRes.status).toBe(200);
+
+      const res = await app.request(`/api/sessions?${new URLSearchParams({ q: "file:auth/login" })}`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as { rows: Array<{ sessionId: string; matchSource?: string; matchedFile?: string }> };
+      expect(body.rows).toHaveLength(1);
+      expect(body.rows[0]!.sessionId).toBe("sf1");
+      expect(body.rows[0]!.matchSource).toBe("file");
+      expect(body.rows[0]!.matchedFile).toBe("src/auth/login.ts");
+    } finally {
+      await env.store.close();
+    }
+  });
 });
 
 // ---- GET /api/session/:id --------------------------------------------------------------

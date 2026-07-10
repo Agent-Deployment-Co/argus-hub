@@ -1068,6 +1068,25 @@ export class HubStore {
     });
   }
 
+  /** Session ids (within scope) that touched a file whose path contains `filePathSubstring`,
+   *  mapped to one matched path each — backs the sessions list's `file:` search token. */
+  async readSessionIdsByFile(scope: HubScope, filePathSubstring: string): Promise<Map<string, string>> {
+    const expanded = await this.expandScope(scope);
+    if (expanded.empty) return new Map();
+    return this.schedule(async () => {
+      const cond = scopeWhereSql(expanded);
+      const rows = await all<{ session_id: string; file_path: string }>(
+        this.db,
+        `SELECT DISTINCT session_id, file_path FROM resolved_invocations
+         WHERE ${cond} AND file_path IS NOT NULL AND instr(file_path, ?) > 0`,
+        [...scopeParams(expanded), filePathSubstring],
+      );
+      const out = new Map<string, string>();
+      for (const row of rows) if (!out.has(row.session_id)) out.set(row.session_id, row.file_path);
+      return out;
+    });
+  }
+
   async readDashboardAggregates(scope: HubScope, query?: ResolvedQuery): Promise<DashboardAggregates> {
     const expanded = await this.expandScope(scope);
     return this.schedule(() => this.readDashboardAggregatesCore(expanded, query));

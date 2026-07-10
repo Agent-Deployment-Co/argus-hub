@@ -166,6 +166,10 @@ main:has(.sessions-split) { padding: 0; }
 .session-item-meta { display: flex; gap: 6px; align-items: baseline; margin-top: 3px; font-size: 11.5px; }
 .session-item-meta .truncate { max-width: 60%; }
 .session-item-stats { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 5px; color: var(--muted); font: 600 10.5px "Poppins", "Avenir Next", Arial, sans-serif; }
+/* Inline "matched: ..." snippet shown under a session-item's meta row when a search matched on
+   something other than the visible title (a touched file, the project, or the source). */
+.session-item-match { margin-top: 3px; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-item-match code { font-size: 10.5px; padding: 0 3px; }
 .session-empty-row { padding: 18px 14px; color: var(--muted); font-size: 13px; }
 
 .session-detail { overflow-y: auto; min-height: 0; }
@@ -179,7 +183,7 @@ main:has(.sessions-split) { padding: 0; }
 .eyebrow-link:hover { color: var(--link-hover); text-decoration: underline; }
 .table-link { color: var(--link); }
 .table-link:hover { color: var(--link-hover); text-decoration: underline; }
-.session-detail-title { margin: 0; color: var(--heading); font-size: 22px; font-weight: 700; line-height: 1.25; }
+.session-detail-title { margin: 0; color: var(--heading); font-size: 22px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
 .session-detail-range { margin-top: 8px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .session-id { display: inline-block; font-size: 11px; }
 .session-detail-inner section { margin: 22px 0 0; }
@@ -193,13 +197,13 @@ main:has(.sessions-split) { padding: 0; }
 .kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0 22px; }
 .kv-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .kv-k { color: var(--muted); font-size: 13px; }
-.kv-v { color: var(--heading); font-size: 13px; font-variant-numeric: tabular-nums; }
+.kv-v { color: var(--heading); font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; color: var(--text); }
 .chip-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
 .file-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .file-list li { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.first-prompt { margin: 0; padding: 12px 16px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 8px 8px 0; color: var(--text); font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
+.first-prompt { margin: 0; padding: 12px 16px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 8px 8px 0; color: var(--text); font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow-y: auto; }
 .task-empty { margin: 0; color: var(--muted); font-size: 13px; }
 
 /* Hidden /debug page. */
@@ -252,7 +256,7 @@ main:has(.sessions-split) { padding: 0; }
 .task-panel-body { padding: 16px; overflow-y: auto; display: grid; gap: 14px; }
 .task-panel-field { display: grid; gap: 4px; }
 .task-panel-label { color: var(--muted); font: 600 11px "Poppins", "Avenir Next", Arial, sans-serif; text-transform: uppercase; letter-spacing: .04em; }
-.task-panel-value { color: var(--text); font-size: 13.5px; line-height: 1.5; }
+.task-panel-value { color: var(--text); font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere; }
 .task-panel-desc { white-space: pre-wrap; }
 .task-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .task-metric { color: var(--muted); font-size: 12.5px; }

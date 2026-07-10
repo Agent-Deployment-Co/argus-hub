@@ -13,6 +13,10 @@ import { addUsage, emptyUsage, totalTokens } from "../types.ts";
 
 export type SessionSort = "recent" | "tokens" | "cost";
 
+/** Which field a text/file search matched on — surfaced in the list so the UI can label the
+ *  result (e.g. "matched: file path" vs "matched: prompt"). */
+export type SessionMatchSource = "prompt" | "project" | "source" | "file";
+
 export interface SessionListItem {
   sessionId: string;
   source: AgentSource;
@@ -24,6 +28,9 @@ export interface SessionListItem {
   agentMessages: number | null;
   total: number;
   cost: number;
+  matchSource?: SessionMatchSource;
+  /** The specific file path that matched, when matchSource is "file". */
+  matchedFile?: string;
 }
 
 export interface SessionListResponse {
@@ -40,6 +47,10 @@ export interface SessionListParams {
   project?: string;
   q?: string;
   includeGenerated?: boolean;
+  /** Set when `q` was a `file:` token — sessionId -> one matched file path, pre-resolved by the
+   *  caller (session-list.ts has no DB access). When present, it replaces the free-text `q`
+   *  filter rather than combining with it. */
+  fileMatches?: Map<string, string>;
 }
 
 export function isArgusGeneratedSession(firstPrompt: string | null | undefined): boolean {
@@ -82,16 +93,25 @@ const SORTERS: Record<SessionSort, (a: SessionListItem, b: SessionListItem) => n
 
 export function buildSessionList(aggregates: SessionAggregate[], params: SessionListParams): SessionListResponse {
   const project = params.project?.toLowerCase();
-  const term = params.q?.trim().toLowerCase();
+  const term = params.fileMatches ? undefined : params.q?.trim().toLowerCase();
   let items = aggregates.map(listItem);
   items = items.filter((it) => {
     if (!params.includeGenerated && isArgusGeneratedSession(it.firstPrompt)) return false;
     if (project && !it.project.toLowerCase().includes(project)) return false;
+    if (params.fileMatches) {
+      const matched = params.fileMatches.get(it.sessionId);
+      if (!matched) return false;
+      it.matchSource = "file";
+      it.matchedFile = matched;
+      return true;
+    }
     if (term) {
       const title = (it.firstPrompt ?? "").toLowerCase();
-      if (!title.includes(term) && !it.project.toLowerCase().includes(term) && !it.source.toLowerCase().includes(term)) {
-        return false;
-      }
+      const inTitle = title.includes(term);
+      const inProject = it.project.toLowerCase().includes(term);
+      const inSource = it.source.toLowerCase().includes(term);
+      if (!inTitle && !inProject && !inSource) return false;
+      it.matchSource = inTitle ? "prompt" : inProject ? "project" : "source";
     }
     return true;
   });

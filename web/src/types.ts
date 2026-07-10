@@ -165,6 +165,8 @@ export interface TaskListResponse {
 
 export type SessionSort = "recent" | "tokens" | "cost";
 
+export type SessionMatchSource = "prompt" | "project" | "source" | "file";
+
 export interface SessionListItem {
   sessionId: string;
   source: AgentSource;
@@ -176,6 +178,8 @@ export interface SessionListItem {
   agentMessages: number | null;
   total: number;
   cost: number;
+  matchSource?: SessionMatchSource;
+  matchedFile?: string;
 }
 
 /** The payload served at GET /api/sessions. */

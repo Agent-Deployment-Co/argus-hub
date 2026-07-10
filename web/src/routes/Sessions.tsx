@@ -156,6 +156,12 @@ function SessionListRow({ row, active, userId }: { row: SessionListItem; active:
           <span className="pill">{sourceLabel(row.source)}</span>
           <span className="muted truncate">{compactProject(row.project)}</span>
         </div>
+        {row.matchSource === "file" && row.matchedFile && (
+          <div className="session-item-match">Matched file: <code>{row.matchedFile}</code></div>
+        )}
+        {(row.matchSource === "project" || row.matchSource === "source") && (
+          <div className="session-item-match">Matched on {row.matchSource}</div>
+        )}
         <div className="session-item-stats">
           <span>{dayStamp(row.end)}</span>
           <span>{fmt(row.total)} tok</span>

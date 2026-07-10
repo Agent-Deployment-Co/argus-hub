@@ -202,14 +202,20 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     if (!VALID_SORTS.has(sort)) return c.json({ error: `Unknown sort "${sort}".` }, 400);
 
     const userId = parseUserScope(c);
-    const aggregates = await store.readSessionAggregates({ orgId, userId }, query);
+    const scope = { orgId, userId };
+    const aggregates = await store.readSessionAggregates(scope, query);
+
+    const q = c.req.query("q") || undefined;
+    const fileToken = /^file:\s*(.+)$/i.exec(q ?? "");
+    const fileMatches = fileToken ? await store.readSessionIdsByFile(scope, fileToken[1]!.trim()) : undefined;
 
     const params: SessionListParams = {
       sort: sort as SessionSort,
       limit: Math.min(MAX_LIMIT, Math.max(1, parseIntOr(c.req.query("limit"), DEFAULT_LIMIT))),
       offset: Math.max(0, parseIntOr(c.req.query("offset"), 0)),
       project: c.req.query("project") || undefined,
-      q: c.req.query("q") || undefined,
+      q,
+      fileMatches,
       includeGenerated: c.req.query("includeGenerated") === "true",
     };
     return c.json(buildSessionList(aggregates, params));
