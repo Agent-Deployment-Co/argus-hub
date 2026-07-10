@@ -1,5 +1,5 @@
 import { getRouteApi, Link, Outlet, useParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FilterBar } from "../components/FilterBar";
 import { compactProject, dayStamp, fmt, usd } from "../lib/format";
 import { DEFAULT_SINCE, DEFAULT_UNTIL, isFilterActive } from "../lib/filters";
@@ -53,6 +53,56 @@ export function Sessions() {
   const rows = query.data?.rows ?? [];
   const total = query.data?.total ?? 0;
 
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const itemRefs = useRef(new Map<string, HTMLAnchorElement>());
+
+  const openSession = (sessionId: string) =>
+    navigate({ to: "/sessions/$sessionId", params: { sessionId }, search: (prev: SessionsSearch) => prev });
+
+  // j/k row stepping + "/" and Cmd/Ctrl+K to focus search, matching Argus's own sessions list.
+  useEffect(() => {
+    function isTypingTarget(el: EventTarget | null): boolean {
+      const node = el as HTMLElement | null;
+      const tag = node?.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || !!node?.isContentEditable;
+    }
+
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+      if (e.target === searchInputRef.current) {
+        if (e.key === "Enter" && rows.length > 0) {
+          e.preventDefault();
+          openSession(rows[0]!.sessionId);
+          searchInputRef.current?.blur();
+        }
+        return;
+      }
+      if (e.key === "/" && !isTypingTarget(e.target)) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
+      if (isTypingTarget(e.target)) return;
+      if (e.key !== "j" && e.key !== "k") return;
+      if (rows.length === 0) return;
+      e.preventDefault();
+      const idx = rows.findIndex((r) => r.sessionId === activeId);
+      const nextIdx =
+        e.key === "j" ? (idx < 0 ? 0 : Math.min(rows.length - 1, idx + 1)) : idx < 0 ? 0 : Math.max(0, idx - 1);
+      const next = rows[nextIdx]!;
+      openSession(next.sessionId);
+      itemRefs.current.get(next.sessionId)?.scrollIntoView({ block: "nearest" });
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [rows, activeId]);
+
   const patchFilters = (patch: Partial<{ since: string; until: string; source: string; userId: string }>) =>
     navigate({
       to: ".",
@@ -89,6 +139,7 @@ export function Sessions() {
           <div className="session-list-head">
             <div className="session-search-row">
               <input
+                ref={searchInputRef}
                 className="session-search"
                 type="search"
                 placeholder="Search sessions… (try file:path/to/file)"
@@ -119,7 +170,18 @@ export function Sessions() {
             ) : rows.length === 0 ? (
               <li className="session-empty-row">No sessions found.</li>
             ) : (
-              rows.map((row) => <SessionListRow key={row.sessionId} row={row} active={row.sessionId === activeId} userId={userId} />)
+              rows.map((row) => (
+                <SessionListRow
+                  key={row.sessionId}
+                  row={row}
+                  active={row.sessionId === activeId}
+                  userId={userId}
+                  linkRef={(el) => {
+                    if (el) itemRefs.current.set(row.sessionId, el);
+                    else itemRefs.current.delete(row.sessionId);
+                  }}
+                />
+              ))
             )}
           </ul>
           {rows.length < total && (
@@ -141,10 +203,21 @@ export function Sessions() {
   );
 }
 
-function SessionListRow({ row, active, userId }: { row: SessionListItem; active: boolean; userId?: string }) {
+function SessionListRow({
+  row,
+  active,
+  userId,
+  linkRef,
+}: {
+  row: SessionListItem;
+  active: boolean;
+  userId?: string;
+  linkRef: (el: HTMLAnchorElement | null) => void;
+}) {
   return (
     <li>
       <Link
+        ref={linkRef}
         to="/sessions/$sessionId"
         params={{ sessionId: row.sessionId }}
         search={(prev: SessionsSearch) => prev}
