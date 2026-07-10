@@ -160,3 +160,83 @@ export interface TaskListResponse {
   limit: number;
   counts: TaskListCounts;
 }
+
+// ---- Sessions (mirrors hub/src/api/session-list.ts) -------------------------------------
+
+export type SessionSort = "recent" | "tokens" | "cost";
+
+export interface SessionListItem {
+  sessionId: string;
+  source: AgentSource;
+  project: string;
+  firstPrompt: string | null;
+  start: number;
+  end: number;
+  userMessages: number | null;
+  agentMessages: number | null;
+  total: number;
+  cost: number;
+}
+
+/** The payload served at GET /api/sessions. */
+export interface SessionListResponse {
+  rows: SessionListItem[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface SessionHealth {
+  interruptions: number | null;
+  rejections: number | null;
+  compactions: number | null;
+  turns: number | null;
+  medianTurnMs: number | null;
+  maxTurnMs: number | null;
+  stopReasons: Record<string, number> | null;
+  tokenGrowth: number | null;
+}
+
+/** Mirrors hub/src/types.ts's TaskFact, as embedded in a session detail row. */
+export interface SessionTaskFact {
+  id: string;
+  source: AgentSource;
+  sourceSessionId: string;
+  timestampMs?: number;
+  description: string;
+  evidence: string;
+  evidenceKind: "llm_inference" | "user_message";
+  outcome?: string;
+  frustration?: string;
+  signals?: string[];
+  outcomeReason?: string;
+}
+
+/** Mirrors hub/src/types.ts's SessionRow, served at GET /api/session/:id. */
+export interface SessionDetailRow {
+  source: AgentSource;
+  sessionId: string;
+  project: string;
+  start: number;
+  end: number;
+  durationMs: number;
+  messages: number;
+  userMessages: number | null;
+  agentMessages: number | null;
+  rawTurns: number | null;
+  models: string[];
+  topSkills: string[];
+  toolCounts: Record<string, number>;
+  filesTouched: string[];
+  total: number;
+  cost: number;
+  firstPrompt: string;
+  summary: string;
+  health: SessionHealth;
+  tasks?: SessionTaskFact[];
+}
+
+/** The payload served at GET /api/session/:id. */
+export interface SessionDetailResponse {
+  session: SessionDetailRow;
+}

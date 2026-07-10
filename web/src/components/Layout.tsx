@@ -1,5 +1,5 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { Activity, ListTodo, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Sun, Users, Wrench, type LucideIcon } from "lucide-react";
+import { Activity, Inbox, ListTodo, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Sun, Users, Wrench, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTheme } from "../lib/theme";
 import { useUserInfo } from "../lib/users";
@@ -25,6 +25,7 @@ function readCollapsed(): boolean {
 
 const NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "/", label: "Activity", icon: Activity },
+  { to: "/sessions", label: "Sessions", icon: Inbox },
   { to: "/tasks", label: "Tasks", icon: ListTodo },
   { to: "/tools", label: "Tools", icon: Wrench },
   { to: "/users", label: "Team", icon: Users },
@@ -32,6 +33,7 @@ const NAV: { to: string; label: string; icon: LucideIcon }[] = [
 
 const ROUTE_TITLES: Record<string, string> = {
   "/": "Argus Hub",
+  "/sessions": "Sessions · Argus Hub",
   "/tasks": "Tasks · Argus Hub",
   "/tools": "Tools · Argus Hub",
   "/users": "Team · Argus Hub",
@@ -49,7 +51,7 @@ function useDocumentTitle() {
       document.title = `${userInfo.data?.displayName ?? userId} · Argus Hub`;
       return;
     }
-    document.title = ROUTE_TITLES[pathname] ?? "Argus Hub";
+    document.title = ROUTE_TITLES[pathname] ?? (pathname.startsWith("/sessions") ? ROUTE_TITLES["/sessions"]! : "Argus Hub");
   }, [pathname, userId, userInfo.data]);
 }
 
@@ -103,7 +105,12 @@ export function Layout() {
                 to={item.to}
                 className="rail-link"
                 activeOptions={{ exact: item.to === "/" }}
-                aria-current={pathname === item.to || (item.to === "/users" && pathname.startsWith("/users")) ? "page" : undefined}
+                aria-current={
+                  pathname === item.to ||
+                  ((item.to === "/users" || item.to === "/sessions") && pathname.startsWith(item.to))
+                    ? "page"
+                    : undefined
+                }
               >
                 <Ico className="rail-icon" size={18} strokeWidth={1.75} aria-hidden />
                 <span className="rail-label">{item.label}</span>

@@ -385,14 +385,28 @@ describe("GET /api/sessions", () => {
 // ---- GET /api/session/:id --------------------------------------------------------------
 
 describe("GET /api/session/:id", () => {
-  test("returns 400 when ?user= is missing", async () => {
+  test("returns 404 (not 400) for an unknown session when ?user= is missing", async () => {
     const { store } = await openTestEnv();
     const app = createHubApp(store);
     try {
       const res = await app.request("/api/session/some-id");
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(404);
     } finally {
       await store.close();
+    }
+  });
+
+  test("falls back to an org-wide lookup when ?user= is omitted", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncAs(env, "alice@example.com", [{ id: "detail-sess" }]);
+      const res = await app.request("/api/session/detail-sess");
+      expect(res.status).toBe(200);
+      const body = await res.json() as { session: { sessionId: string } };
+      expect(body.session.sessionId).toBe("detail-sess");
+    } finally {
+      await env.store.close();
     }
   });
 

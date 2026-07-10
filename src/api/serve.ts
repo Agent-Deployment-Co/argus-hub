@@ -251,10 +251,11 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
 
   // ---- Session detail -----------------------------------------------------------
 
-  // Requires ?user= because session IDs are per-user UUIDs that may collide across users.
+  // ?user= narrows the search to one user's clients; omitted, it falls back to an org-wide
+  // lookup by session id (session ids are random UUIDs, so a cross-user collision is not a
+  // realistic concern for a read-only lookup).
   app.get("/api/session/:id", async (c) => {
     const userId = parseUserScope(c);
-    if (!userId) return c.json({ error: "Missing required ?user= parameter." }, 400);
 
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "Session not found." }, 404);
@@ -262,7 +263,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     const sessionId = c.req.param("id").trim();
     if (!sessionId) return c.json({ error: "Missing session id." }, 400);
 
-    const scope = { orgId, userId };
+    const scope = userId ? { orgId, userId } : { orgId };
     const [meta, messages, tasks] = await Promise.all([
       store.readHubSessionMeta(scope, sessionId),
       store.readHubSessionMessages(scope, sessionId),
