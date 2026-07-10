@@ -1,17 +1,13 @@
+import { getRouteApi } from "@tanstack/react-router";
 import type { ChartOptions } from "chart.js";
-import { useState } from "react";
 import { ChartCanvas } from "../components/charts/ChartCanvas";
 import { DataTable, type Column } from "../components/DataTable";
+import { FilterBar } from "../components/FilterBar";
 import { Dash, Skills } from "../components/pills";
 import { CATEGORY_PALETTE, fmt, SERIES, SKILL_PALETTE, usd } from "../lib/format";
-import { SnapshotProvider, useSnapshot, useSnapshotQuery, type SnapshotFilters } from "../lib/snapshot";
+import { DEFAULT_SINCE, DEFAULT_UNTIL, isFilterActive } from "../lib/filters";
+import { SnapshotProvider, useSnapshot, useSnapshotQuery } from "../lib/snapshot";
 import type { PluginRow, ToolStat } from "../types";
-
-function daysAgo(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 const fmtTick = (v: number | string) => fmt(Number(v));
 
@@ -174,17 +170,42 @@ function ToolsContent() {
   );
 }
 
+const routeApi = getRouteApi("/tools");
+
 /** Org-wide tool/skill/plugin usage — mirrors Argus's own /tools view, scoped to the whole team. */
 export function Tools() {
-  const [filters] = useState<SnapshotFilters>(() => ({ since: daysAgo(30), until: daysAgo(0) }));
-  const query = useSnapshotQuery(filters);
+  const search = routeApi.useSearch();
+  const navigate = routeApi.useNavigate();
+  const since = search.since ?? DEFAULT_SINCE();
+  const until = search.until ?? DEFAULT_UNTIL();
+  const source = search.source ?? "";
+  const query = useSnapshotQuery({ since, until, source });
   const snap = query.data;
+
+  const patchFilters = (patch: Partial<{ since: string; until: string; source: string }>) =>
+    navigate({
+      to: ".",
+      search: (prev: { since?: string; until?: string; source?: string }) => ({
+        since: patch.since !== undefined ? patch.since || undefined : prev.since,
+        until: patch.until !== undefined ? patch.until || undefined : prev.until,
+        source: "source" in patch ? patch.source || undefined : prev.source,
+      }),
+      replace: true,
+    });
 
   return (
     <>
+      <FilterBar
+        since={since}
+        until={until}
+        source={source}
+        loading={query.isFetching}
+        onChange={patchFilters}
+        onReset={() => navigate({ to: ".", search: {}, replace: true })}
+        resettable={isFilterActive(search, { since: DEFAULT_SINCE(), until: DEFAULT_UNTIL() })}
+      />
       <div className="page-head">
         <h1>Tools</h1>
-        <span className="page-range">{filters.since} → {filters.until}</span>
       </div>
       {query.isPending ? (
         <div className="center-state">Loading…</div>

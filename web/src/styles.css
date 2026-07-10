@@ -132,7 +132,6 @@ main { padding: 30px 32px 64px; }
 .task-filters { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: -12px 0 20px; }
 .task-filters-outcomes { display: flex; align-items: center; gap: 8px; }
 .task-filters-right { display: flex; align-items: center; gap: 10px; }
-.task-filters .select-wrap > select.filter-input { width: 180px; }
 
 /* Sessions: a full-height two-pane (selector list + detail). Drop main's padding for this route
    only so the list sits flush against the rail instead of floating inside the page gutters. */

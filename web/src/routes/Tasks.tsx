@@ -3,7 +3,8 @@ import { getRouteApi } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { compactProject, dayStamp } from "../lib/format";
 import { StatCards, type Stat } from "../components/StatCards";
-import { useUsers } from "../lib/users";
+import { FilterBar } from "../components/FilterBar";
+import { DEFAULT_SINCE, DEFAULT_UNTIL, isFilterActive, sanitizedSource } from "../lib/filters";
 import type { TaskListResponse } from "../types";
 
 const NEGATION_RE = /\b(?:un|in|non)\w+|\bnot\s+\w+/;
@@ -14,11 +15,22 @@ const OUTCOME_OPTIONS: { key: "success" | "failure" | "unknown"; label: string }
   { key: "unknown", label: "Unknown" },
 ];
 
-async function fetchTasks(q: string, outcome: string[], user: string): Promise<TaskListResponse> {
-  const params = new URLSearchParams({ limit: "100" });
-  if (q) params.set("q", q);
-  if (outcome.length) params.set("outcome", outcome.join(","));
-  if (user) params.set("user", user);
+interface TaskFilters {
+  q: string;
+  outcome: string[];
+  user: string;
+  since: string;
+  until: string;
+  source: string;
+}
+
+async function fetchTasks(f: TaskFilters): Promise<TaskListResponse> {
+  const params = new URLSearchParams({ limit: "100", since: f.since, until: f.until });
+  if (f.q) params.set("q", f.q);
+  if (f.outcome.length) params.set("outcome", f.outcome.join(","));
+  if (f.user) params.set("user", f.user);
+  const source = sanitizedSource(f.source);
+  if (source) params.set("source", source);
   const res = await fetch(`/api/tasks?${params}`);
   if (!res.ok) throw new Error(`Failed to load tasks (${res.status})`);
   return res.json();
@@ -52,19 +64,34 @@ export function Tasks() {
   const q = search.q ?? "";
   const outcome = search.outcome ?? [];
   const user = search.user ?? "";
+  const since = search.since ?? DEFAULT_SINCE();
+  const until = search.until ?? DEFAULT_UNTIL();
+  const source = search.source ?? "";
   const [draft, setDraft] = useState(q);
   const [openId, setOpenId] = useState<string | null>(null);
   const query = useQuery({
-    queryKey: ["tasks", q, outcome, user],
-    queryFn: () => fetchTasks(q, outcome, user),
+    queryKey: ["tasks", q, outcome, user, since, until, source],
+    queryFn: () => fetchTasks({ q, outcome, user, since, until, source }),
     staleTime: 30_000,
   });
-  const usersQuery = useUsers();
 
   const toggleOutcome = (key: string) => {
     const next = outcome.includes(key) ? outcome.filter((o: string) => o !== key) : [...outcome, key];
     navigate({ to: ".", search: { ...search, outcome: next.length ? next : undefined }, replace: true });
   };
+
+  const patchFilters = (patch: Partial<{ since: string; until: string; source: string; userId: string }>) =>
+    navigate({
+      to: ".",
+      search: {
+        ...search,
+        since: patch.since !== undefined ? patch.since || undefined : search.since,
+        until: patch.until !== undefined ? patch.until || undefined : search.until,
+        source: "source" in patch ? patch.source || undefined : search.source,
+        user: "userId" in patch ? patch.userId || undefined : search.user,
+      },
+      replace: true,
+    });
 
   // Keep the input in sync if the URL changes out from under us (back/forward nav).
   useEffect(() => setDraft(q), [q]);
@@ -80,6 +107,17 @@ export function Tasks() {
 
   return (
     <>
+      <FilterBar
+        since={since}
+        until={until}
+        source={source}
+        userId={user}
+        showUser
+        loading={query.isFetching}
+        onChange={patchFilters}
+        onReset={() => { setDraft(""); navigate({ to: ".", search: {}, replace: true }); }}
+        resettable={isFilterActive(search, { since: DEFAULT_SINCE(), until: DEFAULT_UNTIL() }) || !!q || outcome.length > 0}
+      />
       <div className="page-head">
         <h1>Tasks</h1>
       </div>
@@ -97,21 +135,6 @@ export function Tasks() {
           ))}
         </div>
         <div className="task-filters-right">
-          <div className="select-wrap">
-            <select
-              className="filter-input"
-              aria-label="Filter by user"
-              value={user}
-              onChange={(e) =>
-                navigate({ to: ".", search: { ...search, user: e.target.value || undefined }, replace: true })
-              }
-            >
-              <option value="">All users</option>
-              {usersQuery.data?.map((u) => (
-                <option key={u.userId} value={u.userId}>{u.displayName}</option>
-              ))}
-            </select>
-          </div>
           <div className="filter-search">
             <input
               className="filter-input"
