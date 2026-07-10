@@ -1,4 +1,4 @@
-import { Calendar, FilterX, Layers, RotateCcw, User } from "lucide-react";
+import { Calendar, FilterX, Layers, RotateCw, User } from "lucide-react";
 import { useUsers } from "../lib/users";
 import { DATE_PRESETS, SORTED_SOURCES, daysAgo, formatDateShort, sourceLabel, type FilterValues } from "../lib/filters";
 import { FilterDropdown, FilterDropdownOption } from "./FilterDropdown";
@@ -148,7 +148,7 @@ export function FilterBar({ since, until, source, userId, showUser, loading, onC
         aria-label="Reset filters"
       >
         {loading ? (
-          <RotateCcw className="filter-spinner" size={16} strokeWidth={2} aria-label="Loading" />
+          <RotateCw className="filter-spinner" size={16} strokeWidth={2} aria-label="Loading" />
         ) : (
           <FilterX size={16} strokeWidth={1.75} aria-hidden />
         )}
