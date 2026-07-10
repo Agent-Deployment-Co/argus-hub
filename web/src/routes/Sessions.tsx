@@ -1,6 +1,8 @@
 import { getRouteApi, Link, Outlet, useParams } from "@tanstack/react-router";
+import { ArrowUpDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { FilterBar } from "../components/FilterBar";
+import { FilterDropdown, FilterDropdownOption } from "../components/FilterDropdown";
 import { compactProject, dayStamp, fmt, usd } from "../lib/format";
 import { DEFAULT_SINCE, DEFAULT_UNTIL, isFilterActive } from "../lib/filters";
 import { useSessionList, type SessionsSearch } from "../lib/sessions";
@@ -147,16 +149,29 @@ export function Sessions() {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
               />
-              <select
-                className="session-sort"
-                aria-label="Sort sessions"
-                value={sort}
-                onChange={(e) => navigate({ to: ".", search: (prev: SessionsSearch) => ({ ...prev, sort: e.target.value as SessionSort }), replace: true })}
+              <FilterDropdown
+                icon={<ArrowUpDown size={14} strokeWidth={2} aria-hidden />}
+                label="Sort"
+                summary={SORT_OPTIONS.find((o) => o.key === sort)?.label}
+                active={sort !== "recent"}
+                align="right"
               >
-                {SORT_OPTIONS.map((o) => (
-                  <option key={o.key} value={o.key}>{o.label}</option>
-                ))}
-              </select>
+                {(close) => (
+                  <div className="filter-dropdown-list" role="listbox" aria-label="Sort sessions">
+                    {SORT_OPTIONS.map((o) => (
+                      <FilterDropdownOption
+                        key={o.key}
+                        label={o.label}
+                        selected={sort === o.key}
+                        onToggle={() => {
+                          navigate({ to: ".", search: (prev: SessionsSearch) => ({ ...prev, sort: o.key }), replace: true });
+                          close();
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </FilterDropdown>
             </div>
             <span className="session-count">
               {query.isPending ? "Loading…" : total === 1 ? "1 session" : `${fmt(total)} sessions`}
