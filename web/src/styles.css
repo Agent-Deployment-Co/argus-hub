@@ -65,8 +65,14 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 "Al
 /* Global filter bar pinned above every view. Fixed height so the full-height Sessions split can
    subtract it (see .sessions-split) without overflowing the viewport. Pill-shaped Date/Sources/User
    dropdowns (FilterDropdown) borrowed from the /sessions inbox toolbar so every data view reads as
-   one filter system. */
-.filter-bar { position: sticky; top: 0; z-index: 5; box-sizing: border-box; height: var(--filter-bar-h); display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 32px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 50%, var(--bg)); }
+   one filter system.
+   It renders as the route's own first child (inside <main>, not a sibling of it — see Activity.tsx
+   etc.), so it inherits main's padding (30px 32px). Negative-margin it back out to bleed edge-to-edge
+   and sit flush with no gap above, restoring the inset as its own horizontal padding; margin-bottom
+   keeps the usual gap before the page content that follows. On /sessions, main's padding is already
+   zeroed (see main:has(.sessions-split) below), so the bleed margin is reset there to avoid double-
+   subtracting padding that no longer exists. */
+.filter-bar { position: sticky; top: 0; z-index: 5; box-sizing: border-box; height: var(--filter-bar-h); display: flex; align-items: center; justify-content: center; gap: 10px; margin: -30px -32px 24px; padding: 0 32px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 50%, var(--bg)); }
 .filter-dash { color: var(--muted); }
 /* Fixed height (padding-free vertically) so date inputs and the source select are identical — date
    inputs otherwise render taller than a select from UA styling. box-sizing:border-box is global. */
@@ -161,6 +167,7 @@ main { padding: 30px 32px 64px; }
 /* Sessions: a full-height two-pane (selector list + detail). Drop main's padding for this route
    only so the list sits flush against the rail instead of floating inside the page gutters. */
 main:has(.sessions-split) { padding: 0; }
+main:has(.sessions-split) .filter-bar { margin: 0; }
 .sessions-split { display: grid; grid-template-columns: minmax(248px, 320px) 1fr; height: calc(100vh - var(--filter-bar-h)); }
 .session-list { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 50%, var(--bg)); }
 .session-list-head { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
@@ -352,5 +359,6 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
   .rail-brand, .rail-link { justify-content: center; padding-left: 0; padding-right: 0; }
   .rail-footer { flex-direction: column-reverse; }
   main { padding-left: 18px; padding-right: 18px; }
-  .filter-bar { padding-left: 18px; padding-right: 18px; gap: 12px; }
+  .filter-bar { margin-left: -18px; margin-right: -18px; padding-left: 18px; padding-right: 18px; gap: 12px; }
+  main:has(.sessions-split) .filter-bar { margin: 0; }
 }
