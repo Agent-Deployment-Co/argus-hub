@@ -377,6 +377,7 @@ const CREATE_HUB_SCHEMA_SQL = `
   CREATE INDEX resolved_usage_date_model ON resolved_usage(org_id, date, model);
   CREATE INDEX resolved_usage_source     ON resolved_usage(org_id, source);
   CREATE INDEX resolved_usage_ts         ON resolved_usage(org_id, ts);
+  CREATE INDEX resolved_usage_client_session_date ON resolved_usage(org_id, client_id, session_id, date);
 
   CREATE TABLE resolved_tasks (
     org_id     TEXT NOT NULL,
@@ -528,6 +529,17 @@ async function initHubDatabase(db: Database, path: string): Promise<void> {
   await exec(db, "PRAGMA journal_mode = WAL");
   await exec(db, "PRAGMA synchronous = NORMAL");
   await exec(db, "PRAGMA trusted_schema = OFF");
+
+  // Self-healing index for pre-existing databases created before this index was added to
+  // CREATE_HUB_SCHEMA_SQL. Without it, readTaskFacts' per-row EXISTS(...) subquery against
+  // resolved_usage falls back to scanning the whole date range instead of seeking straight to
+  // the (client_id, session_id) pair, which made GET /api/activity take 10+ seconds on modest
+  // data volumes.
+  await exec(
+    db,
+    "CREATE INDEX IF NOT EXISTS resolved_usage_client_session_date " +
+      "ON resolved_usage(org_id, client_id, session_id, date)",
+  );
 
   // Secure WAL files too.
   if (process.platform !== "win32") {
