@@ -1635,8 +1635,16 @@ export class HubStore {
          JOIN resolved_sessions s ON s.org_id = t.org_id AND s.client_id = t.client_id AND s.session_id = t.session_id
          LEFT JOIN clients c ON c.client_id = t.client_id
          LEFT JOIN users u ON u.user_id = c.user_id
-         LEFT JOIN resolved_interactions i
-           ON i.org_id = t.org_id AND i.client_id = t.client_id AND i.session_id = t.session_id AND i.task_seq = t.seq
+         LEFT JOIN (
+           SELECT org_id, client_id, session_id, task_seq, disposition,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY org_id, client_id, session_id, task_seq ORDER BY seq DESC
+                  ) AS rn
+           FROM resolved_interactions
+           WHERE task_seq IS NOT NULL
+         ) i
+           ON i.org_id = t.org_id AND i.client_id = t.client_id AND i.session_id = t.session_id
+              AND i.task_seq = t.seq AND i.rn = 1
          WHERE ${conds.join(" AND ")}
          ORDER BY t.ts IS NULL, t.ts DESC, t.seq DESC`,
         params,
