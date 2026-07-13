@@ -600,6 +600,10 @@ export interface HubTaskRow {
   project: string;
   sessionId: string;
   userId: string | null;
+  displayName: string | null;
+  /** The disposition of the interaction this task opened ("completed" | "interrupted" |
+   *  "incomplete" | "error"), or null when no matching interaction was found. */
+  disposition: string | null;
 }
 
 export class HubStore {
@@ -1608,12 +1612,19 @@ export class HubStore {
         params.push(...dateParams);
       }
 
-      const rows = await all<{ task_json: string; project: string; session_id: string; user_id: string | null }>(
+      const rows = await all<{
+        task_json: string; project: string; session_id: string; user_id: string | null;
+        display_name: string | null; disposition: string | null;
+      }>(
         this.db,
-        `SELECT t.task_json AS task_json, s.project AS project, t.session_id AS session_id, c.user_id AS user_id
+        `SELECT t.task_json AS task_json, s.project AS project, t.session_id AS session_id,
+                c.user_id AS user_id, u.display_name AS display_name, i.disposition AS disposition
          FROM resolved_tasks t
          JOIN resolved_sessions s ON s.org_id = t.org_id AND s.client_id = t.client_id AND s.session_id = t.session_id
          LEFT JOIN clients c ON c.client_id = t.client_id
+         LEFT JOIN users u ON u.user_id = c.user_id
+         LEFT JOIN resolved_interactions i
+           ON i.org_id = t.org_id AND i.client_id = t.client_id AND i.session_id = t.session_id AND i.task_seq = t.seq
          WHERE ${conds.join(" AND ")}
          ORDER BY t.ts IS NULL, t.ts DESC, t.seq DESC`,
         params,
@@ -1623,6 +1634,8 @@ export class HubStore {
         project: r.project,
         sessionId: r.session_id,
         userId: r.user_id,
+        displayName: r.display_name,
+        disposition: r.disposition,
       }));
     });
   }
@@ -1834,6 +1847,42 @@ export class HubStore {
         distinctUsers: r.distinct_users,
         byModel: byModelBySource.get(r.source) ?? [],
       }));
+    });
+  }
+
+  // ---- Task report friction rollup (GET /api/tasks/report) ------------------------------
+  //
+  // Session-level interruptions/rejections/compactions, summed over sessions active in the
+  // window. Mirrors the friction half of readHealthRollups but public and without the
+  // per-project breakdown / token-growth pass that dashboard reporting also needs.
+
+  async readWindowFrictionRollup(scope: HubScope, query: ResolvedQuery): Promise<FrictionTotals> {
+    const expanded = await this.expandScope(scope);
+    if (expanded.empty) return emptyFrictionTotals();
+    return this.schedule(async () => {
+      const filters = buildHubFilters(expanded, query, {
+        sourceColumn: "m.source", dateColumn: "m.date", cwdColumn: "m.cwd", tableAlias: "m",
+      }, { excludeArchived: true });
+      const sessions = await all<{
+        session_id: string;
+        fi: number | null; fr: number | null; fc: number | null; ft: number | null;
+      }>(
+        this.db,
+        `SELECT m.session_id AS session_id,
+                s.friction_interruptions AS fi, s.friction_rejections AS fr,
+                s.friction_compactions AS fc, s.friction_turns AS ft
+         FROM resolved_usage m JOIN resolved_sessions s
+           ON s.org_id = m.org_id AND s.client_id = m.client_id AND s.session_id = m.session_id
+         ${filters.messageWhere}
+         GROUP BY m.session_id`,
+        filters.messageParams,
+      );
+      const totals = emptyFrictionTotals();
+      for (const row of sessions) {
+        if (row.fi == null) continue;
+        foldFriction(totals, { interruptions: row.fi, rejections: row.fr ?? 0, compactions: row.fc ?? 0, turns: row.ft ?? 0 });
+      }
+      return totals;
     });
   }
 

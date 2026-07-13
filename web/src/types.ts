@@ -196,6 +196,67 @@ export interface Snapshot {
   generatedAtMs: number;
 }
 
+// ---- Task report (GET /api/tasks/report) ------------------------------------------------
+
+export interface TaskOutcomeCounts {
+  total: number;
+  success: number;
+  failure: number;
+  unknown: number;
+}
+
+export interface FrustrationCounts {
+  none: number;
+  moderate: number;
+  high: number;
+  unknown: number;
+}
+
+export interface TaskTotals {
+  total: number;
+  successRate: number | null;
+  frustrationRate: number | null;
+  interruptedRate: number | null;
+}
+
+export interface TaskDayPoint {
+  date: string;
+  total: number;
+  success: number;
+  failure: number;
+  successRate: number | null;
+}
+
+export interface TaskQualityRow {
+  key: string;
+  label: string;
+  total: number;
+  success: number;
+  failure: number;
+  successRate: number | null;
+  frustrationRate: number | null;
+}
+
+export interface TaskSignalRow {
+  signal: string;
+  count: number;
+}
+
+export interface TaskReport {
+  generatedAtMs: number;
+  range: { since: string; until: string };
+  totals: TaskTotals;
+  outcomes: TaskOutcomeCounts;
+  frustration: FrustrationCounts;
+  daily: TaskDayPoint[];
+  byUser: TaskQualityRow[];
+  bySource: TaskQualityRow[];
+  byProject: TaskQualityRow[];
+  topSignals: TaskSignalRow[];
+  friction: FrictionTotals;
+  minCohortGuard: boolean;
+}
+
 /** Mirrors hub/src/api/task-list.ts's TaskListItem, served at GET /api/tasks. */
 export interface TaskListItem {
   id: string;

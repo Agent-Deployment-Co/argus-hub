@@ -448,7 +448,7 @@ async function syncWithTask(
   env: TestEnv,
   email: string,
   sessionId: string,
-  task: { outcome?: string; frustration?: string; description?: string },
+  task: { outcome?: string; frustration?: string; description?: string; signals?: string[]; disposition?: string },
 ): Promise<string> {
   const app = createHubApp(env.store);
   const clientId = env.clientFor(email);
@@ -468,9 +468,23 @@ async function syncWithTask(
       evidenceKind: "user_message",
       outcome: task.outcome,
       frustration: task.frustration,
+      signals: task.signals,
       position: { originKey: sessionId, recordIndex: 0, itemIndex: 0 },
     }),
   });
+  if (task.disposition) {
+    payload.rows.interactions.push({
+      session_id: sessionId,
+      seq: 0,
+      source: "claude",
+      ts: 1_000_000,
+      initiator: "human",
+      disposition: task.disposition,
+      compaction_count: 0,
+      task_seq: 0,
+      interaction_json: JSON.stringify({}),
+    });
+  }
   const res = await app.request("/api/sync", {
     method: "POST",
     headers: {
@@ -643,6 +657,108 @@ describe("GET /api/activity", () => {
       expect(body.bySource).toHaveLength(1);
       expect(body.bySource[0]!.taskSuccessRate).toBe(0.5);
       expect(body.bySource[0]!.sessions).toBe(3);
+    } finally {
+      await env.store.close();
+    }
+  });
+});
+
+// ---- GET /api/tasks/report --------------------------------------------------------------
+
+describe("GET /api/tasks/report", () => {
+  test("returns 503 when no data exists yet", async () => {
+    const { store } = await openTestEnv();
+    const app = createHubApp(store);
+    try {
+      const res = await app.request("/api/tasks/report");
+      expect(res.status).toBe(503);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("returns 400 for an unknown source", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncAs(env, "alice@example.com", [{ id: "s" }]);
+      const res = await app.request(`/api/tasks/report?${WIDE_RANGE}&source=unknown`);
+      expect(res.status).toBe(400);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("rolls up outcome/frustration totals and withholds byUser below the privacy floor", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncWithTask(env, "alice@example.com", "s1", { outcome: "success", frustration: "none" });
+      await syncWithTask(env, "alice@example.com", "s2", {
+        outcome: "failure",
+        frustration: "high",
+        signals: ["no access"],
+      });
+
+      const res = await app.request(`/api/tasks/report?${WIDE_RANGE}`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as {
+        totals: { total: number; successRate: number | null; frustrationRate: number | null };
+        outcomes: { total: number; success: number; failure: number; unknown: number };
+        frustration: { none: number; high: number };
+        minCohortGuard: boolean;
+        byUser: unknown[];
+        bySource: Array<{ key: string; label: string; total: number; success: number; failure: number; successRate: number | null; frustrationRate: number | null }>;
+        topSignals: Array<{ signal: string; count: number }>;
+      };
+      expect(body.totals.total).toBe(2);
+      expect(body.totals.successRate).toBe(0.5);
+      expect(body.totals.frustrationRate).toBe(0.5);
+      expect(body.outcomes).toEqual({ total: 2, success: 1, failure: 1, unknown: 0 });
+      expect(body.minCohortGuard).toBe(true);
+      expect(body.byUser).toEqual([]);
+      expect(body.bySource).toEqual([{ key: "claude", label: "claude", total: 2, success: 1, failure: 1, successRate: 0.5, frustrationRate: 0.5 }]);
+      expect(body.topSignals).toEqual([{ signal: "no access", count: 1 }]);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("computes interruptedRate from interaction disposition, ignoring unknown dispositions", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncWithTask(env, "alice@example.com", "s1", { outcome: "success", disposition: "completed" });
+      await syncWithTask(env, "alice@example.com", "s2", { outcome: "success", disposition: "interrupted" });
+      await syncWithTask(env, "alice@example.com", "s3", { outcome: "success" }); // no interaction -> unknown disposition
+
+      const res = await app.request(`/api/tasks/report?${WIDE_RANGE}`);
+      const body = await res.json() as { totals: { interruptedRate: number | null; total: number } };
+      expect(body.totals.total).toBe(3);
+      expect(body.totals.interruptedRate).toBe(0.5);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("shows byUser/byProject once the org clears the cohort floor", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncWithTask(env, "alice@example.com", "alice-sess", { outcome: "success" });
+      await syncWithTask(env, "bob@example.com", "bob-sess", { outcome: "failure" });
+      await syncAs(env, "carol@example.com", [{ id: "carol-sess" }]);
+
+      const res = await app.request(`/api/tasks/report?${WIDE_RANGE}`);
+      const body = await res.json() as {
+        minCohortGuard: boolean;
+        byUser: Array<{ label: string; total: number }>;
+        byProject: Array<{ label: string; total: number }>;
+      };
+      expect(body.minCohortGuard).toBe(false);
+      expect(body.byUser).toHaveLength(2);
+      expect(body.byProject).toHaveLength(1);
+      expect(body.byProject[0]!.total).toBe(2);
     } finally {
       await env.store.close();
     }

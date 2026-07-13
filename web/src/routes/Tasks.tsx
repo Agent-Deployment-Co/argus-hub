@@ -1,9 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { compactProject, dayStamp } from "../lib/format";
-import { StatCards, type Stat } from "../components/StatCards";
 import { FilterBar } from "../components/FilterBar";
+import { TaskTiles } from "../components/TaskTiles";
+import { TaskDistributions } from "../components/TaskDistributions";
+import { TaskSuccessTrend } from "../components/TaskSuccessTrend";
+import { TaskQualityByUser, TaskQualityBySource, TaskQualityByProject } from "../components/TaskQuality";
+import { TaskSignalsAndFriction } from "../components/TaskSignalsAndFriction";
+import { useTaskReportQuery } from "../lib/tasks-report";
 import { DEFAULT_SINCE, DEFAULT_UNTIL, isFilterActive, sanitizedSource } from "../lib/filters";
 import type { TaskListResponse } from "../types";
 
@@ -54,8 +59,19 @@ function frustPill(frustration?: string): { label: string; cls: string } | null 
   return { label: frustration, cls: "frust-low" };
 }
 
-/** Flat, cross-session feed of extracted tasks — what the team has been asking their agents
- *  to do, with outcome + frustration signals surfaced for quick scanning. */
+function reportErrorMessage(err: Error): ReactNode {
+  if (err.message === "No data yet.") {
+    return (
+      <>
+        No data yet. Run <code>argus sync</code> from a client to ingest data.
+      </>
+    );
+  }
+  return `Couldn't load data: ${err.message}`;
+}
+
+/** How *well* the org's agent work is going — outcomes, friction, and where quality is
+ *  slipping (SPEC.md 5) — plus the flat, filterable feed of extracted tasks underneath. */
 const routeApi = getRouteApi("/tasks");
 
 export function Tasks() {
@@ -74,6 +90,8 @@ export function Tasks() {
     queryFn: () => fetchTasks({ q, outcome, user, since, until, source }),
     staleTime: 30_000,
   });
+  const reportQuery = useTaskReportQuery({ since, until, source, userId: user });
+  const report = reportQuery.data;
 
   const toggleOutcome = (key: string) => {
     const next = outcome.includes(key) ? outcome.filter((o: string) => o !== key) : [...outcome, key];
@@ -121,6 +139,30 @@ export function Tasks() {
       <div className="page-head">
         <h1>Tasks</h1>
       </div>
+      {reportQuery.isPending ? (
+        <div className="center-state">Loading…</div>
+      ) : reportQuery.isError ? (
+        <div className="center-state">{reportErrorMessage(reportQuery.error as Error)}</div>
+      ) : (
+        <>
+          <section>
+            <TaskTiles totals={report!.totals} />
+          </section>
+          <section>
+            <TaskDistributions outcomes={report!.outcomes} frustration={report!.frustration} />
+          </section>
+          <section>
+            <TaskSuccessTrend daily={report!.daily} />
+          </section>
+          <TaskQualityByUser rows={report!.byUser} minCohortGuard={report!.minCohortGuard} />
+          <TaskQualityBySource rows={report!.bySource} />
+          <TaskQualityByProject rows={report!.byProject} />
+          <TaskSignalsAndFriction signals={report!.topSignals} friction={report!.friction} />
+        </>
+      )}
+      <div className="page-head">
+        <h2>Task list</h2>
+      </div>
       <div className="task-filters">
         <div className="task-filters-outcomes" role="group" aria-label="Filter by outcome">
           {OUTCOME_OPTIONS.map((opt) => (
@@ -160,19 +202,6 @@ export function Tasks() {
           </div>
         </div>
       </div>
-      {query.data && (
-        <section>
-          <StatCards
-            stats={
-              [
-                { label: "Success", value: query.data.counts.success },
-                { label: "Failure", value: query.data.counts.failure },
-                { label: "Unknown", value: query.data.counts.unknown },
-              ] satisfies Stat[]
-            }
-          />
-        </section>
-      )}
       {query.isPending ? (
         <div className="center-state">Loading…</div>
       ) : query.isError ? (

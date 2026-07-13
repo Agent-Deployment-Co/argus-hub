@@ -19,8 +19,9 @@ import { totalTokens } from "../types.ts";
 const SILENT_THRESHOLD_MS = 3 * 24 * 60 * 60 * 1000;
 
 /** Below the org-wide user-count privacy floor, per-user rankings are withheld rather than
- *  singling out one person in a tiny org (SPEC.md 6, "Privacy floor"). */
-const MIN_COHORT_FOR_RANKINGS = 3;
+ *  singling out one person in a tiny org (SPEC.md 6, "Privacy floor"). Shared with the Tasks
+ *  report (reporting/tasks.ts) so both pages apply the same policy. */
+export const MIN_COHORT_FOR_RANKINGS = 3;
 
 function usageTotals(byModel: Array<{ model: string; usage: Usage }>): { tokens: number; cost: number } {
   let tokens = 0;
@@ -69,7 +70,10 @@ export function previousWindow(since: string, until: string): { since: string; u
   return { since: addDaysIso(since, -span), until: addDaysIso(since, -1) };
 }
 
-function everyDateInclusive(since: string, until: string): string[] {
+/** Every ISO date in [since, until], inclusive — used to fill idle-day gaps in daily series so
+ *  the x-axis always spans the full window (client's readActiveDates pattern). Exported for
+ *  reuse by reporting/tasks.ts. */
+export function everyDateInclusive(since: string, until: string): string[] {
   const out: string[] = [];
   let cur = since;
   while (cur <= until) {

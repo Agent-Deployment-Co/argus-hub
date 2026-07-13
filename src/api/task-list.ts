@@ -67,6 +67,16 @@ export function classifyOutcome(outcome?: string): "success" | "failure" | "unkn
   return "unknown";
 }
 
+/** Classifies a task's free-text `frustration` into the three-tier SPEC.md 5.2 bucket, so the
+ *  Tasks report and any per-row pill always agree on what counts as moderate/high. */
+export function classifyFrustration(frustration?: string): "none" | "moderate" | "high" | "unknown" {
+  const v = (frustration ?? "").toLowerCase().trim();
+  if (!v) return "unknown";
+  if (v.includes("high") || v.includes("severe")) return "high";
+  if (v.includes("none") || v === "0") return "none";
+  return "moderate";
+}
+
 export function buildTaskList(rows: HubTaskRow[], params: TaskListParams): TaskListResponse {
   const term = params.q?.trim().toLowerCase();
   const allowed = params.outcomes?.length ? new Set(params.outcomes) : null;
