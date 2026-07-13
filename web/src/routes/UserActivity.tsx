@@ -1,32 +1,52 @@
-import { Link, useParams } from "@tanstack/react-router";
-import { useState } from "react";
+import { getRouteApi, Link, useParams } from "@tanstack/react-router";
 import { Dashboard } from "../components/Dashboard";
+import { FilterBar } from "../components/FilterBar";
+import { DEFAULT_SINCE, DEFAULT_UNTIL, isFilterActive } from "../lib/filters";
 import { SnapshotProvider, useSnapshotQuery } from "../lib/snapshot";
 import { useUserInfo } from "../lib/users";
 
-function daysAgo(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+const routeApi = getRouteApi("/users/$userId");
 
 export function UserActivity() {
   const { userId } = useParams({ from: "/users/$userId" });
+  const search = routeApi.useSearch();
+  const navigate = routeApi.useNavigate();
   const userInfo = useUserInfo(userId);
-  const [range] = useState(() => ({ since: daysAgo(30), until: daysAgo(0) }));
-  const filters = { ...range, userId };
+  const since = search.since ?? DEFAULT_SINCE();
+  const until = search.until ?? DEFAULT_UNTIL();
+  const source = search.source ?? "";
+  const filters = { since, until, source, userId };
   const query = useSnapshotQuery(filters);
   const snap = query.data;
   const displayName = userInfo.data?.displayName ?? userId;
 
+  const patchFilters = (patch: Partial<{ since: string; until: string; source: string }>) =>
+    navigate({
+      to: ".",
+      search: (prev: { since?: string; until?: string; source?: string }) => ({
+        since: patch.since !== undefined ? patch.since || undefined : prev.since,
+        until: patch.until !== undefined ? patch.until || undefined : prev.until,
+        source: "source" in patch ? patch.source || undefined : prev.source,
+      }),
+      replace: true,
+    });
+
   return (
     <>
+      <FilterBar
+        since={since}
+        until={until}
+        source={source}
+        loading={query.isFetching}
+        onChange={patchFilters}
+        onReset={() => navigate({ to: ".", search: {}, replace: true })}
+        resettable={isFilterActive(search, { since: DEFAULT_SINCE(), until: DEFAULT_UNTIL() })}
+      />
       <div className="page-head">
         <div>
           <Link to="/users" className="hub-org-link">← Team</Link>
           <h1>{displayName}</h1>
         </div>
-        <span className="page-range">{filters.since} → {filters.until}</span>
       </div>
       {query.isPending ? (
         <div className="center-state">Loading…</div>
