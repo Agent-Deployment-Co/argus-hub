@@ -116,6 +116,70 @@ export interface Dashboard {
   highTokenGrowthSessions: number;
 }
 
+// ---- Activity report (GET /api/activity) ----------------------------------------------
+
+export interface ActivityTaskCounts {
+  total: number;
+  success: number;
+  failure: number;
+  unknown: number;
+}
+
+export interface ActivityTotals {
+  sessions: number;
+  activeUsers: number;
+  tasks: ActivityTaskCounts;
+  tokens: number;
+  cost: number;
+}
+
+export interface ActivityDayPoint {
+  date: string;
+  sessions: number;
+  tasks: number;
+  tokens: number;
+  activeUsers: number;
+}
+
+export type ActivityFreshness = "active" | "idle" | "silent";
+
+export interface UserActivityRow {
+  userId: string;
+  displayName: string;
+  sessions: number;
+  tasks: number;
+  taskSuccessRate: number | null;
+  tokens: number;
+  cost: number;
+  activeDays: number;
+  lastActiveMs: number | null;
+  lastSyncMs: number;
+  freshness: ActivityFreshness;
+  score: number;
+}
+
+export interface SourceActivityRow {
+  source: AgentSource;
+  sessions: number;
+  distinctUsers: number;
+  tokens: number;
+  cost: number;
+  taskSuccessRate: number | null;
+}
+
+export interface ActivityReport {
+  generatedAtMs: number;
+  range: { since: string; until: string };
+  previousRange: { since: string; until: string };
+  totals: ActivityTotals;
+  previousTotals: ActivityTotals;
+  daily: ActivityDayPoint[];
+  byUser: UserActivityRow[];
+  bySource: SourceActivityRow[];
+  unpriced: string[];
+  minCohortGuard: boolean;
+}
+
 export type RecommendationSeverity = "tip" | "warning";
 
 export interface Recommendation {

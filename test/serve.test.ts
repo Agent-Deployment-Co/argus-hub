@@ -563,3 +563,88 @@ describe("GET /api/tasks", () => {
     }
   });
 });
+
+// ---- GET /api/activity ------------------------------------------------------------------
+
+const WIDE_RANGE = "since=2020-01-01&until=2030-01-01";
+
+describe("GET /api/activity", () => {
+  test("returns 503 when no data exists yet", async () => {
+    const { store } = await openTestEnv();
+    const app = createHubApp(store);
+    try {
+      const res = await app.request("/api/activity");
+      expect(res.status).toBe(503);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("returns 400 for an unknown source", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncAs(env, "alice@example.com", [{ id: "s" }]);
+      const res = await app.request(`/api/activity?${WIDE_RANGE}&source=unknown`);
+      expect(res.status).toBe(400);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("rolls up totals + daily series and withholds byUser below the privacy floor", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncAs(env, "alice@example.com", [{ id: "sa1" }, { id: "sa2" }]);
+      await syncAs(env, "bob@example.com", [{ id: "sb1" }]);
+
+      const res = await app.request(`/api/activity?${WIDE_RANGE}`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as {
+        totals: { sessions: number; activeUsers: number; tokens: number };
+        daily: Array<{ date: string; sessions: number; tokens: number }>;
+        byUser: unknown[];
+        minCohortGuard: boolean;
+      };
+      expect(body.totals.sessions).toBe(3);
+      expect(body.totals.activeUsers).toBe(2);
+      expect(body.totals.tokens).toBeGreaterThan(0);
+      // Every day in the window is present, including idle ones either side of the fixture date.
+      expect(body.daily.length).toBeGreaterThan(365);
+      const activeDay = body.daily.find((d) => d.date === "2026-01-01");
+      expect(activeDay?.sessions).toBe(3);
+      expect(body.minCohortGuard).toBe(true);
+      expect(body.byUser).toEqual([]);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("shows byUser rankings with scores and taskSuccessRate once the org clears the cohort floor", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncWithTask(env, "alice@example.com", "alice-sess", { outcome: "success" });
+      await syncWithTask(env, "bob@example.com", "bob-sess", { outcome: "failure" });
+      await syncAs(env, "carol@example.com", [{ id: "carol-sess" }]);
+
+      const res = await app.request(`/api/activity?${WIDE_RANGE}`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as {
+        minCohortGuard: boolean;
+        byUser: Array<{ displayName: string; tasks: number; taskSuccessRate: number | null; score: number }>;
+        bySource: Array<{ source: string; taskSuccessRate: number | null; sessions: number }>;
+      };
+      expect(body.minCohortGuard).toBe(false);
+      expect(body.byUser).toHaveLength(3);
+      const alice = body.byUser.find((u) => u.displayName === "alice@example.com");
+      expect(alice?.taskSuccessRate).toBe(1);
+      expect(body.bySource).toHaveLength(1);
+      expect(body.bySource[0]!.taskSuccessRate).toBe(0.5);
+      expect(body.bySource[0]!.sessions).toBe(3);
+    } finally {
+      await env.store.close();
+    }
+  });
+});

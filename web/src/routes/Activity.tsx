@@ -1,9 +1,12 @@
 import { getRouteApi } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { Dashboard } from "../components/Dashboard";
+import { ActivitySourceRankings } from "../components/ActivitySourceRankings";
+import { ActivityTiles } from "../components/ActivityTiles";
+import { ActivityTimeSeries } from "../components/ActivityTimeSeries";
+import { ActivityUserRankings } from "../components/ActivityUserRankings";
 import { FilterBar } from "../components/FilterBar";
+import { useActivityQuery } from "../lib/activity";
 import { DEFAULT_SINCE, DEFAULT_UNTIL, isFilterActive } from "../lib/filters";
-import { SnapshotProvider, useSnapshotQuery } from "../lib/snapshot";
 
 function errorMessage(err: Error): ReactNode {
   if (err.message === "No data yet.") {
@@ -18,8 +21,8 @@ function errorMessage(err: Error): ReactNode {
 
 const routeApi = getRouteApi("/");
 
-/** The Hub's home page: a roll-up of every user's activity across the whole team (no ?user=
- *  scope, so /api/snapshot aggregates every synced client in the org). */
+/** The Hub's home page: at a glance, how much agent work the org did in the window, and how
+ *  it's distributed across people and tools (SPEC.md 4). Org-wide only — no ?user= scope. */
 export function Activity() {
   const search = routeApi.useSearch();
   const navigate = routeApi.useNavigate();
@@ -27,8 +30,8 @@ export function Activity() {
   const until = search.until ?? DEFAULT_UNTIL();
   const source = search.source ?? "";
   const filters = { since, until, source };
-  const query = useSnapshotQuery(filters);
-  const snap = query.data;
+  const query = useActivityQuery(filters);
+  const report = query.data;
 
   const patchFilters = (patch: Partial<{ since: string; until: string; source: string }>) =>
     navigate({
@@ -53,16 +56,28 @@ export function Activity() {
         resettable={isFilterActive(search, { since: DEFAULT_SINCE(), until: DEFAULT_UNTIL() })}
       />
       <div className="page-head">
-        <h1>Team Activity</h1>
+        <h1>Activity</h1>
       </div>
       {query.isPending ? (
         <div className="center-state">Loading…</div>
       ) : query.isError ? (
         <div className="center-state">{errorMessage(query.error as Error)}</div>
       ) : (
-        <SnapshotProvider value={snap!}>
-          <Dashboard />
-        </SnapshotProvider>
+        <>
+          <section>
+            <ActivityTiles totals={report!.totals} previousTotals={report!.previousTotals} />
+            {report!.unpriced.length > 0 && (
+              <p className="note">Unpriced models (cost excluded): {report!.unpriced.join(", ")}.</p>
+            )}
+          </section>
+
+          <section>
+            <ActivityTimeSeries daily={report!.daily} />
+          </section>
+
+          <ActivityUserRankings byUser={report!.byUser} minCohortGuard={report!.minCohortGuard} />
+          <ActivitySourceRankings bySource={report!.bySource} />
+        </>
       )}
     </>
   );

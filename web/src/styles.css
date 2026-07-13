@@ -310,6 +310,22 @@ section h2 { font-family: "Poppins", "Avenir Next", Arial, sans-serif; font-size
 .card .label { color: var(--muted); font-family: "Poppins", "Avenir Next", Arial, sans-serif; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; }
 .card .value { color: var(--heading); font-size: 25px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .card .value small { font-size: 13px; color: var(--muted); font-weight: 400; }
+.stat-delta { display: flex; align-items: center; gap: 3px; margin-top: 4px; font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat-delta.up { color: var(--sky-surge); }
+.stat-delta.down { color: var(--racing-red); }
+.stat-delta.flat { color: var(--muted); }
+
+.pill.freshness-active { color: var(--sky-surge); border-color: var(--cornflower-ocean); }
+.pill.freshness-idle { color: var(--tiger-orange); border-color: var(--tiger-orange); }
+.pill.freshness-silent { color: var(--racing-red); border-color: var(--racing-red); }
+
+.filter-toggle.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--heading); }
+
+.rank-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.rank-row { display: flex; align-items: center; gap: 10px; }
+.rank-num { flex: 0 0 auto; width: 18px; color: var(--muted); font-size: 12px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.rank-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-score { flex: 0 0 auto; color: var(--heading); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .usersel { color: var(--muted); font-family: "Poppins", "Avenir Next", Arial, sans-serif; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
 .usersel select { background: var(--surface); color: var(--text); border: 1px solid var(--cornflower-ocean); border-radius: 7px; padding: 5px 9px; font: 13px "Aleo", Georgia, serif; text-transform: none; letter-spacing: normal; }
 .usersel select:focus-visible { outline: 2px solid var(--tiger-orange); outline-offset: 2px; }
