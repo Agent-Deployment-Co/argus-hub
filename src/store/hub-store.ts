@@ -17,7 +17,7 @@ import type {
 } from "../types.ts";
 import { emptyFrictionTotals, foldFriction, HIGH_TOKEN_GROWTH_RATIO } from "../health.ts";
 
-export const HUB_SCHEMA_VERSION = 1;
+export const HUB_SCHEMA_VERSION = 2;
 export const HUB_APPLICATION_ID = 0x48554200; // "HUB\0"
 
 // ---- Raw row types (mirrors client argus.db resolved_* column shapes) -------------------
@@ -37,6 +37,8 @@ export interface UploadedSession {
   friction_compactions: number | null;
   friction_turns: number | null;
   last_interruption_ms: number | null;
+  title: string | null;
+  summary: string | null;
   meta_json: string;
 }
 
@@ -97,12 +99,27 @@ export interface UploadedInvocation {
   approx_result_tokens: number;
 }
 
+/** One label applied to a session or one of its tasks, denormalized (name/origin inline). The
+ *  client sends applied labels only — there is no separate label-definition sync. Optional on the
+ *  wire: older clients omit it. */
+export interface UploadedLabel {
+  session_id: string;
+  source: string;
+  name: string;
+  origin: string;
+  applied_by: string;
+  target_kind: string;
+  task_seq: number | null;
+  applied_at_ms: number;
+}
+
 export interface HubUploadRows {
   sessions: UploadedSession[];
   usage: UploadedUsage[];
   tasks: UploadedTask[];
   interactions: UploadedInteraction[];
   invocations: UploadedInvocation[];
+  labels: UploadedLabel[];
 }
 
 /** One fingerprint observation as it arrives from the client. The client de-dupes repeats
@@ -229,6 +246,25 @@ async function insertRows(
 // the auto-mapper at ingest time (unless user_pinned = 1, in which case the operator's
 // mapping wins). All resolved_* rows are scoped by client_id; user-scoped reads JOIN clients.
 
+// The applied-labels table (added in schema v2). Kept as its own constant so the fresh-install
+// schema and the v1→v2 in-place migration create it from a single source of truth.
+const RESOLVED_SESSION_LABELS_DDL = `
+  CREATE TABLE resolved_session_labels (
+    org_id        TEXT NOT NULL,
+    client_id     TEXT NOT NULL,
+    session_id    TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    origin        TEXT NOT NULL,
+    applied_by    TEXT NOT NULL,
+    target_kind   TEXT NOT NULL,
+    task_seq      INTEGER,
+    applied_at_ms INTEGER NOT NULL,
+    FOREIGN KEY (org_id, client_id, session_id) REFERENCES resolved_sessions(org_id, client_id, session_id) ON DELETE CASCADE
+  );
+  CREATE INDEX resolved_session_labels_scope ON resolved_session_labels(org_id, session_id);
+  CREATE INDEX resolved_session_labels_name  ON resolved_session_labels(org_id, name);
+`;
+
 const CREATE_HUB_SCHEMA_SQL = `
   CREATE TABLE organizations (
     org_id     TEXT PRIMARY KEY,
@@ -302,6 +338,8 @@ const CREATE_HUB_SCHEMA_SQL = `
     friction_compactions   INTEGER,
     friction_turns         INTEGER,
     last_interruption_ms   INTEGER,
+    title                  TEXT,
+    summary                TEXT,
     meta_json              TEXT NOT NULL,
     PRIMARY KEY (org_id, client_id, session_id)
   );
@@ -393,7 +431,20 @@ const CREATE_HUB_SCHEMA_SQL = `
   CREATE INDEX resolved_invocations_date ON resolved_invocations(org_id, date);
   CREATE INDEX resolved_invocations_mcp_server ON resolved_invocations(mcp_server) WHERE mcp_server IS NOT NULL;
   CREATE INDEX resolved_invocations_skill      ON resolved_invocations(skill) WHERE skill IS NOT NULL;
+  ${RESOLVED_SESSION_LABELS_DDL}
 `;
+
+// Forward-only, in-place migrations keyed by the version they upgrade FROM. Each step is purely
+// additive (ADD COLUMN / CREATE TABLE), so existing rows are preserved and clients need not
+// re-sync. A version with no entry here can't be upgraded in place (fatal — delete hub.db).
+const HUB_MIGRATIONS: Record<number, string> = {
+  // v1 → v2: session title/summary (#234) + applied labels.
+  1: `
+    ALTER TABLE resolved_sessions ADD COLUMN title TEXT;
+    ALTER TABLE resolved_sessions ADD COLUMN summary TEXT;
+    ${RESOLVED_SESSION_LABELS_DDL}
+  `,
+};
 
 // ---- DB open / init ---------------------------------------------------------------------
 
@@ -448,13 +499,28 @@ async function initHubDatabase(db: Database, path: string): Promise<void> {
     });
   } else if (appId !== HUB_APPLICATION_ID) {
     throw new Error(`${path} is not an Argus Hub store.`);
-  } else if (userVersion !== HUB_SCHEMA_VERSION) {
-    // No migrations: a version mismatch (newer OR older) is a fatal error. The operator must
-    // delete hub.db (+ -wal/-shm) and let the hub recreate the schema.
+  } else if (userVersion > HUB_SCHEMA_VERSION) {
+    // The store was written by a newer Hub build than this one — we can't safely downgrade.
     throw new Error(
-      `Hub store at ${path} is version ${userVersion}; this build expects v${HUB_SCHEMA_VERSION}. ` +
-        `Delete hub.db (and hub.db-wal / hub.db-shm) to start fresh — clients will then re-sync.`,
+      `Hub store at ${path} is version ${userVersion}, newer than this build (v${HUB_SCHEMA_VERSION}). ` +
+        `Update Argus Hub, or delete hub.db (and hub.db-wal / hub.db-shm) to start fresh.`,
     );
+  } else if (userVersion < HUB_SCHEMA_VERSION) {
+    // Upgrade in place by applying additive migrations sequentially. Existing rows are preserved,
+    // so clients keep their sync cursors and don't need to re-upload everything.
+    await transaction(db, async () => {
+      for (let v = userVersion; v < HUB_SCHEMA_VERSION; v++) {
+        const sql = HUB_MIGRATIONS[v];
+        if (!sql) {
+          throw new Error(
+            `No in-place migration from Hub store v${v} to v${v + 1} at ${path}. ` +
+              `Delete hub.db (and hub.db-wal / hub.db-shm) to start fresh — clients will then re-sync.`,
+          );
+        }
+        await exec(db, sql);
+        await exec(db, `PRAGMA user_version = ${v + 1}`);
+      }
+    });
   }
 
   await exec(db, "PRAGMA journal_mode = WAL");
@@ -767,8 +833,8 @@ export class HubStore {
                org_id, client_id, session_id,
                source, project, cwd, first_ts, last_ts, message_count, first_prompt, archived,
                friction_interruptions, friction_rejections, friction_compactions,
-               friction_turns, last_interruption_ms, meta_json
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               friction_turns, last_interruption_ms, title, summary, meta_json
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               orgId, clientId, sid,
               session.source, session.project, session.cwd,
@@ -776,7 +842,8 @@ export class HubStore {
               session.first_prompt, session.archived,
               session.friction_interruptions, session.friction_rejections,
               session.friction_compactions, session.friction_turns,
-              session.last_interruption_ms, session.meta_json,
+              session.last_interruption_ms, session.title ?? null, session.summary ?? null,
+              session.meta_json,
             ],
           );
         }
@@ -832,6 +899,21 @@ export class HubStore {
             orgId, clientId, v.session_id, v.seq, v.source, v.interaction_seq,
             v.tool, v.category, v.mcp_server, v.mcp_tool, v.skill, v.file_path,
             v.date, v.cwd, v.args, v.approx_result_tokens,
+          ]),
+        );
+
+        // Applied labels (optional on the wire — older clients omit them). Session-scoped, so the
+        // delete-then-insert of the session above already cleared any prior labels via CASCADE.
+        await insertRows(
+          this.db,
+          "resolved_session_labels",
+          [
+            "org_id", "client_id", "session_id", "name", "origin",
+            "applied_by", "target_kind", "task_seq", "applied_at_ms",
+          ],
+          (rows.labels ?? []).filter((l) => sessionIds.has(l.session_id)).map((l) => [
+            orgId, clientId, l.session_id, l.name, l.origin,
+            l.applied_by, l.target_kind, l.task_seq, l.applied_at_ms,
           ]),
         );
 

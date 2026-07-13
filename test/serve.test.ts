@@ -63,6 +63,8 @@ function buildUploadPayload(sessions: Array<{ id: string; source?: string; proje
         friction_compactions: null,
         friction_turns: null,
         last_interruption_ms: null,
+        title: null,
+        summary: null,
         meta_json: JSON.stringify({ sessionId: id, source, project, cwd: project, filePath: "" }),
       })),
       usage: sessions.map(({ id, source = "claude", project = "/Users/you/proj" }) => ({
@@ -92,6 +94,7 @@ function buildUploadPayload(sessions: Array<{ id: string; source?: string; proje
       tasks: [],
       interactions: [],
       invocations: [],
+      labels: [],
     },
   };
 }
