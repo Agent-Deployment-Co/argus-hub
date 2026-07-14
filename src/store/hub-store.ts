@@ -1884,17 +1884,17 @@ export class HubStore {
         sourceColumn: "m.source", dateColumn: "m.date", cwdColumn: "m.cwd", tableAlias: "m",
       }, { excludeArchived: true });
       const sessions = await all<{
-        session_id: string;
+        org_id: string; client_id: string; session_id: string;
         fi: number | null; fr: number | null; fc: number | null; ft: number | null;
       }>(
         this.db,
-        `SELECT m.session_id AS session_id,
+        `SELECT m.org_id AS org_id, m.client_id AS client_id, m.session_id AS session_id,
                 s.friction_interruptions AS fi, s.friction_rejections AS fr,
                 s.friction_compactions AS fc, s.friction_turns AS ft
          FROM resolved_usage m JOIN resolved_sessions s
            ON s.org_id = m.org_id AND s.client_id = m.client_id AND s.session_id = m.session_id
          ${filters.messageWhere}
-         GROUP BY m.session_id`,
+         GROUP BY m.org_id, m.client_id, m.session_id`,
         filters.messageParams,
       );
       const totals = emptyFrictionTotals();
