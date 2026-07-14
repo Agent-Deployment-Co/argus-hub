@@ -1323,6 +1323,89 @@ export class HubStore {
       skill: r.skill, count: r.count, sampleArgs: sampleArgsBySkill.get(r.skill) ?? "",
     }));
 
+    // ---- §4.1 source-dimensioned aggregates (Claude vs. Codex, etc.) --------------------
+    const byToolSource = (
+      await all<{ tool: string; source: string; category: string; calls: number; sessions: number }>(
+        this.db,
+        `SELECT tool, source, MIN(category) AS category, COUNT(*) AS calls, COUNT(DISTINCT session_id) AS sessions
+         FROM resolved_invocations i ${invFilters.messageWhere} GROUP BY tool, source`,
+        invFilters.messageParams,
+      )
+    ).map((r) => ({ tool: r.tool, source: r.source, category: r.category as ToolCategory, calls: r.calls, sessions: r.sessions }));
+
+    const byToolCategorySource = (
+      await all<{ category: string; source: string; calls: number; tools: number; sessions: number }>(
+        this.db,
+        `SELECT category, source, COUNT(*) AS calls, COUNT(DISTINCT tool) AS tools, COUNT(DISTINCT session_id) AS sessions
+         FROM resolved_invocations i ${invFilters.messageWhere} GROUP BY category, source`,
+        invFilters.messageParams,
+      )
+    ).map((r) => ({ category: r.category as ToolCategory, source: r.source, calls: r.calls, tools: r.tools, sessions: r.sessions }));
+
+    const mcpServersSource = await all<{ server: string; source: string; calls: number }>(
+      this.db,
+      `SELECT mcp_server AS server, source, COUNT(*) AS calls FROM resolved_invocations i ${mcpFilter} GROUP BY mcp_server, source`,
+      invFilters.messageParams,
+    );
+
+    const skillInvocationsSource = await all<{ skill: string; source: string; count: number }>(
+      this.db,
+      `SELECT skill, source, COUNT(*) AS count FROM resolved_invocations i ${skillFilter} GROUP BY skill, source`,
+      invFilters.messageParams,
+    );
+
+    // ---- §4.2 user-dimensioned aggregates (distinct-user reach; counts only, no per-user
+    // breakout, so no privacy-floor concern — see MIN_COHORT_FOR_RANKINGS in reporting/activity.ts) --
+    const withUsers = (where: string) => (where ? `${where} AND c.user_id IS NOT NULL` : "WHERE c.user_id IS NOT NULL");
+    const toolUsers = await all<{ tool: string; users: number }>(
+      this.db,
+      `SELECT tool, COUNT(DISTINCT c.user_id) AS users
+       FROM resolved_invocations i JOIN clients c ON c.client_id = i.client_id
+       ${withUsers(invFilters.messageWhere)} GROUP BY tool`,
+      invFilters.messageParams,
+    );
+    const skillUsers = await all<{ skill: string; users: number }>(
+      this.db,
+      `SELECT skill, COUNT(DISTINCT c.user_id) AS users
+       FROM resolved_invocations i JOIN clients c ON c.client_id = i.client_id
+       ${withUsers(skillFilter)} GROUP BY skill`,
+      invFilters.messageParams,
+    );
+    const mcpServerUsers = await all<{ server: string; users: number }>(
+      this.db,
+      `SELECT mcp_server AS server, COUNT(DISTINCT c.user_id) AS users
+       FROM resolved_invocations i JOIN clients c ON c.client_id = i.client_id
+       ${withUsers(mcpFilter)} GROUP BY mcp_server`,
+      invFilters.messageParams,
+    );
+
+    // ---- §4.3 friction-on-tools: stop_reason per tool via the shared interaction_seq. Rejections
+    // have no per-invocation link in the schema (resolved_interactions.disposition never encodes
+    // "rejected" — only completed/interrupted/incomplete/error, see reporting/tasks.ts), so
+    // rejection counts stay org-level (frictionTotals.rejections) rather than per-tool.
+    const seqFilter = invFilters.messageWhere
+      ? `${invFilters.messageWhere} AND i.interaction_seq IS NOT NULL`
+      : "WHERE i.interaction_seq IS NOT NULL";
+    // Excludes 'end_turn'/'tool_use' — the two expected, non-friction stop reasons on a normal
+    // tool-calling turn. Only anomalous stops (max_tokens, stop_sequence, refusals, errors, …)
+    // are a per-tool issue signal worth surfacing.
+    const stopReasonByTool = await all<{ tool: string; stop_reason: string; count: number }>(
+      this.db,
+      `SELECT i.tool AS tool, u.stop_reason AS stop_reason, COUNT(*) AS count
+       FROM resolved_invocations i
+       JOIN resolved_usage u
+         ON u.org_id = i.org_id AND u.client_id = i.client_id AND u.session_id = i.session_id
+        AND u.interaction_seq = i.interaction_seq
+       ${seqFilter} AND u.stop_reason IS NOT NULL AND u.stop_reason NOT IN ('end_turn', 'tool_use')
+       GROUP BY i.tool, u.stop_reason`,
+      invFilters.messageParams,
+    );
+    const invocationSeqCoverage = await get<{ total: number; with_seq: number }>(
+      this.db,
+      `SELECT COUNT(*) AS total, COUNT(i.interaction_seq) AS with_seq FROM resolved_invocations i ${invFilters.messageWhere}`,
+      invFilters.messageParams,
+    );
+
     const { friction, growth } = await this.readHealthRollups(scope, filters);
 
     return {
@@ -1331,6 +1414,12 @@ export class HubStore {
       toolResultStats, byTool, byToolCategory, mcpServers, mcpServerTools,
       skillInvocations, frictionTotals: friction.totals, projectFriction: friction.byProject,
       highTokenGrowthSessions: growth,
+      byToolSource, byToolCategorySource, mcpServersSource, skillInvocationsSource,
+      toolUsers, skillUsers, mcpServerUsers,
+      stopReasonByTool: stopReasonByTool.map((r) => ({ tool: r.tool, stopReason: r.stop_reason, count: r.count })),
+      invocationSeqCoverage: invocationSeqCoverage && invocationSeqCoverage.total > 0
+        ? invocationSeqCoverage.with_seq / invocationSeqCoverage.total
+        : 0,
     };
   }
 

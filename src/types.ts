@@ -174,6 +174,24 @@ export interface DashboardAggregates {
   frictionTotals: FrictionTotals;
   projectFriction: Array<{ project: string; friction: FrictionTotals }>;
   highTokenGrowthSessions: number;
+
+  // ---- §4.1 source-dimensioned (Claude vs. Codex, etc.) --------------------------------
+  byToolSource: Array<{ tool: string; source: string; category: ToolCategory; calls: number; sessions: number }>;
+  byToolCategorySource: Array<{ category: ToolCategory; source: string; calls: number; tools: number; sessions: number }>;
+  mcpServersSource: Array<{ server: string; source: string; calls: number }>;
+  skillInvocationsSource: Array<{ skill: string; source: string; count: number }>;
+
+  // ---- §4.2 user-dimensioned (distinct-user reach; counts only) ------------------------
+  toolUsers: Array<{ tool: string; users: number }>;
+  skillUsers: Array<{ skill: string; users: number }>;
+  mcpServerUsers: Array<{ server: string; users: number }>;
+
+  // ---- §4.3 friction-on-tools -----------------------------------------------------------
+  stopReasonByTool: Array<{ tool: string; stopReason: string; count: number }>;
+  /** Fraction of invocations with a populated interaction_seq — the friction-on-tools panel
+   *  degrades to "insufficient data" below a usable threshold rather than showing partial data
+   *  as if it were complete. */
+  invocationSeqCoverage: number;
 }
 
 // ---- dashboard / presentation types --------------------------------------------
@@ -207,7 +225,6 @@ export interface PluginInfo {
 export interface PluginRow {
   name: string;
   marketplace: string;
-  enabled: boolean;
   used: boolean;
   version?: string;
   installedAt?: string;
@@ -216,6 +233,10 @@ export interface PluginRow {
   skillTokens: number;
   skillCost: number;
   mcpCalls: number;
+  /** Observed-usage reach (§2 of TOOLS_PLAN.md) — NOT a config read. The hub cannot see
+   *  install/enable state, only who invoked something. */
+  users: number;
+  sources: AgentSource[];
 }
 
 export interface ToolStat {
@@ -225,6 +246,9 @@ export interface ToolStat {
   calls: number;
   sessions: number;
   approxResultTokens: number;
+  /** Distinct users observed invoking this tool (observed-usage proxy, not a config read). */
+  users: number;
+  bySource: Record<string, number>;
 }
 
 export interface ToolCategoryStat {
@@ -234,6 +258,50 @@ export interface ToolCategoryStat {
   tools: number;
   sessions: number;
   approxResultTokens: number;
+  bySource: Record<string, number>;
+}
+
+/** Bottom-decile-or-single-user items across tools/skills/MCP servers — the honest, observed-usage
+ *  version of "what's underused" (TOOLS_PLAN.md §3.2). Never implies "installed but unused". */
+export interface UnderusedRow {
+  kind: "tool" | "skill" | "mcp";
+  name: string;
+  display: string;
+  calls: number;
+  users: number;
+}
+
+/** One item (skill or MCP server) bucketed by observed reach for the shared-vs-solo view
+ *  (TOOLS_PLAN.md §3.7). `shared` follows the same MIN_COHORT_FOR_RANKINGS floor as Activity/Tasks. */
+export interface ReachRow {
+  kind: "skill" | "mcp";
+  name: string;
+  users: number;
+  calls: number;
+  shared: boolean;
+}
+
+export interface SourceBreakdownRow {
+  key: string;
+  display: string;
+  bySource: Record<string, number>;
+}
+
+/** Claude/Codex/etc. comparison threaded across category mix, top tools, top skills, and top
+ *  MCP servers (TOOLS_PLAN.md §3.8) — the highest-leverage panel unlocked by source-dimensioned data. */
+export interface SourceComparison {
+  sources: string[];
+  byCategory: SourceBreakdownRow[];
+  topTools: SourceBreakdownRow[];
+  topSkills: SourceBreakdownRow[];
+  topMcpServers: SourceBreakdownRow[];
+}
+
+export interface ToolFriction {
+  byTool: Array<{ tool: string; stopReason: string; count: number }>;
+  /** Below this, the panel is hidden rather than shown with a caveat — a coverage this low means
+   *  the join sample isn't representative, not that friction is rare. */
+  coverage: number;
 }
 
 export interface SessionRow {
@@ -435,4 +503,10 @@ export interface Dashboard {
   byToolCategory: ToolCategoryStat[];
   frictionTotals: FrictionTotals;
   highTokenGrowthSessions: number;
+
+  underused: UnderusedRow[];
+  sharedVsSolo: ReachRow[];
+  minCohortGuard: boolean;
+  sourceComparison: SourceComparison;
+  toolFriction: ToolFriction;
 }

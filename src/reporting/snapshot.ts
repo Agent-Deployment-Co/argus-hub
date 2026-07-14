@@ -1,18 +1,46 @@
 import { skillPlugin } from "./inventory.ts";
 import { cost, unpricedModels } from "../pricing.ts";
+import { MIN_COHORT_FOR_RANKINGS } from "./activity.ts";
 import { CATEGORY_LABELS, parseMcpTool, toolDisplayName, UNATTRIBUTED_SKILL } from "../tool-categories.ts";
 import type {
+  AgentSource,
   Dashboard,
   DashboardAggregates,
   DayBucket,
   NamedUsage,
   PluginInfo,
   PluginRow,
+  ReachRow,
+  SourceBreakdownRow,
+  SourceComparison,
   ToolCategoryStat,
+  ToolFriction,
   ToolStat,
+  UnderusedRow,
   Usage,
 } from "../types.ts";
 import { addUsage, emptyUsage, totalTokens } from "../types.ts";
+
+/** Groups rows keyed by `key(r)` into a per-key `source -> value` record. */
+function groupBySource<R>(rows: R[], key: (r: R) => string, source: (r: R) => string, value: (r: R) => number): Map<string, Record<string, number>> {
+  const map = new Map<string, Record<string, number>>();
+  for (const r of rows) {
+    const k = key(r);
+    const rec = map.get(k) ?? {};
+    map.set(k, rec);
+    rec[source(r)] = (rec[source(r)] ?? 0) + value(r);
+  }
+  return map;
+}
+
+/** Bottom-decile-by-calls cutoff within a set of comparable items (tools, skills, or MCP servers
+ *  considered separately — a heavy tool and a light skill aren't the same population). */
+function decileCutoff(calls: number[]): number {
+  if (calls.length === 0) return 0;
+  const sorted = [...calls].sort((a, b) => a - b);
+  const idx = Math.floor(sorted.length * 0.1);
+  return sorted[Math.min(idx, sorted.length - 1)]!;
+}
 
 export function assembleDashboard(agg: DashboardAggregates, plugins: Map<string, PluginInfo>): Dashboard {
   // ---- daily / totals / byModel / byModelDaily ----
@@ -107,6 +135,13 @@ export function assembleDashboard(agg: DashboardAggregates, plugins: Map<string,
 
   // ---- tool result sizes + call counts ----
   const resultTokensByTool = new Map(agg.toolResultStats.map((r) => [r.tool, r.approxTokens]));
+  const toolUsersMap = new Map(agg.toolUsers.map((r) => [r.tool, r.users]));
+  const skillUsersMap = new Map(agg.skillUsers.map((r) => [r.skill, r.users]));
+  const mcpServerUsersMap = new Map(agg.mcpServerUsers.map((r) => [r.server, r.users]));
+  const byToolSourceMap = groupBySource(agg.byToolSource, (r) => r.tool, (r) => r.source, (r) => r.calls);
+  const byToolCategorySourceMap = groupBySource(agg.byToolCategorySource, (r) => r.category, (r) => r.source, (r) => r.calls);
+  const mcpServersSourceMap = groupBySource(agg.mcpServersSource, (r) => r.server, (r) => r.source, (r) => r.calls);
+  const skillInvocationsSourceMap = groupBySource(agg.skillInvocationsSource, (r) => r.skill, (r) => r.source, (r) => r.count);
 
   const byTool: ToolStat[] = agg.byTool
     .map((r) => ({
@@ -116,6 +151,8 @@ export function assembleDashboard(agg: DashboardAggregates, plugins: Map<string,
       calls: r.calls,
       sessions: r.sessions,
       approxResultTokens: resultTokensByTool.get(r.tool) ?? 0,
+      users: toolUsersMap.get(r.tool) ?? 0,
+      bySource: byToolSourceMap.get(r.tool) ?? {},
     }))
     .sort((a, b) => b.calls - a.calls);
 
@@ -131,6 +168,7 @@ export function assembleDashboard(agg: DashboardAggregates, plugins: Map<string,
       tools: r.tools,
       sessions: r.sessions,
       approxResultTokens: categoryApprox.get(r.category) ?? 0,
+      bySource: byToolCategorySourceMap.get(r.category) ?? {},
     }))
     .sort((a, b) => b.calls - a.calls);
 
@@ -150,12 +188,26 @@ export function assembleDashboard(agg: DashboardAggregates, plugins: Map<string,
           return { tool: parseMcpTool(tool)?.tool ?? tool, count };
         })
         .sort((a, b) => b.count - a.count);
-      return { server: s.server, calls: s.calls, approxResultTokens, topTools };
+      return {
+        server: s.server,
+        calls: s.calls,
+        approxResultTokens,
+        topTools,
+        users: mcpServerUsersMap.get(s.server) ?? 0,
+        bySource: mcpServersSourceMap.get(s.server) ?? {},
+      };
     })
     .sort((a, b) => b.calls - a.calls);
 
   const skillInvocations = agg.skillInvocations
-    .map((r) => ({ name: r.skill, count: r.count, plugin: skillPlugin(r.skill, plugins), sampleArgs: r.sampleArgs }))
+    .map((r) => ({
+      name: r.skill,
+      count: r.count,
+      plugin: skillPlugin(r.skill, plugins),
+      sampleArgs: r.sampleArgs,
+      users: skillUsersMap.get(r.skill) ?? 0,
+      bySource: skillInvocationsSourceMap.get(r.skill) ?? {},
+    }))
     .sort((a, b) => b.count - a.count);
 
   const heaviestToolResults = agg.toolResultStats
@@ -163,7 +215,57 @@ export function assembleDashboard(agg: DashboardAggregates, plugins: Map<string,
     .sort((a, b) => b.approxTokens - a.approxTokens)
     .slice(0, 15);
 
-  const byPlugin = foldPlugins(bySkill, byMcpServer, plugins);
+  const byPlugin = foldPlugins(bySkill, skillInvocations, byMcpServer, plugins);
+
+  // ---- §3.2 underused (observed usage only — no "installed but never invoked" denominator) ----
+  const namedSkillInvocations = skillInvocations.filter((s) => s.name !== UNATTRIBUTED_SKILL);
+  const maxObservedUsers = Math.max(
+    0,
+    ...byTool.map((t) => t.users),
+    ...namedSkillInvocations.map((s) => s.users),
+    ...byMcpServer.map((m) => m.users),
+  );
+  const minCohortGuard = maxObservedUsers > 0 && maxObservedUsers < MIN_COHORT_FOR_RANKINGS;
+
+  const toolCutoff = decileCutoff(byTool.map((t) => t.calls));
+  const skillCutoff = decileCutoff(namedSkillInvocations.map((s) => s.count));
+  const mcpCutoff = decileCutoff(byMcpServer.map((m) => m.calls));
+  const underused: UnderusedRow[] = [
+    ...byTool
+      .filter((t) => t.calls <= toolCutoff || (!minCohortGuard && t.users === 1))
+      .map((t): UnderusedRow => ({ kind: "tool", name: t.name, display: t.display, calls: t.calls, users: t.users })),
+    ...namedSkillInvocations
+      .filter((s) => s.count <= skillCutoff || (!minCohortGuard && s.users === 1))
+      .map((s): UnderusedRow => ({ kind: "skill", name: s.name, display: s.name, calls: s.count, users: s.users })),
+    ...byMcpServer
+      .filter((m) => m.calls <= mcpCutoff || (!minCohortGuard && m.users === 1))
+      .map((m): UnderusedRow => ({ kind: "mcp", name: m.server, display: m.server, calls: m.calls, users: m.users })),
+  ].sort((a, b) => a.calls - b.calls);
+
+  // ---- §3.7 shared vs. solo (skills + MCP servers, by distinct-user reach) ----
+  const sharedVsSolo: ReachRow[] = minCohortGuard
+    ? []
+    : [
+        ...namedSkillInvocations.map((s): ReachRow => ({ kind: "skill", name: s.name, users: s.users, calls: s.count, shared: s.users >= MIN_COHORT_FOR_RANKINGS })),
+        ...byMcpServer.map((m): ReachRow => ({ kind: "mcp", name: m.server, users: m.users, calls: m.calls, shared: m.users >= MIN_COHORT_FOR_RANKINGS })),
+      ].sort((a, b) => b.users - a.users);
+
+  // ---- §3.8 Claude/Codex source comparison ----
+  const sources = [...new Set(bySource.map((s) => s.name))].sort();
+  const topTools8 = byTool.slice(0, 8);
+  const topSkills8 = namedSkillInvocations.slice(0, 8);
+  const topMcp8 = byMcpServer.slice(0, 8);
+  const toRow = (key: string, display: string, bySourceMap: Record<string, number>): SourceBreakdownRow => ({ key, display, bySource: bySourceMap });
+  const sourceComparison: SourceComparison = {
+    sources,
+    byCategory: byToolCategory.map((c) => toRow(c.category, c.label, c.bySource)),
+    topTools: topTools8.map((t) => toRow(t.name, t.display, t.bySource)),
+    topSkills: topSkills8.map((s) => toRow(s.name, s.name, s.bySource)),
+    topMcpServers: topMcp8.map((m) => toRow(m.server, m.server, m.bySource)),
+  };
+
+  // ---- §3.4 friction on tools ----
+  const toolFriction: ToolFriction = { byTool: agg.stopReasonByTool, coverage: agg.invocationSeqCoverage };
 
   return {
     generatedAtMs: 0,
@@ -191,14 +293,21 @@ export function assembleDashboard(agg: DashboardAggregates, plugins: Map<string,
     byProject,
     frictionTotals: agg.frictionTotals,
     highTokenGrowthSessions: agg.highTokenGrowthSessions,
+    underused,
+    sharedVsSolo,
+    minCohortGuard,
+    sourceComparison,
+    toolFriction,
   };
 }
 
 function foldPlugins(
   bySkill: NamedUsage[],
-  byMcpServer: Array<{ server: string; calls: number }>,
+  skillInvocations: Array<{ name: string; plugin: string | null; users: number; bySource: Record<string, number> }>,
+  byMcpServer: Array<{ server: string; calls: number; users: number; bySource: Record<string, number> }>,
   plugins: Map<string, PluginInfo>,
 ): PluginRow[] {
+  const costBySkill = new Map(bySkill.map((s) => [s.name, s]));
   const pluginAgg = new Map<string, PluginRow>();
   const ensurePlugin = (name: string): PluginRow => {
     let row = pluginAgg.get(name);
@@ -207,7 +316,6 @@ function foldPlugins(
       row = {
         name,
         marketplace: info?.marketplace || "",
-        enabled: info?.enabled ?? false,
         used: false,
         version: info?.version,
         installedAt: info?.installedAt,
@@ -216,27 +324,40 @@ function foldPlugins(
         skillTokens: 0,
         skillCost: 0,
         mcpCalls: 0,
+        users: 0,
+        sources: [],
       };
       pluginAgg.set(name, row);
     }
     return row;
   };
   for (const name of plugins.keys()) ensurePlugin(name);
-  for (const s of bySkill) {
-    const pname = (s.meta?.plugin as string | null) ?? null;
-    if (!pname) continue;
-    const row = ensurePlugin(pname);
+  const mergeSources = (row: PluginRow, bySource: Record<string, number>) => {
+    for (const src of Object.keys(bySource)) {
+      if (!row.sources.includes(src as AgentSource)) row.sources.push(src as AgentSource);
+    }
+  };
+  for (const s of skillInvocations) {
+    if (!s.plugin) continue;
+    const row = ensurePlugin(s.plugin);
     row.used = true;
     if (!row.skills.includes(s.name)) row.skills.push(s.name);
-    row.skillMessages += s.messages;
-    row.skillTokens += s.total;
-    row.skillCost += s.cost;
+    const usage = costBySkill.get(s.name);
+    if (usage) {
+      row.skillMessages += usage.messages;
+      row.skillTokens += usage.total;
+      row.skillCost += usage.cost;
+    }
+    row.users = Math.max(row.users, s.users);
+    mergeSources(row, s.bySource);
   }
   for (const s of byMcpServer) {
     if (pluginAgg.has(s.server)) {
       const row = ensurePlugin(s.server);
       row.used = true;
       row.mcpCalls += s.calls;
+      row.users = Math.max(row.users, s.users);
+      mergeSources(row, s.bySource);
     }
   }
   return [...pluginAgg.values()].sort((a, b) => {

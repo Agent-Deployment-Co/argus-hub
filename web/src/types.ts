@@ -53,7 +53,6 @@ export interface DayBucket {
 export interface PluginRow {
   name: string;
   marketplace: string;
-  enabled: boolean;
   used: boolean;
   version?: string;
   installedAt?: string;
@@ -62,6 +61,8 @@ export interface PluginRow {
   skillTokens: number;
   skillCost: number;
   mcpCalls: number;
+  users: number;
+  sources: AgentSource[];
 }
 
 export interface ToolStat {
@@ -71,6 +72,8 @@ export interface ToolStat {
   calls: number;
   sessions: number;
   approxResultTokens: number;
+  users: number;
+  bySource: Record<string, number>;
 }
 
 export interface ToolCategoryStat {
@@ -80,6 +83,42 @@ export interface ToolCategoryStat {
   tools: number;
   sessions: number;
   approxResultTokens: number;
+  bySource: Record<string, number>;
+}
+
+export interface UnderusedRow {
+  kind: "tool" | "skill" | "mcp";
+  name: string;
+  display: string;
+  calls: number;
+  users: number;
+}
+
+export interface ReachRow {
+  kind: "skill" | "mcp";
+  name: string;
+  users: number;
+  calls: number;
+  shared: boolean;
+}
+
+export interface SourceBreakdownRow {
+  key: string;
+  display: string;
+  bySource: Record<string, number>;
+}
+
+export interface SourceComparison {
+  sources: string[];
+  byCategory: SourceBreakdownRow[];
+  topTools: SourceBreakdownRow[];
+  topSkills: SourceBreakdownRow[];
+  topMcpServers: SourceBreakdownRow[];
+}
+
+export interface ToolFriction {
+  byTool: Array<{ tool: string; stopReason: string; count: number }>;
+  coverage: number;
 }
 
 export interface Dashboard {
@@ -100,12 +139,14 @@ export interface Dashboard {
   bySource: NamedUsage[];
   bySkill: NamedUsage[];
   byUser?: NamedUsage[];
-  skillInvocations: Array<{ name: string; count: number; plugin: string | null; sampleArgs: string }>;
+  skillInvocations: Array<{ name: string; count: number; plugin: string | null; sampleArgs: string; users: number; bySource: Record<string, number> }>;
   byMcpServer: Array<{
     server: string;
     calls: number;
     approxResultTokens: number;
     topTools: Array<{ tool: string; count: number }>;
+    users: number;
+    bySource: Record<string, number>;
   }>;
   heaviestToolResults: Array<{ tool: string; count: number; approxTokens: number }>;
   byPlugin: PluginRow[];
@@ -114,6 +155,11 @@ export interface Dashboard {
   byToolCategory: ToolCategoryStat[];
   frictionTotals: FrictionTotals;
   highTokenGrowthSessions: number;
+  underused: UnderusedRow[];
+  sharedVsSolo: ReachRow[];
+  minCohortGuard: boolean;
+  sourceComparison: SourceComparison;
+  toolFriction: ToolFriction;
 }
 
 // ---- Activity report (GET /api/activity) ----------------------------------------------
