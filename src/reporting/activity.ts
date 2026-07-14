@@ -7,6 +7,7 @@ import type {
   ActivityTaskCounts,
   ActivityTotals,
   AgentSource,
+  ModelCostRow,
   SourceActivityRow,
   TaskFact,
   Usage,
@@ -113,6 +114,7 @@ export interface ActivityDailyRaw {
   sessions: number;
   activeUsers: number;
   tokens: number;
+  byModel: Array<{ model: string; usage: Usage }>;
 }
 
 export interface AssembleActivityReportInput {
@@ -208,6 +210,7 @@ export function assembleActivityReport(input: AssembleActivityReportInput): Acti
       sessions: row?.sessions ?? 0,
       activeUsers: row?.activeUsers ?? 0,
       tokens: row?.tokens ?? 0,
+      cost: row ? usageTotals(row.byModel).cost : 0,
       tasks: tasksByDate.get(date) ?? 0,
     };
   });
@@ -241,6 +244,22 @@ export function assembleActivityReport(input: AssembleActivityReportInput): Acti
         })
         .sort((a, b) => b.score - a.score);
 
+  // Cost split across models for the window. Aggregates duplicate model rows (the raw byModel
+  // can list a model more than once) and drops anything with zero cost — unpriced models would
+  // otherwise sort to the bottom implying "cheap" rather than "unknown" (surfaced via `unpriced`).
+  const costModelMap = new Map<string, { tokens: number; cost: number }>();
+  for (const { model, usage } of input.currentTotals.byModel) {
+    const c = cost(usage, model);
+    if (c <= 0) continue;
+    const acc = costModelMap.get(model) ?? { tokens: 0, cost: 0 };
+    costModelMap.set(model, acc);
+    acc.tokens += totalTokens(usage);
+    acc.cost += c;
+  }
+  const costByModel: ModelCostRow[] = [...costModelMap.entries()]
+    .map(([model, v]) => ({ model, tokens: v.tokens, cost: v.cost }))
+    .sort((a, b) => b.cost - a.cost);
+
   const bySource: SourceActivityRow[] = input.bySource
     .map((r) => {
       const { tokens, cost: sourceCost } = usageTotals(r.byModel);
@@ -266,6 +285,7 @@ export function assembleActivityReport(input: AssembleActivityReportInput): Acti
     daily,
     byUser,
     bySource,
+    costByModel,
     unpriced: unpricedModels(),
     minCohortGuard,
   };

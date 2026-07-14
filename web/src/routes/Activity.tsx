@@ -1,5 +1,6 @@
 import { getRouteApi } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { ActivityCostByModel } from "../components/ActivityCostByModel";
 import { ActivitySourceRankings } from "../components/ActivitySourceRankings";
 import { ActivityTiles } from "../components/ActivityTiles";
 import { ActivityTimeSeries } from "../components/ActivityTimeSeries";
@@ -74,6 +75,12 @@ export function Activity() {
           <section>
             <ActivityTimeSeries daily={report!.daily} />
           </section>
+
+          {report!.costByModel.length > 0 && (
+            <section>
+              <ActivityCostByModel costByModel={report!.costByModel} />
+            </section>
+          )}
 
           <ActivityUserRankings byUser={report!.byUser} minCohortGuard={report!.minCohortGuard} />
           <ActivitySourceRankings bySource={report!.bySource} />

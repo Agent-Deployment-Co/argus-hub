@@ -1708,7 +1708,7 @@ export class HubStore {
     });
   }
 
-  async readActivityDaily(scope: HubScope, query: ResolvedQuery): Promise<Array<{ date: string; sessions: number; activeUsers: number; tokens: number }>> {
+  async readActivityDaily(scope: HubScope, query: ResolvedQuery): Promise<Array<{ date: string; sessions: number; activeUsers: number; tokens: number; byModel: Array<{ model: string; usage: Usage }> }>> {
     const expanded = await this.expandScope(scope);
     if (expanded.empty) return [];
     return this.schedule(async () => {
@@ -1727,7 +1727,38 @@ export class HubStore {
          GROUP BY ru.date`,
         filters.messageParams,
       );
-      return rows.map((r) => ({ date: r.date, sessions: r.sessions, activeUsers: r.active_users, tokens: r.tokens ?? 0 }));
+
+      // Per-date, per-model usage so the report can price each day (cost is model-specific and
+      // computed in the reporting layer, which owns pricing). Attached to the matching date row.
+      const modelRows = await all<{
+        date: string; model: string | null; input: number | null; output: number | null;
+        cache_read: number | null; cw5: number | null; cw1: number | null;
+      }>(
+        this.db,
+        `SELECT ru.date AS date, ru.model AS model,
+                SUM(input_tokens) AS input, SUM(output_tokens) AS output, SUM(cache_read) AS cache_read,
+                SUM(cache_write_5m) AS cw5, SUM(cache_write_1h) AS cw1
+         FROM resolved_usage ru ${filters.messageWhere}
+         GROUP BY ru.date, ru.model`,
+        filters.messageParams,
+      );
+      const byModelByDate = new Map<string, Array<{ model: string; usage: Usage }>>();
+      for (const r of modelRows) {
+        const list = byModelByDate.get(r.date) ?? [];
+        byModelByDate.set(r.date, list);
+        list.push({
+          model: r.model ?? "",
+          usage: {
+            input: r.input ?? 0, output: r.output ?? 0, cacheRead: r.cache_read ?? 0,
+            cacheWrite5m: r.cw5 ?? 0, cacheWrite1h: r.cw1 ?? 0,
+          },
+        });
+      }
+
+      return rows.map((r) => ({
+        date: r.date, sessions: r.sessions, activeUsers: r.active_users, tokens: r.tokens ?? 0,
+        byModel: byModelByDate.get(r.date) ?? [],
+      }));
     });
   }
 

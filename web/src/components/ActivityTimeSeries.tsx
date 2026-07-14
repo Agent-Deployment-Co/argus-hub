@@ -1,25 +1,28 @@
 import type { ChartOptions } from "chart.js";
 import { useState } from "react";
 import { ChartCanvas } from "./charts/ChartCanvas";
-import { fmt, SERIES } from "../lib/format";
+import { fmt, usd, SERIES } from "../lib/format";
 import type { ActivityDayPoint } from "../types";
 
-type Measure = "sessions" | "tasks" | "tokens" | "activeUsers";
+type Measure = "sessions" | "tasks" | "tokens" | "cost" | "activeUsers";
 
 const MEASURES: { key: Measure; label: string }[] = [
   { key: "sessions", label: "Sessions" },
   { key: "tasks", label: "Tasks" },
   { key: "tokens", label: "Tokens" },
+  { key: "cost", label: "Cost" },
   { key: "activeUsers", label: "Active users" },
 ];
 
 const fmtTick = (v: number | string) => fmt(Number(v));
+const usdTick = (v: number | string) => usd(Number(v));
 
 /** Daily time series with a sessions/tasks/tokens/active-users toggle. The x-axis is every day
  *  in the window (including idle days) — the backend already fills gaps, per readActiveDates. */
 export function ActivityTimeSeries({ daily }: { daily: ActivityDayPoint[] }) {
   const [measure, setMeasure] = useState<Measure>("sessions");
   const active = MEASURES.find((m) => m.key === measure)!;
+  const isCost = measure === "cost";
 
   return (
     <div className="panel">
@@ -47,10 +50,13 @@ export function ActivityTimeSeries({ daily }: { daily: ActivityDayPoint[] }) {
           datasets: [{ label: active.label, data: daily.map((d) => d[measure]), backgroundColor: SERIES.accent }],
         }}
         options={{
-          plugins: { legend: { display: false } },
+          plugins: {
+            legend: { display: false },
+            ...(isCost ? { tooltip: { callbacks: { label: (c) => usd(Number(c.parsed.y)) } } } : {}),
+          },
           scales: {
             x: { ticks: { maxRotation: 90, minRotation: 45 } },
-            y: { ticks: { callback: fmtTick } },
+            y: { ticks: { callback: isCost ? usdTick : fmtTick } },
           },
         } satisfies ChartOptions<"bar">}
       />

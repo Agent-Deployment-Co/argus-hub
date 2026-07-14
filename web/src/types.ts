@@ -138,7 +138,14 @@ export interface ActivityDayPoint {
   sessions: number;
   tasks: number;
   tokens: number;
+  cost: number;
   activeUsers: number;
+}
+
+export interface ModelCostRow {
+  model: string;
+  tokens: number;
+  cost: number;
 }
 
 export type ActivityFreshness = "active" | "idle" | "silent";
@@ -176,6 +183,7 @@ export interface ActivityReport {
   daily: ActivityDayPoint[];
   byUser: UserActivityRow[];
   bySource: SourceActivityRow[];
+  costByModel: ModelCostRow[];
   unpriced: string[];
   minCohortGuard: boolean;
 }
