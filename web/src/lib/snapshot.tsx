@@ -1,20 +1,9 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createContext, useContext, type ReactNode } from "react";
 import type { Dashboard, Snapshot } from "../types";
+import { sanitizedSource, type FilterValues } from "./filters";
 
-export interface SnapshotFilters {
-  since?: string;
-  until?: string;
-  source?: string;
-  /** Scope to one user's data. Omit for the org-wide team rollup. */
-  userId?: string;
-}
-
-export const KNOWN_SOURCES = ["claude", "codex", "gemini", "cowork"] as const;
-
-function sanitizedSource(source: string | undefined): string | null {
-  return source && (KNOWN_SOURCES as readonly string[]).includes(source) ? source : null;
-}
+export type SnapshotFilters = FilterValues;
 
 function snapshotQueryKey(filters: SnapshotFilters) {
   return ["snapshot", filters.userId ?? null, filters.since ?? null, filters.until ?? null, sanitizedSource(filters.source)] as const;

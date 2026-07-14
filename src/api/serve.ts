@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import type { HubStore } from "../store/hub-store.ts";
 import { syncHandler, unknownSessionsHandler } from "./sync.ts";
 import { assembleDashboard } from "../reporting/snapshot.ts";
+import { assembleActivityReport, previousWindow } from "../reporting/activity.ts";
+import { assembleTaskReport } from "../reporting/tasks.ts";
 import { loadPlugins } from "../reporting/inventory.ts";
 import { computeRecommendations } from "./recommendations.ts";
 import { buildSessionList, buildSessionDetail, type SessionListParams } from "./session-list.ts";
@@ -189,6 +191,53 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     return c.json({ dashboard, recommendations, generatedAtMs });
   });
 
+  // ---- Activity report (org-wide Page 1) -----------------------------------------
+
+  app.get("/api/activity", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No data yet." }, 503);
+
+    const query = parseResolvedQuery(c);
+    if (typeof query === "string") return c.json({ error: query }, 400);
+
+    const now = new Date();
+    const isoDaysAgo = (n: number) => {
+      const d = new Date(now);
+      d.setUTCDate(d.getUTCDate() - n);
+      return d.toISOString().slice(0, 10);
+    };
+    const since = query.since ?? isoDaysAgo(30);
+    const until = query.until ?? isoDaysAgo(0);
+    const currentQuery = { ...query, since, until };
+    const { since: previousSince, until: previousUntil } = previousWindow(since, until);
+    const previousQuery = { ...query, since: previousSince, until: previousUntil };
+
+    const scope = { orgId };
+    const [currentTotals, previousTotals, daily, byUser, bySource, currentTasks, previousTasks] =
+      await Promise.all([
+        store.readActivityTotals(scope, currentQuery),
+        store.readActivityTotals(scope, previousQuery),
+        store.readActivityDaily(scope, currentQuery),
+        store.readActivityUserRollup(scope, currentQuery),
+        store.readActivitySourceRollup(scope, currentQuery),
+        store.readTaskFacts(scope, currentQuery),
+        store.readTaskFacts(scope, previousQuery),
+      ]);
+
+    if (currentTotals.sessions === 0 && previousTotals.sessions === 0 && byUser.length === 0) {
+      return c.json({ error: "No data yet." }, 503);
+    }
+
+    const report = assembleActivityReport({
+      since, until, previousSince, previousUntil,
+      currentTotals, previousTotals, daily, byUser, bySource,
+      currentTasks: currentTasks.map((r) => ({ task: r.task, userId: r.userId })),
+      previousTasks: previousTasks.map((r) => ({ task: r.task })),
+      nowMs: now.getTime(),
+    });
+    return c.json(report);
+  });
+
   // ---- Session list -------------------------------------------------------------
 
   app.get("/api/sessions", async (c) => {
@@ -247,6 +296,44 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
       outcomes,
     };
     return c.json(buildTaskList(taskRows, params));
+  });
+
+  // ---- Task report (Page 2 — Tasks) ----------------------------------------------
+  //
+  // Outcomes, frustration, and friction rolled up for the window — how *well* the org's agent
+  // work is going, built on the same readTaskFacts spine as /api/tasks so the two views always
+  // agree on totals (SPEC.md 5).
+  app.get("/api/tasks/report", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No data yet." }, 503);
+
+    const query = parseResolvedQuery(c);
+    if (typeof query === "string") return c.json({ error: query }, 400);
+
+    const now = new Date();
+    const isoDaysAgo = (n: number) => {
+      const d = new Date(now);
+      d.setUTCDate(d.getUTCDate() - n);
+      return d.toISOString().slice(0, 10);
+    };
+    const since = query.since ?? isoDaysAgo(30);
+    const until = query.until ?? isoDaysAgo(0);
+    const currentQuery = { ...query, since, until };
+
+    const userId = parseUserScope(c);
+    const scope = { orgId, userId };
+    const [rows, friction, totals] = await Promise.all([
+      store.readTaskFacts(scope, currentQuery),
+      store.readWindowFrictionRollup(scope, currentQuery),
+      store.readActivityTotals(scope, currentQuery),
+    ]);
+
+    if (totals.sessions === 0) return c.json({ error: "No data yet." }, 503);
+
+    const report = assembleTaskReport({
+      since, until, rows, friction, nowMs: now.getTime(),
+    });
+    return c.json(report);
   });
 
   // ---- Session detail -----------------------------------------------------------

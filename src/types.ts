@@ -259,6 +259,139 @@ export interface SessionRow {
   tasks?: TaskFact[];
 }
 
+// ---- Activity report (GET /api/activity) ----------------------------------------------
+
+export interface ActivityTaskCounts {
+  total: number;
+  success: number;
+  failure: number;
+  unknown: number;
+}
+
+export interface ActivityTotals {
+  sessions: number;
+  activeUsers: number;
+  tasks: ActivityTaskCounts;
+  tokens: number;
+  cost: number;
+}
+
+export interface ActivityDayPoint {
+  date: string;
+  sessions: number;
+  tasks: number;
+  tokens: number;
+  activeUsers: number;
+}
+
+export type ActivityFreshness = "active" | "idle" | "silent";
+
+export interface UserActivityRow {
+  userId: string;
+  displayName: string;
+  sessions: number;
+  tasks: number;
+  taskSuccessRate: number | null;
+  tokens: number;
+  cost: number;
+  activeDays: number;
+  lastActiveMs: number | null;
+  lastSyncMs: number;
+  freshness: ActivityFreshness;
+  score: number;
+}
+
+export interface SourceActivityRow {
+  source: AgentSource;
+  sessions: number;
+  distinctUsers: number;
+  tokens: number;
+  cost: number;
+  taskSuccessRate: number | null;
+}
+
+export interface ActivityReport {
+  generatedAtMs: number;
+  range: { since: string; until: string };
+  previousRange: { since: string; until: string };
+  totals: ActivityTotals;
+  previousTotals: ActivityTotals;
+  daily: ActivityDayPoint[];
+  byUser: UserActivityRow[];
+  bySource: SourceActivityRow[];
+  unpriced: string[];
+  minCohortGuard: boolean;
+}
+
+// ---- Task report (GET /api/tasks/report) ------------------------------------------------
+
+export interface TaskOutcomeCounts {
+  total: number;
+  success: number;
+  failure: number;
+  unknown: number;
+}
+
+export interface FrustrationCounts {
+  none: number;
+  moderate: number;
+  high: number;
+  unknown: number;
+}
+
+export interface TaskTotals {
+  total: number;
+  /** `success / (success + failure)`; null when neither has occurred yet. */
+  successRate: number | null;
+  /** Share of tasks at `moderate` + `high` frustration, of those with a known frustration. */
+  frustrationRate: number | null;
+  /** Share of interactions with disposition `interrupted` or `incomplete`, of those with a
+   *  known disposition — the mechanical, LLM-independent friction counterpart to successRate. */
+  interruptedRate: number | null;
+}
+
+export interface TaskDayPoint {
+  date: string;
+  total: number;
+  success: number;
+  failure: number;
+  successRate: number | null;
+}
+
+export interface TaskQualityRow {
+  /** userId / source / project, depending on which dimension this row belongs to. */
+  key: string;
+  label: string;
+  total: number;
+  success: number;
+  failure: number;
+  successRate: number | null;
+  frustrationRate: number | null;
+}
+
+export interface TaskSignalRow {
+  signal: string;
+  count: number;
+}
+
+export interface TaskReport {
+  generatedAtMs: number;
+  range: { since: string; until: string };
+  totals: TaskTotals;
+  outcomes: TaskOutcomeCounts;
+  frustration: FrustrationCounts;
+  daily: TaskDayPoint[];
+  byUser: TaskQualityRow[];
+  bySource: TaskQualityRow[];
+  byProject: TaskQualityRow[];
+  /** Most frequent `signals[]` tags across failed/frustrated tasks, ranked by frequency. */
+  topSignals: TaskSignalRow[];
+  /** Interruptions/rejections/compactions rolled up for the window. `observableSessions` is the
+   *  count of sessions where these are knowable at all (codex/gemini leave them null, not zero). */
+  friction: FrictionTotals;
+  minCohortGuard: boolean;
+}
+
 export interface Dashboard {
   generatedAtMs: number;
   range: { start: string; end: string };

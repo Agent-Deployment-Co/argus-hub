@@ -116,6 +116,70 @@ export interface Dashboard {
   highTokenGrowthSessions: number;
 }
 
+// ---- Activity report (GET /api/activity) ----------------------------------------------
+
+export interface ActivityTaskCounts {
+  total: number;
+  success: number;
+  failure: number;
+  unknown: number;
+}
+
+export interface ActivityTotals {
+  sessions: number;
+  activeUsers: number;
+  tasks: ActivityTaskCounts;
+  tokens: number;
+  cost: number;
+}
+
+export interface ActivityDayPoint {
+  date: string;
+  sessions: number;
+  tasks: number;
+  tokens: number;
+  activeUsers: number;
+}
+
+export type ActivityFreshness = "active" | "idle" | "silent";
+
+export interface UserActivityRow {
+  userId: string;
+  displayName: string;
+  sessions: number;
+  tasks: number;
+  taskSuccessRate: number | null;
+  tokens: number;
+  cost: number;
+  activeDays: number;
+  lastActiveMs: number | null;
+  lastSyncMs: number;
+  freshness: ActivityFreshness;
+  score: number;
+}
+
+export interface SourceActivityRow {
+  source: AgentSource;
+  sessions: number;
+  distinctUsers: number;
+  tokens: number;
+  cost: number;
+  taskSuccessRate: number | null;
+}
+
+export interface ActivityReport {
+  generatedAtMs: number;
+  range: { since: string; until: string };
+  previousRange: { since: string; until: string };
+  totals: ActivityTotals;
+  previousTotals: ActivityTotals;
+  daily: ActivityDayPoint[];
+  byUser: UserActivityRow[];
+  bySource: SourceActivityRow[];
+  unpriced: string[];
+  minCohortGuard: boolean;
+}
+
 export type RecommendationSeverity = "tip" | "warning";
 
 export interface Recommendation {
@@ -130,6 +194,67 @@ export interface Snapshot {
   dashboard: Dashboard;
   recommendations: Recommendation[];
   generatedAtMs: number;
+}
+
+// ---- Task report (GET /api/tasks/report) ------------------------------------------------
+
+export interface TaskOutcomeCounts {
+  total: number;
+  success: number;
+  failure: number;
+  unknown: number;
+}
+
+export interface FrustrationCounts {
+  none: number;
+  moderate: number;
+  high: number;
+  unknown: number;
+}
+
+export interface TaskTotals {
+  total: number;
+  successRate: number | null;
+  frustrationRate: number | null;
+  interruptedRate: number | null;
+}
+
+export interface TaskDayPoint {
+  date: string;
+  total: number;
+  success: number;
+  failure: number;
+  successRate: number | null;
+}
+
+export interface TaskQualityRow {
+  key: string;
+  label: string;
+  total: number;
+  success: number;
+  failure: number;
+  successRate: number | null;
+  frustrationRate: number | null;
+}
+
+export interface TaskSignalRow {
+  signal: string;
+  count: number;
+}
+
+export interface TaskReport {
+  generatedAtMs: number;
+  range: { since: string; until: string };
+  totals: TaskTotals;
+  outcomes: TaskOutcomeCounts;
+  frustration: FrustrationCounts;
+  daily: TaskDayPoint[];
+  byUser: TaskQualityRow[];
+  bySource: TaskQualityRow[];
+  byProject: TaskQualityRow[];
+  topSignals: TaskSignalRow[];
+  friction: FrictionTotals;
+  minCohortGuard: boolean;
 }
 
 /** Mirrors hub/src/api/task-list.ts's TaskListItem, served at GET /api/tasks. */

@@ -377,6 +377,7 @@ const CREATE_HUB_SCHEMA_SQL = `
   CREATE INDEX resolved_usage_date_model ON resolved_usage(org_id, date, model);
   CREATE INDEX resolved_usage_source     ON resolved_usage(org_id, source);
   CREATE INDEX resolved_usage_ts         ON resolved_usage(org_id, ts);
+  CREATE INDEX resolved_usage_client_session_date ON resolved_usage(org_id, client_id, session_id, date);
 
   CREATE TABLE resolved_tasks (
     org_id     TEXT NOT NULL,
@@ -529,6 +530,17 @@ async function initHubDatabase(db: Database, path: string): Promise<void> {
   await exec(db, "PRAGMA synchronous = NORMAL");
   await exec(db, "PRAGMA trusted_schema = OFF");
 
+  // Self-healing index for pre-existing databases created before this index was added to
+  // CREATE_HUB_SCHEMA_SQL. Without it, readTaskFacts' per-row EXISTS(...) subquery against
+  // resolved_usage falls back to scanning the whole date range instead of seeking straight to
+  // the (client_id, session_id) pair, which made GET /api/activity take 10+ seconds on modest
+  // data volumes.
+  await exec(
+    db,
+    "CREATE INDEX IF NOT EXISTS resolved_usage_client_session_date " +
+      "ON resolved_usage(org_id, client_id, session_id, date)",
+  );
+
   // Secure WAL files too.
   if (process.platform !== "win32") {
     for (const candidate of [path, `${path}-wal`, `${path}-shm`]) {
@@ -599,6 +611,11 @@ export interface HubTaskRow {
   task: TaskFact;
   project: string;
   sessionId: string;
+  userId: string | null;
+  displayName: string | null;
+  /** The disposition of the interaction this task opened ("completed" | "interrupted" |
+   *  "incomplete" | "error"), or null when no matching interaction was found. */
+  disposition: string | null;
 }
 
 export class HubStore {
@@ -1607,11 +1624,27 @@ export class HubStore {
         params.push(...dateParams);
       }
 
-      const rows = await all<{ task_json: string; project: string; session_id: string }>(
+      const rows = await all<{
+        task_json: string; project: string; session_id: string; user_id: string | null;
+        display_name: string | null; disposition: string | null;
+      }>(
         this.db,
-        `SELECT t.task_json AS task_json, s.project AS project, t.session_id AS session_id
+        `SELECT t.task_json AS task_json, s.project AS project, t.session_id AS session_id,
+                c.user_id AS user_id, u.display_name AS display_name, i.disposition AS disposition
          FROM resolved_tasks t
          JOIN resolved_sessions s ON s.org_id = t.org_id AND s.client_id = t.client_id AND s.session_id = t.session_id
+         LEFT JOIN clients c ON c.client_id = t.client_id
+         LEFT JOIN users u ON u.user_id = c.user_id
+         LEFT JOIN (
+           SELECT org_id, client_id, session_id, task_seq, disposition,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY org_id, client_id, session_id, task_seq ORDER BY seq DESC
+                  ) AS rn
+           FROM resolved_interactions
+           WHERE task_seq IS NOT NULL
+         ) i
+           ON i.org_id = t.org_id AND i.client_id = t.client_id AND i.session_id = t.session_id
+              AND i.task_seq = t.seq AND i.rn = 1
          WHERE ${conds.join(" AND ")}
          ORDER BY t.ts IS NULL, t.ts DESC, t.seq DESC`,
         params,
@@ -1620,7 +1653,256 @@ export class HubStore {
         task: JSON.parse(r.task_json) as TaskFact,
         project: r.project,
         sessionId: r.session_id,
+        userId: r.user_id,
+        displayName: r.display_name,
+        disposition: r.disposition,
       }));
+    });
+  }
+
+  // ---- Activity report (GET /api/activity) -----------------------------------------------
+  //
+  // Sessions/tokens/users rolled up for a single window (current or the prior equal-length
+  // window used for deltas). Tasks are read separately via readTaskFacts + classifyOutcome
+  // (JS-side, so the same outcome-text heuristic backs both /api/tasks and this report).
+
+  async readActivityTotals(scope: HubScope, query: ResolvedQuery): Promise<{ sessions: number; activeUsers: number; byModel: Array<{ model: string; usage: Usage }> }> {
+    const expanded = await this.expandScope(scope);
+    if (expanded.empty) return { sessions: 0, activeUsers: 0, byModel: [] };
+    return this.schedule(async () => {
+      const filters = buildHubFilters(expanded, query, {
+        sourceColumn: "ru.source", dateColumn: "ru.date", cwdColumn: "ru.cwd", tableAlias: "ru",
+      }, { excludeArchived: true });
+
+      const countRow = await get<{ sessions: number; active_users: number }>(
+        this.db,
+        `SELECT COUNT(DISTINCT ru.client_id || ':' || ru.session_id) AS sessions,
+                COUNT(DISTINCT c.user_id) AS active_users
+         FROM resolved_usage ru LEFT JOIN clients c ON c.client_id = ru.client_id
+         ${filters.messageWhere}`,
+        filters.messageParams,
+      );
+
+      const modelRows = await all<{
+        model: string | null; input: number | null; output: number | null;
+        cache_read: number | null; cw5: number | null; cw1: number | null;
+      }>(
+        this.db,
+        `SELECT model, SUM(input_tokens) AS input, SUM(output_tokens) AS output,
+                SUM(cache_read) AS cache_read, SUM(cache_write_5m) AS cw5, SUM(cache_write_1h) AS cw1
+         FROM resolved_usage ru ${filters.messageWhere} GROUP BY model`,
+        filters.messageParams,
+      );
+
+      return {
+        sessions: countRow?.sessions ?? 0,
+        activeUsers: countRow?.active_users ?? 0,
+        byModel: modelRows.map((r) => ({
+          model: r.model ?? "",
+          usage: {
+            input: r.input ?? 0, output: r.output ?? 0, cacheRead: r.cache_read ?? 0,
+            cacheWrite5m: r.cw5 ?? 0, cacheWrite1h: r.cw1 ?? 0,
+          },
+        })),
+      };
+    });
+  }
+
+  async readActivityDaily(scope: HubScope, query: ResolvedQuery): Promise<Array<{ date: string; sessions: number; activeUsers: number; tokens: number }>> {
+    const expanded = await this.expandScope(scope);
+    if (expanded.empty) return [];
+    return this.schedule(async () => {
+      const filters = buildHubFilters(expanded, query, {
+        sourceColumn: "ru.source", dateColumn: "ru.date", cwdColumn: "ru.cwd", tableAlias: "ru",
+      }, { excludeArchived: true });
+      const rows = await all<{ date: string; sessions: number; active_users: number; tokens: number | null }>(
+        this.db,
+        `SELECT ru.date AS date,
+                COUNT(DISTINCT ru.client_id || ':' || ru.session_id) AS sessions,
+                COUNT(DISTINCT c.user_id) AS active_users,
+                SUM(COALESCE(ru.input_tokens,0) + COALESCE(ru.output_tokens,0) + COALESCE(ru.cache_read,0)
+                    + COALESCE(ru.cache_write_5m,0) + COALESCE(ru.cache_write_1h,0)) AS tokens
+         FROM resolved_usage ru LEFT JOIN clients c ON c.client_id = ru.client_id
+         ${filters.messageWhere}
+         GROUP BY ru.date`,
+        filters.messageParams,
+      );
+      return rows.map((r) => ({ date: r.date, sessions: r.sessions, activeUsers: r.active_users, tokens: r.tokens ?? 0 }));
+    });
+  }
+
+  async readActivityUserRollup(scope: HubScope, query: ResolvedQuery): Promise<
+    Array<{
+      userId: string;
+      displayName: string;
+      sessions: number;
+      activeDays: number;
+      lastActiveMs: number | null;
+      lastSyncMs: number;
+      byModel: Array<{ model: string; usage: Usage }>;
+    }>
+  > {
+    const expanded = await this.expandScope(scope);
+    if (expanded.empty) return [];
+    return this.schedule(async () => {
+      const filters = buildHubFilters(expanded, query, {
+        sourceColumn: "ru.source", dateColumn: "ru.date", cwdColumn: "ru.cwd", tableAlias: "ru",
+      }, { excludeArchived: true });
+      const extra = filters.messageWhere ? `${filters.messageWhere} AND c.user_id IS NOT NULL` : "WHERE c.user_id IS NOT NULL";
+
+      const rollupRows = await all<{
+        user_id: string; display_name: string; sessions: number; active_days: number; last_active_ms: number | null;
+      }>(
+        this.db,
+        `SELECT c.user_id AS user_id, u.display_name AS display_name,
+                COUNT(DISTINCT ru.client_id || ':' || ru.session_id) AS sessions,
+                COUNT(DISTINCT ru.date) AS active_days,
+                MAX(ru.ts) AS last_active_ms
+         FROM resolved_usage ru
+         JOIN clients c ON c.client_id = ru.client_id
+         JOIN users u ON u.user_id = c.user_id
+         ${extra}
+         GROUP BY c.user_id`,
+        filters.messageParams,
+      );
+      if (!rollupRows.length) return [];
+
+      const modelRows = await all<{
+        user_id: string; model: string | null; input: number | null; output: number | null;
+        cache_read: number | null; cw5: number | null; cw1: number | null;
+      }>(
+        this.db,
+        `SELECT c.user_id AS user_id, ru.model AS model,
+                SUM(input_tokens) AS input, SUM(output_tokens) AS output, SUM(cache_read) AS cache_read,
+                SUM(cache_write_5m) AS cw5, SUM(cache_write_1h) AS cw1
+         FROM resolved_usage ru JOIN clients c ON c.client_id = ru.client_id
+         ${extra} AND ru.model IS NOT NULL
+         GROUP BY c.user_id, ru.model`,
+        filters.messageParams,
+      );
+      const byModelByUser = new Map<string, Array<{ model: string; usage: Usage }>>();
+      for (const r of modelRows) {
+        const list = byModelByUser.get(r.user_id) ?? [];
+        byModelByUser.set(r.user_id, list);
+        list.push({
+          model: r.model ?? "",
+          usage: {
+            input: r.input ?? 0, output: r.output ?? 0, cacheRead: r.cache_read ?? 0,
+            cacheWrite5m: r.cw5 ?? 0, cacheWrite1h: r.cw1 ?? 0,
+          },
+        });
+      }
+
+      const syncRows = await all<{ user_id: string; last_sync_ms: number | null }>(
+        this.db,
+        `SELECT c.user_id AS user_id, MAX(cs.last_sync_ms) AS last_sync_ms
+         FROM clients c LEFT JOIN client_syncs cs ON cs.client_id = c.client_id
+         WHERE c.org_id = ? AND c.user_id IS NOT NULL GROUP BY c.user_id`,
+        [expanded.orgId],
+      );
+      const lastSyncByUser = new Map(syncRows.map((r) => [r.user_id, r.last_sync_ms ?? 0]));
+
+      return rollupRows.map((r) => ({
+        userId: r.user_id,
+        displayName: r.display_name,
+        sessions: r.sessions,
+        activeDays: r.active_days,
+        lastActiveMs: r.last_active_ms,
+        lastSyncMs: lastSyncByUser.get(r.user_id) ?? 0,
+        byModel: byModelByUser.get(r.user_id) ?? [],
+      }));
+    });
+  }
+
+  async readActivitySourceRollup(scope: HubScope, query: ResolvedQuery): Promise<
+    Array<{ source: string; sessions: number; distinctUsers: number; byModel: Array<{ model: string; usage: Usage }> }>
+  > {
+    const expanded = await this.expandScope(scope);
+    if (expanded.empty) return [];
+    return this.schedule(async () => {
+      const filters = buildHubFilters(expanded, query, {
+        sourceColumn: "ru.source", dateColumn: "ru.date", cwdColumn: "ru.cwd", tableAlias: "ru",
+      }, { excludeArchived: true });
+
+      const countRows = await all<{ source: string; sessions: number; distinct_users: number }>(
+        this.db,
+        `SELECT ru.source AS source,
+                COUNT(DISTINCT ru.client_id || ':' || ru.session_id) AS sessions,
+                COUNT(DISTINCT c.user_id) AS distinct_users
+         FROM resolved_usage ru LEFT JOIN clients c ON c.client_id = ru.client_id
+         ${filters.messageWhere}
+         GROUP BY ru.source`,
+        filters.messageParams,
+      );
+
+      const modelRows = await all<{
+        source: string; model: string | null; input: number | null; output: number | null;
+        cache_read: number | null; cw5: number | null; cw1: number | null;
+      }>(
+        this.db,
+        `SELECT ru.source AS source, ru.model AS model,
+                SUM(input_tokens) AS input, SUM(output_tokens) AS output, SUM(cache_read) AS cache_read,
+                SUM(cache_write_5m) AS cw5, SUM(cache_write_1h) AS cw1
+         FROM resolved_usage ru
+         ${filters.messageWhere ? `${filters.messageWhere} AND ru.model IS NOT NULL` : "WHERE ru.model IS NOT NULL"}
+         GROUP BY ru.source, ru.model`,
+        filters.messageParams,
+      );
+      const byModelBySource = new Map<string, Array<{ model: string; usage: Usage }>>();
+      for (const r of modelRows) {
+        const list = byModelBySource.get(r.source) ?? [];
+        byModelBySource.set(r.source, list);
+        list.push({
+          model: r.model ?? "",
+          usage: {
+            input: r.input ?? 0, output: r.output ?? 0, cacheRead: r.cache_read ?? 0,
+            cacheWrite5m: r.cw5 ?? 0, cacheWrite1h: r.cw1 ?? 0,
+          },
+        });
+      }
+
+      return countRows.map((r) => ({
+        source: r.source,
+        sessions: r.sessions,
+        distinctUsers: r.distinct_users,
+        byModel: byModelBySource.get(r.source) ?? [],
+      }));
+    });
+  }
+
+  // ---- Task report friction rollup (GET /api/tasks/report) ------------------------------
+  //
+  // Session-level interruptions/rejections/compactions, summed over sessions active in the
+  // window. Mirrors the friction half of readHealthRollups but public and without the
+  // per-project breakdown / token-growth pass that dashboard reporting also needs.
+
+  async readWindowFrictionRollup(scope: HubScope, query: ResolvedQuery): Promise<FrictionTotals> {
+    const expanded = await this.expandScope(scope);
+    if (expanded.empty) return emptyFrictionTotals();
+    return this.schedule(async () => {
+      const filters = buildHubFilters(expanded, query, {
+        sourceColumn: "m.source", dateColumn: "m.date", cwdColumn: "m.cwd", tableAlias: "m",
+      }, { excludeArchived: true });
+      const sessions = await all<{
+        org_id: string; client_id: string; session_id: string;
+        fi: number | null; fr: number | null; fc: number | null; ft: number | null;
+      }>(
+        this.db,
+        `SELECT m.org_id AS org_id, m.client_id AS client_id, m.session_id AS session_id,
+                s.friction_interruptions AS fi, s.friction_rejections AS fr,
+                s.friction_compactions AS fc, s.friction_turns AS ft
+         FROM resolved_usage m JOIN resolved_sessions s
+           ON s.org_id = m.org_id AND s.client_id = m.client_id AND s.session_id = m.session_id
+         ${filters.messageWhere}
+         GROUP BY m.org_id, m.client_id, m.session_id`,
+        filters.messageParams,
+      );
+      const totals = emptyFrictionTotals();
+      for (const row of sessions) {
+        if (row.fi == null) continue;
+        foldFriction(totals, { interruptions: row.fi, rejections: row.fr ?? 0, compactions: row.fc ?? 0, turns: row.ft ?? 0 });
+      }
+      return totals;
     });
   }
 

@@ -782,3 +782,37 @@ describe("readDashboardAggregates", () => {
     expect(dashboard.toolResultStats).toEqual([{ tool: "Read", count: 1, approxTokens: 25 }]);
   });
 });
+
+describe("readWindowFrictionRollup", () => {
+  test("sums friction separately per client when session_ids collide across clients", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    // Session IDs are per-client UUIDs that can collide across different clients/users.
+    const collidingSessionId = "collide-1";
+
+    const aliceRows = minimalUploadRows(collidingSessionId);
+    aliceRows.sessions[0]!.friction_interruptions = 2;
+    aliceRows.sessions[0]!.friction_rejections = 1;
+    aliceRows.sessions[0]!.friction_compactions = 0;
+    aliceRows.sessions[0]!.friction_turns = 5;
+    await syncAs(store, orgId, newClientId(), "alice@example.com", aliceRows, 1_000_000);
+
+    const bobRows = minimalUploadRows(collidingSessionId);
+    bobRows.sessions[0]!.friction_interruptions = 3;
+    bobRows.sessions[0]!.friction_rejections = 0;
+    bobRows.sessions[0]!.friction_compactions = 2;
+    bobRows.sessions[0]!.friction_turns = 4;
+    await syncAs(store, orgId, newClientId(), "bob@example.com", bobRows, 1_000_000);
+
+    const friction = await store.readWindowFrictionRollup({ orgId }, {});
+    await store.close();
+
+    expect(friction.observableSessions).toBe(2);
+    expect(friction.interruptions).toBe(5);
+    expect(friction.rejections).toBe(1);
+    expect(friction.compactions).toBe(2);
+    expect(friction.turns).toBe(9);
+  });
+});

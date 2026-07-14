@@ -103,7 +103,12 @@ export function Layout() {
                 to={item.to}
                 className="rail-link"
                 activeOptions={{ exact: item.to === "/" }}
-                aria-current={pathname === item.to || (item.to === "/users" && pathname.startsWith("/users")) ? "page" : undefined}
+                aria-current={
+                  pathname === item.to ||
+                  (item.to === "/users" && pathname.startsWith(item.to))
+                    ? "page"
+                    : undefined
+                }
               >
                 <Ico className="rail-icon" size={18} strokeWidth={1.75} aria-hidden />
                 <span className="rail-label">{item.label}</span>
