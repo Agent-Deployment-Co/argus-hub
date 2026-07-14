@@ -103,8 +103,8 @@ export function Tasks() {
       to: ".",
       search: {
         ...search,
-        since: patch.since !== undefined ? patch.since || undefined : search.since,
-        until: patch.until !== undefined ? patch.until || undefined : search.until,
+        since: "since" in patch ? patch.since || undefined : search.since,
+        until: "until" in patch ? patch.until || undefined : search.until,
         source: "source" in patch ? patch.source || undefined : search.source,
         user: "userId" in patch ? patch.userId || undefined : search.user,
       },

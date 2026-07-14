@@ -24,8 +24,8 @@ export function UserActivity() {
     navigate({
       to: ".",
       search: (prev: { since?: string; until?: string; source?: string }) => ({
-        since: patch.since !== undefined ? patch.since || undefined : prev.since,
-        until: patch.until !== undefined ? patch.until || undefined : prev.until,
+        since: "since" in patch ? patch.since || undefined : prev.since,
+        until: "until" in patch ? patch.until || undefined : prev.until,
         source: "source" in patch ? patch.source || undefined : prev.source,
       }),
       replace: true,
