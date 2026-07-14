@@ -129,8 +129,6 @@ export interface AssembleActivityReportInput {
    *  report and the Tasks tab always agree on what counts as success/failure/unknown). */
   currentTasks: Array<{ task: TaskFact; userId: string | null }>;
   previousTasks: Array<{ task: TaskFact }>;
-  /** Org-wide, all-time user count — drives the privacy-floor guard on byUser/bySource. */
-  totalOrgUsers: number;
   nowMs: number;
 }
 
@@ -216,7 +214,7 @@ export function assembleActivityReport(input: AssembleActivityReportInput): Acti
 
   const tokensByUser = new Map(input.byUser.map((r) => [r.userId, usageTotals(r.byModel).tokens]));
   const scores = computeScores(input.byUser, tokensByUser);
-  const minCohortGuard = input.totalOrgUsers < MIN_COHORT_FOR_RANKINGS;
+  const minCohortGuard = input.byUser.length < MIN_COHORT_FOR_RANKINGS;
 
   const byUser: UserActivityRow[] = minCohortGuard
     ? []

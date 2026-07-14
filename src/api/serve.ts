@@ -213,7 +213,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     const previousQuery = { ...query, since: previousSince, until: previousUntil };
 
     const scope = { orgId };
-    const [currentTotals, previousTotals, daily, byUser, bySource, currentTasks, previousTasks, totalOrgUsers] =
+    const [currentTotals, previousTotals, daily, byUser, bySource, currentTasks, previousTasks] =
       await Promise.all([
         store.readActivityTotals(scope, currentQuery),
         store.readActivityTotals(scope, previousQuery),
@@ -222,7 +222,6 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
         store.readActivitySourceRollup(scope, currentQuery),
         store.readTaskFacts(scope, currentQuery),
         store.readTaskFacts(scope, previousQuery),
-        store.countUsers(orgId),
       ]);
 
     if (currentTotals.sessions === 0 && previousTotals.sessions === 0 && byUser.length === 0) {
@@ -234,7 +233,6 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
       currentTotals, previousTotals, daily, byUser, bySource,
       currentTasks: currentTasks.map((r) => ({ task: r.task, userId: r.userId })),
       previousTasks: previousTasks.map((r) => ({ task: r.task })),
-      totalOrgUsers,
       nowMs: now.getTime(),
     });
     return c.json(report);
@@ -324,17 +322,16 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
 
     const userId = parseUserScope(c);
     const scope = { orgId, userId };
-    const [rows, friction, totalOrgUsers, totals] = await Promise.all([
+    const [rows, friction, totals] = await Promise.all([
       store.readTaskFacts(scope, currentQuery),
       store.readWindowFrictionRollup(scope, currentQuery),
-      store.countUsers(orgId),
       store.readActivityTotals(scope, currentQuery),
     ]);
 
     if (totals.sessions === 0) return c.json({ error: "No data yet." }, 503);
 
     const report = assembleTaskReport({
-      since, until, rows, friction, totalOrgUsers, nowMs: now.getTime(),
+      since, until, rows, friction, nowMs: now.getTime(),
     });
     return c.json(report);
   });

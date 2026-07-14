@@ -78,8 +78,6 @@ export interface AssembleTaskReportInput {
   rows: HubTaskRow[];
   /** Session-level interruption/rejection/compaction rollup for the same window (readWindowFrictionRollup). */
   friction: FrictionTotals;
-  /** Org-wide, all-time user count — drives the privacy-floor guard on byUser (SPEC.md 6). */
-  totalOrgUsers: number;
   nowMs: number;
   topSignalsLimit?: number;
 }
@@ -148,7 +146,7 @@ export function assembleTaskReport(input: AssembleTaskReportInput): TaskReport {
     .sort((a, b) => b.count - a.count || a.signal.localeCompare(b.signal))
     .slice(0, input.topSignalsLimit ?? DEFAULT_TOP_SIGNALS_LIMIT);
 
-  const minCohortGuard = input.totalOrgUsers < MIN_COHORT_FOR_RANKINGS;
+  const minCohortGuard = byUserMap.size < MIN_COHORT_FOR_RANKINGS;
 
   return {
     generatedAtMs: input.nowMs,

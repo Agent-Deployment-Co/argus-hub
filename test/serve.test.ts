@@ -747,7 +747,7 @@ describe("GET /api/tasks/report", () => {
     try {
       await syncWithTask(env, "alice@example.com", "alice-sess", { outcome: "success" });
       await syncWithTask(env, "bob@example.com", "bob-sess", { outcome: "failure" });
-      await syncAs(env, "carol@example.com", [{ id: "carol-sess" }]);
+      await syncWithTask(env, "carol@example.com", "carol-sess", { outcome: "success" });
 
       const res = await app.request(`/api/tasks/report?${WIDE_RANGE}`);
       const body = await res.json() as {
@@ -756,9 +756,9 @@ describe("GET /api/tasks/report", () => {
         byProject: Array<{ label: string; total: number }>;
       };
       expect(body.minCohortGuard).toBe(false);
-      expect(body.byUser).toHaveLength(2);
+      expect(body.byUser).toHaveLength(3);
       expect(body.byProject).toHaveLength(1);
-      expect(body.byProject[0]!.total).toBe(2);
+      expect(body.byProject[0]!.total).toBe(3);
     } finally {
       await env.store.close();
     }
