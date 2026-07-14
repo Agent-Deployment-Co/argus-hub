@@ -338,9 +338,11 @@ const CREATE_HUB_SCHEMA_SQL = `
     friction_compactions   INTEGER,
     friction_turns         INTEGER,
     last_interruption_ms   INTEGER,
+    meta_json              TEXT NOT NULL,
+    -- title/summary come last so this matches the v1->v2 ALTER TABLE ... ADD COLUMN order
+    -- (fresh installs and upgraded stores must have identical column layout).
     title                  TEXT,
     summary                TEXT,
-    meta_json              TEXT NOT NULL,
     PRIMARY KEY (org_id, client_id, session_id)
   );
   CREATE INDEX resolved_sessions_client  ON resolved_sessions(org_id, client_id);
