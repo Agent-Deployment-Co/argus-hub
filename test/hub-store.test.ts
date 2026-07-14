@@ -55,6 +55,12 @@ function rawAll<T>(db: sqlite3.Database, sql: string, params: unknown[] = []): P
   });
 }
 
+function rawExec(db: sqlite3.Database, sql: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    db.exec(sql, (err) => (err ? reject(err) : resolve()));
+  });
+}
+
 function closeRaw(db: sqlite3.Database) {
   return new Promise<void>((resolve, reject) => {
     db.close((err) => (err ? reject(err) : resolve()));
@@ -120,6 +126,8 @@ function minimalUploadRows(sessionId = "sess-1"): HubUploadRows {
         friction_compactions: null,
         friction_turns: null,
         last_interruption_ms: null,
+        title: null,
+        summary: null,
         meta_json: JSON.stringify({
           sessionId,
           source: "claude",
@@ -163,6 +171,7 @@ function minimalUploadRows(sessionId = "sess-1"): HubUploadRows {
     tasks: [],
     interactions: [],
     invocations: [],
+    labels: [],
   };
 }
 
@@ -254,6 +263,66 @@ describe("schema", () => {
     await store1.close();
     const store2 = await openHubStore(dataDir, 2_000_000);
     await store2.close();
+  });
+
+  test("upgrades a v1 store to v2 in place, preserving data", async () => {
+    const dataDir = tempDataDir();
+    const dbPath = join(dataDir, "hub.db");
+
+    // Build a real v2 store with a synced session, then downgrade the file to look like v1
+    // (drop the v2 additions + reset user_version) so reopening exercises the migration.
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+    await syncAs(store, orgId, clientId, "alice@example.com", minimalUploadRows("sess-mig"), 1_000_000);
+    await store.close();
+
+    const raw = await openRaw(dbPath);
+    await rawExec(raw,
+      `DROP TABLE resolved_session_labels;
+       ALTER TABLE resolved_sessions DROP COLUMN title;
+       ALTER TABLE resolved_sessions DROP COLUMN summary;
+       PRAGMA user_version = 1;`);
+    await closeRaw(raw);
+
+    // Reopen — should migrate in place, not throw.
+    const upgraded = await openHubStore(dataDir, 2_000_000);
+    await upgraded.close();
+
+    const db = await openRaw(dbPath);
+    try {
+      const ver = await rawGet<{ user_version: number }>(db, "PRAGMA user_version");
+      expect(ver?.user_version).toBe(HUB_SCHEMA_VERSION);
+
+      const cols = (await rawAll<{ name: string }>(db, "PRAGMA table_info(resolved_sessions)")).map((c) => c.name);
+      expect(cols).toContain("title");
+      expect(cols).toContain("summary");
+
+      const labelTable = await rawGet<{ name: string }>(
+        db, "SELECT name FROM sqlite_schema WHERE type='table' AND name='resolved_session_labels'");
+      expect(labelTable?.name).toBe("resolved_session_labels");
+
+      // Pre-existing session data survived the upgrade.
+      const sess = await rawGet<{ session_id: string; title: string | null }>(
+        db, "SELECT session_id, title FROM resolved_sessions WHERE session_id = ?", ["sess-mig"]);
+      expect(sess?.session_id).toBe("sess-mig");
+      expect(sess?.title).toBeNull();
+    } finally {
+      await closeRaw(db);
+    }
+  });
+
+  test("refuses to open a store newer than the build (no downgrade)", async () => {
+    const dataDir = tempDataDir();
+    const dbPath = join(dataDir, "hub.db");
+    const store = await openHubStore(dataDir, 1_000_000);
+    await store.close();
+
+    const raw = await openRaw(dbPath);
+    await rawExec(raw, `PRAGMA user_version = ${HUB_SCHEMA_VERSION + 1};`);
+    await closeRaw(raw);
+
+    await expect(openHubStore(dataDir, 2_000_000)).rejects.toThrow(/newer than this build/);
   });
 });
 
@@ -500,6 +569,70 @@ describe("upsertClientSessions", () => {
         ["shared-sess-id"],
       );
       expect(count?.n).toBe(2);
+    } finally {
+      await closeRaw(db);
+    }
+    await store.close();
+  });
+
+  test("persists session title/summary and denormalized applied labels", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+
+    const rows = minimalUploadRows("sess-lab");
+    rows.sessions[0]!.title = "A concise title";
+    rows.sessions[0]!.summary = "A few sentences of summary.";
+    rows.labels = [
+      { session_id: "sess-lab", source: "claude", name: "bug", origin: "user", applied_by: "user", target_kind: "session", task_seq: null, applied_at_ms: 10 },
+      { session_id: "sess-lab", source: "claude", name: "auto", origin: "system", applied_by: "system", target_kind: "task", task_seq: 0, applied_at_ms: 11 },
+    ];
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+
+    const db = await openRaw(join(dataDir, "hub.db"));
+    try {
+      const sess = await rawGet<{ title: string | null; summary: string | null }>(
+        db, "SELECT title, summary FROM resolved_sessions WHERE session_id = ?", ["sess-lab"],
+      );
+      expect(sess?.title).toBe("A concise title");
+      expect(sess?.summary).toBe("A few sentences of summary.");
+
+      const labelCount = await rawGet<{ n: number }>(
+        db, "SELECT COUNT(*) AS n FROM resolved_session_labels WHERE org_id = ? AND session_id = ?", [orgId, "sess-lab"],
+      );
+      expect(labelCount?.n).toBe(2);
+
+      // Re-sync with the session-level label removed → the session replace drops it via CASCADE.
+      rows.labels = rows.labels!.filter((l) => l.target_kind === "task");
+      await store.upsertClientSessions(orgId, clientId, rows, 2_000_000);
+      const after = await rawGet<{ n: number }>(
+        db, "SELECT COUNT(*) AS n FROM resolved_session_labels WHERE org_id = ? AND session_id = ?", [orgId, "sess-lab"],
+      );
+      expect(after?.n).toBe(1);
+    } finally {
+      await closeRaw(db);
+    }
+    await store.close();
+  });
+
+  test("accepts an old-client payload with no labels field (defaults to none)", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+
+    // Simulate an older client whose upload omits `labels` entirely.
+    const rows = minimalUploadRows("sess-old");
+    delete (rows as { labels?: unknown }).labels;
+    await syncAs(store, orgId, clientId, "bob@example.com", rows, 1_000_000);
+
+    const db = await openRaw(join(dataDir, "hub.db"));
+    try {
+      const count = await rawGet<{ n: number }>(
+        db, "SELECT COUNT(*) AS n FROM resolved_session_labels WHERE session_id = ?", ["sess-old"],
+      );
+      expect(count?.n).toBe(0);
     } finally {
       await closeRaw(db);
     }

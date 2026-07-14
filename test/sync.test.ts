@@ -62,6 +62,8 @@ function buildPayload(
         friction_compactions: null,
         friction_turns: null,
         last_interruption_ms: null,
+        title: null,
+        summary: null,
         meta_json: JSON.stringify({ sessionId, source, project, cwd: project }),
       })),
       usage: sessions.map(({ sessionId, source = "claude", project = "/Users/you/proj" }) => ({
@@ -91,6 +93,7 @@ function buildPayload(
       tasks: [],
       interactions: [],
       invocations: [],
+      labels: [],
     },
   };
   if (opts.email) {
@@ -195,6 +198,30 @@ describe("parseUploadPayload", () => {
   test("returns 422 when schemaVersion is older than the minimum", () => {
     const result = parseUploadPayload(buildPayload([{ sessionId: "s" }], 9));
     expect("error" in result && result.status).toBe(422);
+  });
+
+  test("defaults rows.labels to [] when the client omits it", () => {
+    const payload = buildPayload([{ sessionId: "s" }]);
+    delete (payload.rows as { labels?: unknown }).labels;
+    const result = parseUploadPayload(payload);
+    expect("error" in result).toBe(false);
+    expect("rows" in result && result.rows.labels).toEqual([]);
+  });
+
+  test("passes through applied labels when present", () => {
+    const payload = buildPayload([{ sessionId: "s" }]);
+    (payload.rows as { labels: unknown[] }).labels = [
+      { session_id: "s", source: "claude", name: "bug", origin: "user", applied_by: "user", target_kind: "session", task_seq: null, applied_at_ms: 1 },
+    ];
+    const result = parseUploadPayload(payload);
+    expect("rows" in result && result.rows.labels).toHaveLength(1);
+  });
+
+  test("returns 400 when rows.labels is present but not an array", () => {
+    const payload = buildPayload([{ sessionId: "s" }]);
+    (payload.rows as { labels: unknown }).labels = "nope";
+    const result = parseUploadPayload(payload);
+    expect("error" in result && result.status).toBe(400);
   });
 });
 

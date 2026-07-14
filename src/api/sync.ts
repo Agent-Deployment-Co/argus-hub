@@ -1,5 +1,5 @@
 import type {
-  HubStore, HubUploadRows, UploadedFingerprintEntry,
+  HubStore, HubUploadRows, UploadedFingerprintEntry, UploadedLabel,
   UploadedInteraction, UploadedInvocation, UploadedSession, UploadedTask, UploadedUsage,
 } from "../store/hub-store.ts";
 import type { Context } from "hono";
@@ -19,6 +19,9 @@ import type { Context } from "hono";
 // v22 added session/task labels as two new local-only tables (not uploaded). No row shape changes.
 // v23 added is_hidden to resolved_sessions (local-only UI state); the upload query does not select
 // this column. No row shape changes.
+// NOTE (still v23, no client store bump): the client now additionally uploads the v21 title/summary
+// columns on each session and the v22 applied labels as a new `rows.labels` array. Both are additive
+// and OPTIONAL on the wire — older v23 clients omit them and still ingest — so HUB_MAX stays 23.
 export const HUB_MIN_CLIENT_SCHEMA_VERSION = 10;
 export const HUB_MAX_CLIENT_SCHEMA_VERSION = 23;
 
@@ -194,6 +197,12 @@ export function parseUploadPayload(payload: unknown): ParseResult {
   if (!sessions || !usage || !tasks || !interactions || !invocations) {
     return { error: "rows must contain sessions, usage, tasks, interactions, invocations arrays.", status: 400 };
   }
+  // Optional (added at client store v23 without a schema bump): absent → [] so older clients sync.
+  // A present-but-non-array `labels` is a malformed body.
+  if (r.labels !== undefined && !Array.isArray(r.labels)) {
+    return { error: "rows.labels must be an array when present.", status: 400 };
+  }
+  const labels = asArray<UploadedLabel>(r.labels) ?? [];
 
   const fingerprint = parseFingerprint(obj.fingerprint);
   if ("error" in fingerprint) return fingerprint;
@@ -205,6 +214,7 @@ export function parseUploadPayload(payload: unknown): ParseResult {
       tasks,
       interactions,
       invocations: invocations.map(normalizeInvocation),
+      labels,
     },
     fingerprint: fingerprint.entries,
   };
@@ -239,7 +249,8 @@ function asArray<T>(value: unknown): T[] | undefined {
   return Array.isArray(value) ? (value as T[]) : undefined;
 }
 
-/** Older clients (pre-v12) lack the friction columns — fill with NULL. */
+/** Older clients (pre-v12) lack the friction columns; clients before the title/summary upload omit
+ *  those too — fill all with NULL. */
 function normalizeSession(s: UploadedSession): UploadedSession {
   return {
     ...s,
@@ -248,6 +259,8 @@ function normalizeSession(s: UploadedSession): UploadedSession {
     friction_compactions: s.friction_compactions ?? null,
     friction_turns: s.friction_turns ?? null,
     last_interruption_ms: s.last_interruption_ms ?? null,
+    title: s.title ?? null,
+    summary: s.summary ?? null,
   };
 }
 
