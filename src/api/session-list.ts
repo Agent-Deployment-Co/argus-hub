@@ -1,4 +1,5 @@
 import { cost } from "../pricing.ts";
+import type { HubSessionSearchMatch } from "../store/hub-store.ts";
 import type {
   AgentSource,
   MessageRecord,
@@ -24,6 +25,7 @@ export interface SessionListItem {
   agentMessages: number | null;
   total: number;
   cost: number;
+  match?: HubSessionSearchMatch;
 }
 
 export interface SessionListResponse {
@@ -40,6 +42,10 @@ export interface SessionListParams {
   project?: string;
   q?: string;
   includeGenerated?: boolean;
+  /** When set, `q` is an FTS-backed match set (from `HubStore.searchSessions`) rather than a
+   *  plain substring filter — `buildSessionList` must not re-apply the substring check on top of
+   *  it, or FTS-only hits that don't literally contain the term would get dropped. */
+  matches?: Map<string, HubSessionSearchMatch>;
 }
 
 export function isArgusGeneratedSession(firstPrompt: string | null | undefined): boolean {
@@ -82,7 +88,7 @@ const SORTERS: Record<SessionSort, (a: SessionListItem, b: SessionListItem) => n
 
 export function buildSessionList(aggregates: SessionAggregate[], params: SessionListParams): SessionListResponse {
   const project = params.project?.toLowerCase();
-  const term = params.q?.trim().toLowerCase();
+  const term = params.matches ? undefined : params.q?.trim().toLowerCase();
   let items = aggregates.map(listItem);
   items = items.filter((it) => {
     if (!params.includeGenerated && isArgusGeneratedSession(it.firstPrompt)) return false;
@@ -95,6 +101,12 @@ export function buildSessionList(aggregates: SessionAggregate[], params: Session
     }
     return true;
   });
+  if (params.matches) {
+    for (const it of items) {
+      const match = params.matches.get(it.sessionId);
+      if (match) it.match = match;
+    }
+  }
   items.sort(SORTERS[params.sort]);
   const total = items.length;
   const offset = Math.max(0, params.offset);

@@ -175,6 +175,31 @@ function minimalUploadRows(sessionId = "sess-1"): HubUploadRows {
   };
 }
 
+function addTask(
+  rows: HubUploadRows,
+  sessionId: string,
+  seq: number,
+  task: { description: string; outcomeReason?: string; signals?: string[]; evidence?: string },
+): void {
+  rows.tasks.push({
+    session_id: sessionId,
+    seq,
+    source: "claude",
+    ts: 1_000_000,
+    task_json: JSON.stringify({
+      id: `${sessionId}-task-${seq}`,
+      source: "claude",
+      sourceSessionId: sessionId,
+      description: task.description,
+      evidence: task.evidence ?? "interactions: 0",
+      evidenceKind: "llm_inference",
+      outcomeReason: task.outcomeReason,
+      signals: task.signals,
+      position: { originKey: sessionId, recordIndex: 0, itemIndex: 0 },
+    }),
+  });
+}
+
 function addInvocation(rows: HubUploadRows, sessionId: string): void {
   rows.invocations.push({
     session_id: sessionId,
@@ -265,12 +290,12 @@ describe("schema", () => {
     await store2.close();
   });
 
-  test("upgrades a v1 store to v2 in place, preserving data", async () => {
+  test("upgrades a v1 store to v3 in place, preserving data", async () => {
     const dataDir = tempDataDir();
     const dbPath = join(dataDir, "hub.db");
 
-    // Build a real v2 store with a synced session, then downgrade the file to look like v1
-    // (drop the v2 additions + reset user_version) so reopening exercises the migration.
+    // Build a real v3 store with a synced session, then downgrade the file to look like v1
+    // (drop the v2 + v3 additions + reset user_version) so reopening exercises both migrations.
     const store = await openHubStore(dataDir, 1_000_000);
     const orgId = (await store.getDefaultOrgId())!;
     const clientId = newClientId();
@@ -279,7 +304,10 @@ describe("schema", () => {
 
     const raw = await openRaw(dbPath);
     await rawExec(raw,
-      `DROP TABLE resolved_session_labels;
+      `DROP TABLE resolved_sessions_fts;
+       DROP TABLE resolved_tasks_fts;
+       DROP INDEX resolved_invocations_file_path;
+       DROP TABLE resolved_session_labels;
        ALTER TABLE resolved_sessions DROP COLUMN title;
        ALTER TABLE resolved_sessions DROP COLUMN summary;
        PRAGMA user_version = 1;`);
@@ -307,6 +335,47 @@ describe("schema", () => {
         db, "SELECT session_id, title FROM resolved_sessions WHERE session_id = ?", ["sess-mig"]);
       expect(sess?.session_id).toBe("sess-mig");
       expect(sess?.title).toBeNull();
+    } finally {
+      await closeRaw(db);
+    }
+  });
+
+  test("upgrades a v2 store to v3 in place, backfilling FTS from existing rows", async () => {
+    const dataDir = tempDataDir();
+    const dbPath = join(dataDir, "hub.db");
+
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+    const rows = minimalUploadRows("sess-v2-mig");
+    rows.sessions[0]!.title = "Backfilled title";
+    rows.sessions[0]!.summary = "Backfilled summary text";
+    addTask(rows, "sess-v2-mig", 0, { description: "backfilled task about widgets" });
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+    await store.close();
+
+    // Downgrade the file to look like v2: drop the v3 FTS tables/index, reset user_version.
+    const raw = await openRaw(dbPath);
+    await rawExec(raw,
+      `DROP TABLE resolved_sessions_fts;
+       DROP TABLE resolved_tasks_fts;
+       DROP INDEX resolved_invocations_file_path;
+       PRAGMA user_version = 2;`);
+    await closeRaw(raw);
+
+    const upgraded = await openHubStore(dataDir, 2_000_000);
+
+    // Backfill ran without a re-sync — search finds the pre-existing data via both sources.
+    const summaryHit = await upgraded.searchSessions({ orgId }, { text: "Backfilled summary" });
+    expect(summaryHit.sessionIds.has("sess-v2-mig")).toBe(true);
+    const taskHit = await upgraded.searchSessions({ orgId }, { text: "widgets" });
+    expect(taskHit.sessionIds.has("sess-v2-mig")).toBe(true);
+    await upgraded.close();
+
+    const db = await openRaw(dbPath);
+    try {
+      const ver = await rawGet<{ user_version: number }>(db, "PRAGMA user_version");
+      expect(ver?.user_version).toBe(HUB_SCHEMA_VERSION);
     } finally {
       await closeRaw(db);
     }
@@ -659,6 +728,306 @@ describe("upsertClientSessions", () => {
     } finally {
       await closeRaw(db);
     }
+    await store.close();
+  });
+});
+
+// ---- searchSessions ---------------------------------------------------------------------
+
+describe("searchSessions", () => {
+  test("matches on session summary text", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+
+    const rows = minimalUploadRows("sess-summary");
+    rows.sessions[0]!.title = "Fix the flaky retry logic";
+    rows.sessions[0]!.summary = "Investigated exponential backoff in the sync client.";
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+
+    const result = await store.searchSessions({ orgId }, { text: "backoff" });
+    expect(result.sessionIds.has("sess-summary")).toBe(true);
+    const match = result.matches.get("sess-summary");
+    expect(match?.sources).toEqual(["summary"]);
+    expect(match?.snippet).toContain("");
+    await store.close();
+  });
+
+  test("matches on task description/outcomeReason/signals, excludes evidence", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+
+    const rows = minimalUploadRows("sess-task");
+    addTask(rows, "sess-task", 0, {
+      description: "Refactor the widget renderer",
+      outcomeReason: "completed after adjusting the gizmo cache",
+      signals: ["needed-clarification"],
+      evidence: "interactions: 1, 2, secretbait",
+    });
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+
+    const widget = await store.searchSessions({ orgId }, { text: "widget" });
+    expect(widget.sessionIds.has("sess-task")).toBe(true);
+    expect(widget.matches.get("sess-task")?.sources).toEqual(["task"]);
+
+    const gizmo = await store.searchSessions({ orgId }, { text: "gizmo" });
+    expect(gizmo.sessionIds.has("sess-task")).toBe(true);
+
+    const clarification = await store.searchSessions({ orgId }, { text: "clarification" });
+    expect(clarification.sessionIds.has("sess-task")).toBe(true);
+
+    // `evidence` is interaction-index bookkeeping, not prose — must never match.
+    const evidence = await store.searchSessions({ orgId }, { text: "secretbait" });
+    expect(evidence.sessionIds.has("sess-task")).toBe(false);
+
+    await store.close();
+  });
+
+  test("multi-source session ranks summary above task on equal terms", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+
+    const rows = minimalUploadRows("sess-multi");
+    rows.sessions[0]!.title = "widget work";
+    rows.sessions[0]!.summary = "";
+    addTask(rows, "sess-multi", 0, { description: "widget follow-up" });
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+
+    const result = await store.searchSessions({ orgId }, { text: "widget" });
+    const match = result.matches.get("sess-multi");
+    expect(match?.sources).toEqual(["summary", "task"]);
+  });
+
+  test("un-interpreted session (no title/summary) produces no summary FTS row", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+    await syncAs(store, orgId, clientId, "alice@example.com", minimalUploadRows("sess-plain"), 1_000_000);
+
+    const db = await openRaw(join(dataDir, "hub.db"));
+    try {
+      const row = await rawGet<{ n: number }>(
+        db, "SELECT COUNT(*) AS n FROM resolved_sessions_fts WHERE session_id = ?", ["sess-plain"],
+      );
+      expect(row?.n).toBe(0);
+    } finally {
+      await closeRaw(db);
+    }
+    await store.close();
+  });
+
+  test("org isolation: a search never returns another org's session, even on session_id collision", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgA = (await store.getDefaultOrgId())!;
+    const orgB = `org-${randomUUID()}`;
+    const db = await openRaw(join(dataDir, "hub.db"));
+    await rawExec(db, `INSERT INTO organizations(org_id, name, created_at) VALUES ('${orgB}', 'Org B', 0)`);
+    await closeRaw(db);
+
+    const rowsA = minimalUploadRows("collide-id");
+    rowsA.sessions[0]!.summary = "orgA needle text";
+    await syncAs(store, orgA, newClientId(), "alice@example.com", rowsA, 1_000_000);
+
+    const rowsB = minimalUploadRows("collide-id");
+    rowsB.sessions[0]!.summary = "orgB needle text";
+    await syncAs(store, orgB, newClientId(), "bob@example.com", rowsB, 1_000_000);
+
+    const resultA = await store.searchSessions({ orgId: orgA }, { text: "needle" });
+    expect(resultA.sessionIds.has("collide-id")).toBe(true);
+    expect(resultA.matches.get("collide-id")?.snippet).toContain("orgA");
+
+    const resultB = await store.searchSessions({ orgId: orgB }, { text: "needle" });
+    expect(resultB.sessionIds.has("collide-id")).toBe(true);
+    expect(resultB.matches.get("collide-id")?.snippet).toContain("orgB");
+
+    await store.close();
+  });
+
+  test("user scope: a search only returns sessions from the user's own clients", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const rowsAlice = minimalUploadRows("sess-alice");
+    rowsAlice.sessions[0]!.summary = "shared needle text";
+    const aliceUserId = await syncAs(store, orgId, newClientId(), "alice@example.com", rowsAlice, 1_000_000);
+
+    const rowsBob = minimalUploadRows("sess-bob");
+    rowsBob.sessions[0]!.summary = "shared needle text";
+    await syncAs(store, orgId, newClientId(), "bob@example.com", rowsBob, 1_000_000);
+
+    const result = await store.searchSessions({ orgId, userId: aliceUserId }, { text: "needle" });
+    expect(result.sessionIds.has("sess-alice")).toBe(true);
+    expect(result.sessionIds.has("sess-bob")).toBe(false);
+
+    await store.close();
+  });
+
+  test("file: matches file_path substring without tokenizing on '/'", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+    const rows = minimalUploadRows("sess-file");
+    addInvocation(rows, "sess-file");
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+
+    const result = await store.searchSessions({ orgId }, { file: "myproject/file.ts" });
+    expect(result.sessionIds.has("sess-file")).toBe(true);
+
+    const miss = await store.searchSessions({ orgId }, { file: "nope.ts" });
+    expect(miss.sessionIds.has("sess-file")).toBe(false);
+    await store.close();
+  });
+
+  test("metadata-only match (first_prompt) gets no FTS sources but is still a candidate", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+    const rows = minimalUploadRows("sess-meta");
+    rows.sessions[0]!.first_prompt = "please help with the frobnicator";
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+
+    const result = await store.searchSessions({ orgId }, { text: "frobnicator" });
+    expect(result.sessionIds.has("sess-meta")).toBe(true);
+    expect(result.matches.get("sess-meta")?.sources).toEqual([]);
+    await store.close();
+  });
+
+  test("re-sync replacement: dropped task text no longer matches, changed summary does", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+
+    const rows = minimalUploadRows("sess-resync");
+    rows.sessions[0]!.summary = "original summary";
+    addTask(rows, "sess-resync", 0, { description: "task about kumquats" });
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+
+    let result = await store.searchSessions({ orgId }, { text: "kumquats" });
+    expect(result.sessionIds.has("sess-resync")).toBe(true);
+
+    const rows2 = minimalUploadRows("sess-resync");
+    rows2.sessions[0]!.summary = "updated summary about durians";
+    await store.upsertClientSessions(orgId, clientId, rows2, 2_000_000);
+
+    result = await store.searchSessions({ orgId }, { text: "kumquats" });
+    expect(result.sessionIds.has("sess-resync")).toBe(false);
+
+    result = await store.searchSessions({ orgId }, { text: "durians" });
+    expect(result.sessionIds.has("sess-resync")).toBe(true);
+
+    await store.close();
+  });
+
+  test("malformed task_json is skipped without failing the sync", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+
+    const rows = minimalUploadRows("sess-bad-task");
+    rows.tasks.push({ session_id: "sess-bad-task", seq: 0, source: "claude", ts: 1, task_json: "{not json" });
+    await expect(syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000)).resolves.toBeTruthy();
+
+    const db = await openRaw(join(dataDir, "hub.db"));
+    try {
+      const ftsCount = await rawGet<{ n: number }>(
+        db, "SELECT COUNT(*) AS n FROM resolved_tasks_fts WHERE session_id = ?", ["sess-bad-task"],
+      );
+      expect(ftsCount?.n).toBe(0);
+      const taskCount = await rawGet<{ n: number }>(
+        db, "SELECT COUNT(*) AS n FROM resolved_tasks WHERE session_id = ?", ["sess-bad-task"],
+      );
+      expect(taskCount?.n).toBe(1);
+    } finally {
+      await closeRaw(db);
+    }
+    await store.close();
+  });
+
+  test("empty store / no text or file: returns no candidates without throwing", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const result = await store.searchSessions({ orgId }, {});
+    expect(result.sessionIds.size).toBe(0);
+    expect(result.matches.size).toBe(0);
+    await store.close();
+  });
+});
+
+// ---- readSessionIdsForLabels --------------------------------------------------------------
+
+describe("readSessionIdsForLabels", () => {
+  test("any: union across sessions with any of the requested labels", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+
+    const rows = minimalUploadRows("sess-label-any");
+    rows.labels = [
+      { session_id: "sess-label-any", source: "claude", name: "bug", origin: "user", applied_by: "user", target_kind: "session", task_seq: null, applied_at_ms: 10 },
+    ];
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+
+    const result = await store.readSessionIdsForLabels(orgId, ["bug", "feature"], "any");
+    expect(result.has("sess-label-any")).toBe(true);
+    await store.close();
+  });
+
+  test("all: per-client intersection, requires every requested label on the same session", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+
+    const rows = minimalUploadRows("sess-label-all");
+    rows.labels = [
+      { session_id: "sess-label-all", source: "claude", name: "bug", origin: "user", applied_by: "user", target_kind: "session", task_seq: null, applied_at_ms: 10 },
+      { session_id: "sess-label-all", source: "claude", name: "urgent", origin: "user", applied_by: "user", target_kind: "session", task_seq: null, applied_at_ms: 11 },
+    ];
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+
+    const both = await store.readSessionIdsForLabels(orgId, ["bug", "urgent"], "all");
+    expect(both.has("sess-label-all")).toBe(true);
+
+    const missingOne = await store.readSessionIdsForLabels(orgId, ["bug", "nonexistent"], "all");
+    expect(missingOne.has("sess-label-all")).toBe(false);
+    await store.close();
+  });
+
+  test("labels are per-client namespaced: same name on different clients doesn't satisfy 'all' across clients", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const clientA = newClientId();
+    const rowsA = minimalUploadRows("sess-a");
+    rowsA.labels = [
+      { session_id: "sess-a", source: "claude", name: "bug", origin: "user", applied_by: "user", target_kind: "session", task_seq: null, applied_at_ms: 10 },
+    ];
+    await syncAs(store, orgId, clientA, "alice@example.com", rowsA, 1_000_000);
+
+    const clientB = newClientId();
+    const rowsB = minimalUploadRows("sess-b");
+    rowsB.labels = [
+      { session_id: "sess-b", source: "claude", name: "urgent", origin: "user", applied_by: "user", target_kind: "session", task_seq: null, applied_at_ms: 10 },
+    ];
+    await syncAs(store, orgId, clientB, "bob@example.com", rowsB, 1_000_000);
+
+    const result = await store.readSessionIdsForLabels(orgId, ["bug", "urgent"], "all");
+    expect(result.size).toBe(0);
     await store.close();
   });
 });

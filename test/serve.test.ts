@@ -44,11 +44,20 @@ function closeDb(db: Database): Promise<void> {
   });
 }
 
-function buildUploadPayload(sessions: Array<{ id: string; source?: string; project?: string }>): HubUploadPayload {
+function buildUploadPayload(
+  sessions: Array<{
+    id: string;
+    source?: string;
+    project?: string;
+    title?: string;
+    summary?: string;
+    labels?: string[];
+  }>,
+): HubUploadPayload {
   return {
     schemaVersion: HUB_MAX_CLIENT_SCHEMA_VERSION,
     rows: {
-      sessions: sessions.map(({ id, source = "claude", project = "/Users/you/proj" }) => ({
+      sessions: sessions.map(({ id, source = "claude", project = "/Users/you/proj", title, summary }) => ({
         session_id: id,
         source,
         project,
@@ -63,8 +72,8 @@ function buildUploadPayload(sessions: Array<{ id: string; source?: string; proje
         friction_compactions: null,
         friction_turns: null,
         last_interruption_ms: null,
-        title: null,
-        summary: null,
+        title: title ?? null,
+        summary: summary ?? null,
         meta_json: JSON.stringify({ sessionId: id, source, project, cwd: project, filePath: "" }),
       })),
       usage: sessions.map(({ id, source = "claude", project = "/Users/you/proj" }) => ({
@@ -94,7 +103,18 @@ function buildUploadPayload(sessions: Array<{ id: string; source?: string; proje
       tasks: [],
       interactions: [],
       invocations: [],
-      labels: [],
+      labels: sessions.flatMap(({ id, labels }) =>
+        (labels ?? []).map((name) => ({
+          session_id: id,
+          source: "claude",
+          name,
+          origin: "user",
+          applied_by: "user",
+          target_kind: "session",
+          task_seq: null,
+          applied_at_ms: 1_000_000,
+        })),
+      ),
     },
   };
 }
@@ -130,7 +150,11 @@ async function openTestEnv(): Promise<TestEnv> {
 
 /** Sync a fixture payload from an Argus client whose claude.oauth.email fingerprint is
  *  `email`. Returns the resolved user_id so callers can use it in URL filters. */
-async function syncAs(env: TestEnv, email: string, sessions: Array<{ id: string }>): Promise<string> {
+async function syncAs(
+  env: TestEnv,
+  email: string,
+  sessions: Array<{ id: string; source?: string; project?: string; title?: string; summary?: string; labels?: string[] }>,
+): Promise<string> {
   const app = createHubApp(env.store);
   const clientId = env.clientFor(email);
   const payload = {
@@ -368,6 +392,111 @@ describe("GET /api/sessions", () => {
       expect(body.rows).toHaveLength(2);
       expect(body.limit).toBe(2);
       expect(body.offset).toBe(0);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("?q= searches session summaries via FTS and attaches a match", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncAs(env, "alice@example.com", [
+        { id: "s1", summary: "Investigated exponential backoff in the sync client." },
+        { id: "s2", summary: "Unrelated dashboard styling tweaks." },
+      ]);
+
+      const res = await app.request("/api/sessions?q=backoff");
+      expect(res.status).toBe(200);
+      const body = await res.json() as {
+        rows: Array<{ sessionId: string; match?: { sources: string[]; snippet: string } }>;
+        total: number;
+      };
+      expect(body.total).toBe(1);
+      expect(body.rows[0]!.sessionId).toBe("s1");
+      expect(body.rows[0]!.match?.sources).toEqual(["summary"]);
+      expect(body.rows[0]!.match?.snippet).toBeTruthy();
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("?q= with multiple terms doesn't drop a hit that isn't a literal contiguous substring", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      // Both terms are present, but not adjacent — a naive substring check on "client backoff"
+      // wouldn't match this text, while FTS5's implicit AND of quoted tokens does.
+      await syncAs(env, "alice@example.com", [
+        { id: "s1", summary: "Restarted the flaky client after a long backoff." },
+      ]);
+
+      const res = await app.request(`/api/sessions?${new URLSearchParams({ q: "client backoff" })}`);
+      const body = await res.json() as { total: number; rows: Array<{ sessionId: string }> };
+      expect(body.total).toBe(1);
+      expect(body.rows[0]!.sessionId).toBe("s1");
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("?file= matches file path substring", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncAs(env, "alice@example.com", [{ id: "s1" }, { id: "s2" }]);
+      const clientId = env.clientFor("alice@example.com");
+      const orgId = env.orgId;
+      // Re-upload s1 alongside its invocation — invocations only attach to sessions present in
+      // the same upload batch (mirrors what a real client sync always does).
+      const payload = buildUploadPayload([{ id: "s1" }]);
+      await env.store.upsertClientSessions(orgId, clientId, {
+        ...payload.rows,
+        invocations: [{
+          session_id: "s1", seq: 0, source: "claude", interaction_seq: null,
+          tool: "Read", category: "file-io", mcp_server: null, mcp_tool: null, skill: null,
+          file_path: "/Users/you/proj/src/widget.ts", date: "2026-01-01", cwd: "/Users/you/proj",
+          args: null, approx_result_tokens: 0,
+        }],
+      }, 2_000_000);
+
+      const res = await app.request("/api/sessions?file=widget.ts");
+      const body = await res.json() as { total: number; rows: Array<{ sessionId: string }> };
+      expect(body.total).toBe(1);
+      expect(body.rows[0]!.sessionId).toBe("s1");
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("?label= intersects the search/whole set with sessions carrying that applied label", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncAs(env, "alice@example.com", [
+        { id: "s1", labels: ["bug"] },
+        { id: "s2", labels: ["feature"] },
+      ]);
+
+      const res = await app.request("/api/sessions?label=bug");
+      const body = await res.json() as { total: number; rows: Array<{ sessionId: string }> };
+      expect(body.total).toBe(1);
+      expect(body.rows[0]!.sessionId).toBe("s1");
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("?q= with no matches returns an empty (not error) result", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncAs(env, "alice@example.com", [{ id: "s1", summary: "some summary" }]);
+      const res = await app.request("/api/sessions?q=nonexistentterm");
+      expect(res.status).toBe(200);
+      const body = await res.json() as { total: number; rows: unknown[] };
+      expect(body.total).toBe(0);
+      expect(body.rows).toEqual([]);
     } finally {
       await env.store.close();
     }

@@ -251,15 +251,39 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     if (!VALID_SORTS.has(sort)) return c.json({ error: `Unknown sort "${sort}".` }, 400);
 
     const userId = parseUserScope(c);
-    const aggregates = await store.readSessionAggregates({ orgId, userId }, query);
+    const scope = { orgId, userId };
+
+    const q = c.req.query("q") || undefined;
+    const file = c.req.query("file") || undefined;
+    const labelParam = c.req.query("label");
+    const labels = labelParam ? labelParam.split(",").map((s) => s.trim()).filter(Boolean) : [];
+    const labelMode = c.req.query("labelMode") === "all" ? "all" : "any";
+
+    // Search/label narrow the candidate session set up front, so readSessionAggregates only
+    // hydrates matched sessions rather than the whole in-window set (avoids the wasteful
+    // hydrate-then-JS-filter the substring path used to do).
+    let sessionIds: string[] | undefined;
+    let matches: SessionListParams["matches"];
+    if (q || file) {
+      const search = await store.searchSessions(scope, { ...query, text: q, file });
+      sessionIds = [...search.sessionIds];
+      matches = search.matches;
+    }
+    if (labels.length) {
+      const labeled = await store.readSessionIdsForLabels(orgId, labels, labelMode);
+      sessionIds = sessionIds ? sessionIds.filter((id) => labeled.has(id)) : [...labeled];
+    }
+
+    const aggregates = await store.readSessionAggregates(scope, query, sessionIds);
 
     const params: SessionListParams = {
       sort: sort as SessionSort,
       limit: Math.min(MAX_LIMIT, Math.max(1, parseIntOr(c.req.query("limit"), DEFAULT_LIMIT))),
       offset: Math.max(0, parseIntOr(c.req.query("offset"), 0)),
       project: c.req.query("project") || undefined,
-      q: c.req.query("q") || undefined,
+      q: matches ? undefined : q,
       includeGenerated: c.req.query("includeGenerated") === "true",
+      matches,
     };
     return c.json(buildSessionList(aggregates, params));
   });

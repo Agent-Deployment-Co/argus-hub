@@ -17,7 +17,7 @@ import type {
 } from "../types.ts";
 import { emptyFrictionTotals, foldFriction, HIGH_TOKEN_GROWTH_RATIO } from "../health.ts";
 
-export const HUB_SCHEMA_VERSION = 2;
+export const HUB_SCHEMA_VERSION = 3;
 export const HUB_APPLICATION_ID = 0x48554200; // "HUB\0"
 
 // ---- Raw row types (mirrors client argus.db resolved_* column shapes) -------------------
@@ -265,6 +265,25 @@ const RESOLVED_SESSION_LABELS_DDL = `
   CREATE INDEX resolved_session_labels_name  ON resolved_session_labels(org_id, name);
 `;
 
+// Full-text search tables (added in schema v3). Every table carries the full (org_id, client_id,
+// session_id) triple as UNINDEXED columns — never just session_id — because session_id collides
+// across clients within an org (see HubScope). Candidate matching must correlate on the triple via
+// EXISTS, never `session_id IN (...)`, or a search would leak matches across clients/orgs.
+const SEARCH_FTS_DDL = `
+  CREATE VIRTUAL TABLE resolved_sessions_fts USING fts5(
+    org_id UNINDEXED, client_id UNINDEXED, session_id UNINDEXED, text
+  );
+  CREATE VIRTUAL TABLE resolved_tasks_fts USING fts5(
+    org_id UNINDEXED, client_id UNINDEXED, session_id UNINDEXED, text
+  );
+`;
+
+// File paths tokenize badly under FTS5's default tokenizer (splits on '/' and '.'), so file search
+// stays a plain substring index rather than an FTS table.
+const RESOLVED_INVOCATIONS_FILE_PATH_INDEX_SQL =
+  "CREATE INDEX IF NOT EXISTS resolved_invocations_file_path " +
+  "ON resolved_invocations(org_id, file_path) WHERE file_path IS NOT NULL";
+
 const CREATE_HUB_SCHEMA_SQL = `
   CREATE TABLE organizations (
     org_id     TEXT PRIMARY KEY,
@@ -434,7 +453,9 @@ const CREATE_HUB_SCHEMA_SQL = `
   CREATE INDEX resolved_invocations_date ON resolved_invocations(org_id, date);
   CREATE INDEX resolved_invocations_mcp_server ON resolved_invocations(mcp_server) WHERE mcp_server IS NOT NULL;
   CREATE INDEX resolved_invocations_skill      ON resolved_invocations(skill) WHERE skill IS NOT NULL;
+  ${RESOLVED_INVOCATIONS_FILE_PATH_INDEX_SQL};
   ${RESOLVED_SESSION_LABELS_DDL}
+  ${SEARCH_FTS_DDL}
 `;
 
 // Forward-only, in-place migrations keyed by the version they upgrade FROM. Each step is purely
@@ -447,6 +468,70 @@ const HUB_MIGRATIONS: Record<number, string> = {
     ALTER TABLE resolved_sessions ADD COLUMN summary TEXT;
     ${RESOLVED_SESSION_LABELS_DDL}
   `,
+  // v2 → v3: full-text search over session title/summary + task text, plus the file-path index.
+  // Additive (new virtual tables + index); existing rows are untouched. The SQL-only part backfills
+  // resolved_sessions_fts directly; resolved_tasks_fts needs task_json parsed in JS, done by
+  // backfillTasksFts (HUB_MIGRATIONS_POST[2]) right after this SQL runs.
+  2: `
+    ${SEARCH_FTS_DDL}
+    ${RESOLVED_INVOCATIONS_FILE_PATH_INDEX_SQL};
+    INSERT INTO resolved_sessions_fts(org_id, client_id, session_id, text)
+    SELECT org_id, client_id, session_id, trim(coalesce(title, '') || ' ' || coalesce(summary, ''))
+    FROM resolved_sessions
+    WHERE coalesce(title, '') || coalesce(summary, '') <> '';
+  `,
+};
+
+/** Projects a `TaskFact` JSON blob into its FTS text, mirroring the CLI's `writeSessionTasks`
+ *  projection: description + outcomeReason + signals. Deliberately excludes `.evidence` (an
+ *  interaction-index bookkeeping string, not prose). Returns null (skip the FTS row) for
+ *  malformed JSON or empty projected text — never throws, so one bad row can't fail a sync or
+ *  a migration backfill. */
+function projectTaskFtsText(taskJson: string): string | null {
+  try {
+    const task = JSON.parse(taskJson) as TaskFact;
+    const parts = [task.description ?? "", task.outcomeReason ?? "", ...(task.signals ?? [])];
+    const text = parts.join(" ").replace(/\s+/g, " ").trim();
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
+/** One-time JS-side backfill of `resolved_tasks_fts` from existing `resolved_tasks.task_json`,
+ *  run once as part of the v2→v3 migration. Batched so a large pre-existing store doesn't hold
+ *  everything in memory at once. */
+async function backfillTasksFts(db: Database): Promise<void> {
+  const BATCH_SIZE = 500;
+  let lastRowid = 0;
+  for (;;) {
+    const rows = await all<{
+      rowid: number; org_id: string; client_id: string; session_id: string; task_json: string;
+    }>(
+      db,
+      "SELECT rowid, org_id, client_id, session_id, task_json FROM resolved_tasks " +
+        "WHERE rowid > ? ORDER BY rowid LIMIT ?",
+      [lastRowid, BATCH_SIZE],
+    );
+    if (!rows.length) break;
+
+    const ftsRows: unknown[][] = [];
+    for (const row of rows) {
+      const text = projectTaskFtsText(row.task_json);
+      if (text) ftsRows.push([row.org_id, row.client_id, row.session_id, text]);
+    }
+    await insertRows(db, "resolved_tasks_fts", ["org_id", "client_id", "session_id", "text"], ftsRows);
+
+    lastRowid = rows[rows.length - 1]!.rowid;
+    if (rows.length < BATCH_SIZE) break;
+  }
+}
+
+// JS-side steps that must run after a migration's SQL, keyed by the same "upgrading FROM version"
+// convention as HUB_MIGRATIONS. Only versions that need non-SQL work (e.g. parsing JSON blobs)
+// appear here.
+const HUB_MIGRATIONS_POST: Record<number, (db: Database) => Promise<void>> = {
+  2: backfillTasksFts,
 };
 
 // ---- DB open / init ---------------------------------------------------------------------
@@ -521,6 +606,8 @@ async function initHubDatabase(db: Database, path: string): Promise<void> {
           );
         }
         await exec(db, sql);
+        const postMigrate = HUB_MIGRATIONS_POST[v];
+        if (postMigrate) await postMigrate(db);
         await exec(db, `PRAGMA user_version = ${v + 1}`);
       }
     });
@@ -540,6 +627,7 @@ async function initHubDatabase(db: Database, path: string): Promise<void> {
     "CREATE INDEX IF NOT EXISTS resolved_usage_client_session_date " +
       "ON resolved_usage(org_id, client_id, session_id, date)",
   );
+  await exec(db, RESOLVED_INVOCATIONS_FILE_PATH_INDEX_SQL);
 
   // Secure WAL files too.
   if (process.platform !== "win32") {
@@ -605,6 +693,54 @@ export interface HubScope {
   orgId: string;
   userId?: string;
   clientId?: string;
+}
+
+export type HubSessionSearchSource = "summary" | "task";
+
+/** Most-distilled-first, matching the CLI's SEARCH.md convention. */
+const SEARCH_SOURCE_ORDER: readonly HubSessionSearchSource[] = ["summary", "task"];
+
+// bm25() weights per FTS source — summary text (already model-distilled) outranks task text on
+// ties. Tunable; not yet validated against a real multi-org corpus (see HUB_SEARCH_PLAN.md §10).
+const FTS_WEIGHT_SUMMARY = 3;
+const FTS_WEIGHT_TASK = 2;
+// Sits below any real (negated-bm25) FTS score, so metadata/path-only matches (no FTS row) always
+// sort last among matches.
+const METADATA_MATCH_SCORE = -1_000_000;
+
+export interface HubSessionSearchQuery extends ResolvedQuery {
+  text?: string;
+  file?: string;
+}
+
+export interface HubSessionSearchMatch {
+  /** Higher is better. Weighted, negated bm25() sum across matched FTS sources, or
+   *  `METADATA_MATCH_SCORE` for a metadata/path-only match with no FTS row. */
+  score: number;
+  /** `char(1)`/`char(2)`-sentineled (never HTML) — safe to render without escaping. Empty for a
+   *  metadata/path-only match (no FTS row to snippet). */
+  snippet: string;
+  /** Deduped, most-distilled-first. Empty for a metadata/path-only match. */
+  sources: HubSessionSearchSource[];
+}
+
+export interface HubSessionSearchResult {
+  /** Bare `session_id`s — see the `searchSessions` doc comment for why this isn't the
+   *  `client_id:session_id` compound key. */
+  sessionIds: Set<string>;
+  matches: Map<string, HubSessionSearchMatch>;
+}
+
+/** Escapes freeform user input for FTS5 MATCH: split on whitespace, wrap each token in double
+ *  quotes (escaping embedded `"` as `""`), join with spaces. Produces an implicit AND of quoted
+ *  phrases, immune to FTS5 operator injection (`-`, `*`, `:`, …) from raw user text. */
+function toFtsMatchQuery(text: string): string {
+  return text
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => `"${token.replace(/"/g, '""')}"`)
+    .join(" ");
 }
 
 export interface HubTaskRow {
@@ -865,6 +1001,28 @@ export class HubStore {
               session.meta_json,
             ],
           );
+
+          // FK CASCADE (above DELETE) already cleared child rows in resolved_tasks etc., but it
+          // doesn't reach virtual tables under trusted_schema=OFF — so FTS needs its own explicit
+          // delete-then-insert here, same discipline as the base tables.
+          await run(
+            this.db,
+            "DELETE FROM resolved_sessions_fts WHERE org_id = ? AND client_id = ? AND session_id = ?",
+            [orgId, clientId, sid],
+          );
+          await run(
+            this.db,
+            "DELETE FROM resolved_tasks_fts WHERE org_id = ? AND client_id = ? AND session_id = ?",
+            [orgId, clientId, sid],
+          );
+          const summaryFtsText = [session.title ?? "", session.summary ?? ""].join(" ").trim();
+          if (summaryFtsText) {
+            await run(
+              this.db,
+              "INSERT INTO resolved_sessions_fts(org_id, client_id, session_id, text) VALUES (?, ?, ?, ?)",
+              [orgId, clientId, sid, summaryFtsText],
+            );
+          }
         }
 
         const sessionIds = new Set(rows.sessions.map((s) => s.session_id));
@@ -884,13 +1042,26 @@ export class HubStore {
           ]),
         );
 
+        const uploadedTasks = rows.tasks.filter((t) => sessionIds.has(t.session_id));
         await insertRows(
           this.db,
           "resolved_tasks",
           ["org_id", "client_id", "session_id", "seq", "source", "ts", "task_json"],
-          rows.tasks.filter((t) => sessionIds.has(t.session_id)).map((t) => [
+          uploadedTasks.map((t) => [
             orgId, clientId, t.session_id, t.seq, t.source, t.ts, t.task_json,
           ]),
+        );
+
+        const taskFtsRows: unknown[][] = [];
+        for (const t of uploadedTasks) {
+          const text = projectTaskFtsText(t.task_json);
+          if (text) taskFtsRows.push([orgId, clientId, t.session_id, text]);
+        }
+        await insertRows(
+          this.db,
+          "resolved_tasks_fts",
+          ["org_id", "client_id", "session_id", "text"],
+          taskFtsRows,
         );
 
         await insertRows(
@@ -1090,12 +1261,26 @@ export class HubStore {
     return { messages, sessions, toolResults, tasksBySession };
   }
 
-  async readSessionAggregates(scope: HubScope, query?: ResolvedQuery): Promise<SessionAggregate[]> {
+  /** `sessionIds`, when passed, narrows to exactly that candidate set (e.g. from
+   *  `searchSessions`/label intersect) instead of hydrating every in-window session and
+   *  filtering in JS. An empty array (as opposed to undefined) means "no candidates matched" —
+   *  short-circuits to []. */
+  async readSessionAggregates(
+    scope: HubScope,
+    query?: ResolvedQuery,
+    sessionIds?: string[],
+  ): Promise<SessionAggregate[]> {
+    if (sessionIds && sessionIds.length === 0) return [];
     const expanded = await this.expandScope(scope);
     return this.schedule(async () => {
       const sessionConds = [scopeWhereSql(expanded, "s")];
       const sessionParams: unknown[] = [...scopeParams(expanded)];
       sessionConds.push("s.archived = 0");
+
+      if (sessionIds) {
+        sessionConds.push(`s.session_id IN (${sessionIds.map(() => "?").join(", ")})`);
+        sessionParams.push(...sessionIds);
+      }
 
       if (query?.sources?.length) {
         sessionConds.push(`s.source IN (${query.sources.map(() => "?").join(", ")})`);
@@ -1166,6 +1351,177 @@ export class HubStore {
         lastTs: row.last_ts,
         messageCount: row.message_count,
       }));
+    });
+  }
+
+  // ---- Search -----------------------------------------------------------------------------
+
+  /** Full-text + metadata session search, scoped exactly like every other Hub read (org, and
+   *  optionally user/client). The candidate query and FTS `MATCH` correlate on the full
+   *  (org_id, client_id, session_id) triple, never `session_id` alone, so a search can never
+   *  surface a match belonging to a different client/org whose session_id happens to collide
+   *  (see the module-level comment on `SEARCH_FTS_DDL`).
+   *
+   *  `sessionIds`/`matches` are keyed by bare `session_id` — matching `SessionAggregate` /
+   *  `SessionListItem`, which don't carry `client_id` today — not the `client_id:session_id`
+   *  compound key. Org/client isolation is still fully enforced inside the query itself; this
+   *  only affects the (already pre-existing, org-scoped) risk of two different clients' sessions
+   *  sharing a session_id colliding in the *display* layer, same as the rest of the session list. */
+  async searchSessions(scope: HubScope, query: HubSessionSearchQuery): Promise<HubSessionSearchResult> {
+    const expanded = await this.expandScope(scope);
+    if (expanded.empty) return { sessionIds: new Set(), matches: new Map() };
+    return this.schedule(async () => {
+      const conds = [scopeWhereSql(expanded, "s"), "s.archived = 0"];
+      const params: unknown[] = [...scopeParams(expanded)];
+
+      if (query.sources?.length) {
+        conds.push(`s.source IN (${query.sources.map(() => "?").join(", ")})`);
+        params.push(...query.sources);
+      }
+      if (query.projectSubstring) {
+        conds.push("instr(s.cwd, ?) > 0");
+        params.push(query.projectSubstring);
+      }
+
+      const dateConds: string[] = [];
+      const dateParams: unknown[] = [];
+      if (query.since) { dateConds.push("m.date >= ?"); dateParams.push(query.since); }
+      if (query.until) { dateConds.push("m.date <= ?"); dateParams.push(query.until); }
+      if (dateConds.length) {
+        conds.push(
+          `EXISTS (SELECT 1 FROM resolved_usage m WHERE m.org_id = s.org_id AND m.client_id = s.client_id ` +
+            `AND m.session_id = s.session_id AND ${dateConds.join(" AND ")})`,
+        );
+        params.push(...dateParams);
+      }
+
+      if (query.file) {
+        conds.push(
+          `EXISTS (SELECT 1 FROM resolved_invocations i WHERE i.org_id = s.org_id AND i.client_id = s.client_id ` +
+            `AND i.session_id = s.session_id AND instr(lower(i.file_path), lower(?)) > 0)`,
+        );
+        params.push(query.file);
+      }
+
+      const text = query.text?.trim();
+      let ftsMatch = "";
+      if (text) {
+        ftsMatch = toFtsMatchQuery(text);
+        const lowered = text.toLowerCase();
+        conds.push(`(
+          instr(lower(coalesce(s.first_prompt, '')), ?) > 0
+          OR instr(lower(s.project), ?) > 0
+          OR instr(lower(s.source), ?) > 0
+          OR EXISTS (SELECT 1 FROM resolved_sessions_fts f WHERE f.org_id = s.org_id AND f.client_id = s.client_id
+                     AND f.session_id = s.session_id AND resolved_sessions_fts MATCH ?)
+          OR EXISTS (SELECT 1 FROM resolved_tasks_fts f WHERE f.org_id = s.org_id AND f.client_id = s.client_id
+                     AND f.session_id = s.session_id AND resolved_tasks_fts MATCH ?)
+        )`);
+        params.push(lowered, lowered, lowered, ftsMatch, ftsMatch);
+      }
+
+      const rows = await all<{ session_id: string }>(
+        this.db,
+        `SELECT DISTINCT s.session_id AS session_id FROM resolved_sessions s WHERE ${conds.join(" AND ")}`,
+        params,
+      );
+      const sessionIds = new Set(rows.map((r) => r.session_id));
+      const matches = new Map<string, HubSessionSearchMatch>();
+      if (!sessionIds.size || !text) return { sessionIds, matches };
+
+      // Snippet/score queries, one per FTS table (snippet() can't combine with GROUP BY, so these
+      // can't be folded into one query). Scoped the same way as the candidate query, but the
+      // org_id/client_id filter here is a post-MATCH plain-column filter (UNINDEXED columns), not
+      // an indexed lookup — correctness relies on the triple correlation, perf relies on MATCH
+      // already narrowing hard before it. Fine at expected corpus sizes.
+      const scopeCond = scopeWhereSql(expanded);
+      const scopeP = scopeParams(expanded);
+      const [summaryRows, taskRows] = await Promise.all([
+        all<{ session_id: string; score: number; snip: string }>(
+          this.db,
+          `SELECT session_id, bm25(resolved_sessions_fts) AS score,
+                  snippet(resolved_sessions_fts, 3, char(1), char(2), '…', 12) AS snip
+           FROM resolved_sessions_fts WHERE resolved_sessions_fts MATCH ? AND ${scopeCond}`,
+          [ftsMatch, ...scopeP],
+        ),
+        all<{ session_id: string; score: number; snip: string }>(
+          this.db,
+          `SELECT session_id, bm25(resolved_tasks_fts) AS score,
+                  snippet(resolved_tasks_fts, 3, char(1), char(2), '…', 12) AS snip
+           FROM resolved_tasks_fts WHERE resolved_tasks_fts MATCH ? AND ${scopeCond}`,
+          [ftsMatch, ...scopeP],
+        ),
+      ]);
+
+      // bm25() is lower-is-better; negate so a higher combined score means a better match, then
+      // weight per source so the most-distilled source (summary) wins ties over task text.
+      const applyMatch = (
+        rowsToApply: { session_id: string; score: number; snip: string }[],
+        source: HubSessionSearchSource,
+        weight: number,
+      ) => {
+        for (const row of rowsToApply) {
+          if (!sessionIds.has(row.session_id)) continue;
+          const contribution = weight * -row.score;
+          const existing = matches.get(row.session_id);
+          if (existing) {
+            existing.score += contribution;
+            if (!existing.sources.includes(source)) existing.sources.push(source);
+          } else {
+            matches.set(row.session_id, { score: contribution, snippet: row.snip, sources: [source] });
+          }
+        }
+      };
+      applyMatch(summaryRows, "summary", FTS_WEIGHT_SUMMARY);
+      applyMatch(taskRows, "task", FTS_WEIGHT_TASK);
+      for (const match of matches.values()) {
+        match.sources.sort((a, b) => SEARCH_SOURCE_ORDER.indexOf(a) - SEARCH_SOURCE_ORDER.indexOf(b));
+      }
+
+      // Metadata/path-only matches (no FTS row at all) get a fixed floor score so they always
+      // sort below every real FTS hit, however weak.
+      for (const id of sessionIds) {
+        if (!matches.has(id)) matches.set(id, { score: METADATA_MATCH_SCORE, snippet: "", sources: [] });
+      }
+
+      return { sessionIds, matches };
+    });
+  }
+
+  /** Session ids (within an org) carrying every (mode "all") or any (mode "any") of the given
+   *  applied label names. Labels are per-client namespaced (client A's "work" != client B's
+   *  "work"), so "all" intersects per (client_id, session_id), not just by name. */
+  async readSessionIdsForLabels(
+    orgId: string,
+    names: string[],
+    mode: "any" | "all" = "any",
+  ): Promise<Set<string>> {
+    return this.schedule(async () => {
+      if (!names.length) return new Set<string>();
+      const placeholders = names.map(() => "?").join(", ");
+      const rows = await all<{ client_id: string; session_id: string; name: string }>(
+        this.db,
+        `SELECT DISTINCT client_id, session_id, name FROM resolved_session_labels
+         WHERE org_id = ? AND name IN (${placeholders})`,
+        [orgId, ...names],
+      );
+      if (mode === "any") return new Set(rows.map((r) => r.session_id));
+
+      const byClient = new Map<string, Map<string, Set<string>>>();
+      for (const r of rows) {
+        let bySession = byClient.get(r.client_id);
+        if (!bySession) { bySession = new Map(); byClient.set(r.client_id, bySession); }
+        let matched = bySession.get(r.session_id);
+        if (!matched) { matched = new Set(); bySession.set(r.session_id, matched); }
+        matched.add(r.name);
+      }
+      const result = new Set<string>();
+      for (const bySession of byClient.values()) {
+        for (const [sessionId, matched] of bySession) {
+          if (names.every((n) => matched.has(n))) result.add(sessionId);
+        }
+      }
+      return result;
     });
   }
 
