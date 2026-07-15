@@ -62,6 +62,20 @@ export const CATEGORY_PALETTE = [
   "#ef8920", "#5dbcdf", "#e2302c", "#286992", "#f3d7ba", "#f9ebdc", "#fefaf5", "#ef8920", "#5dbcdf",
 ];
 
+/** Stable per-source hues for Claude/Codex comparisons — same family mapping as modelFamilyColor
+ *  (Claude=orange, Codex=teal, Gemini=blue, Cowork=muted), so a source reads the same color
+ *  everywhere on the page. */
+export const SOURCE_COLORS: Record<string, string> = {
+  claude: "#ef8920",
+  codex: "#2a8090",
+  gemini: "#5dbcdf",
+  cowork: "#887060",
+};
+
+export function sourceColor(source: string): string {
+  return SOURCE_COLORS[source] ?? "#887060";
+}
+
 /** Color models by family: Claude=oranges, Gemini=blues, GPT=greens, Codex=teals, other=muted. */
 export function modelFamilyColor(name: string): string {
   const n = String(name).toLowerCase();

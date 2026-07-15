@@ -11,7 +11,9 @@ export interface Recommendation {
 
 export function computeRecommendations(d: Dashboard): Recommendation[] {
   const rules: Array<(d: Dashboard) => Recommendation | null> = [
-    ruleUnusedPlugins,
+    // ruleUnusedPlugins intentionally omitted: the hub has no install/enable manifest, only
+    // invocation records, so "enabled but unused" has no denominator to compute from
+    // (TOOLS_PLAN.md §2). Do not resurrect this without a client-side inventory upload.
     ruleTokenGrowth,
     ruleHighInterruptions,
     ruleRejections,
@@ -19,18 +21,6 @@ export function computeRecommendations(d: Dashboard): Recommendation[] {
     ruleUnpriced,
   ];
   return rules.map((r) => r(d)).filter((r): r is Recommendation => r !== null);
-}
-
-function ruleUnusedPlugins(d: Dashboard): Recommendation | null {
-  const unused = d.byPlugin.filter((p) => p.enabled && !p.used);
-  if (unused.length === 0) return null;
-  const names = unused.map((p) => p.name).join(", ");
-  return {
-    id: "unused-plugins",
-    severity: "tip",
-    title: `${unused.length} plugin${unused.length > 1 ? "s" : ""} enabled but unused`,
-    detail: `${names} — every enabled plugin's skills and MCP servers are included in every prompt's context. Disabling unused plugins reduces that overhead.`,
-  };
 }
 
 function ruleTokenGrowth(d: Dashboard): Recommendation | null {
