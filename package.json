@@ -12,6 +12,7 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit && tsc -p web --noEmit",
+    "dev": "bun run scripts/dev.ts",
     "dev:web": "vite --config web/vite.config.ts",
     "build:web": "vite build --config web/vite.config.ts",
     "build": "bun run build:web && bun build src/cli.ts --target=node --external sqlite3 --outfile=dist/cli.js && tail -n +2 dist/cli.js > dist/cli.temp && echo '#!/usr/bin/env node' | cat - dist/cli.temp > dist/cli.js && rm dist/cli.temp && chmod +x dist/cli.js",
