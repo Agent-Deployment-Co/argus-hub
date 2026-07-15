@@ -17,10 +17,13 @@
 
 import { defineCommand, runMain } from "citty";
 import { rm } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { openHubStore } from "../src/store/hub-store.ts";
 import { createAdminAuth } from "../src/admin-auth.ts";
 import { generateDemoData } from "./demo/generate.ts";
+
+/** The real server's data dir (src/cli.ts's own default) — refuse to seed/wipe here. */
+const REAL_DATA_DIR = resolve(process.env.HUB_DATA_DIR ?? "./data");
 
 /** Parse a `YYYY-MM-DD` as UTC midnight (matches the generator's UTC date handling). */
 function parseAsOf(value: string): number {
@@ -48,6 +51,14 @@ const demo = defineCommand({
     const asOfMs = parseAsOf(args["as-of"]);
     const seed = Number(args.seed);
     if (Number.isNaN(seed)) throw new Error(`Invalid --seed: ${args.seed}`);
+
+    // This wipes and reseeds --out on every run — refuse if it resolves to the real data dir.
+    if (resolve(out) === REAL_DATA_DIR) {
+      throw new Error(
+        `--out (${out}) resolves to the real data dir (${REAL_DATA_DIR}). ` +
+          `Refusing to wipe/seed it — pass a sandbox dir instead.`,
+      );
+    }
 
     // Fresh sandbox every run: reproducible, and guarantees the API key below is (re)printed.
     for (const suffix of ["hub.db", "hub.db-wal", "hub.db-shm"]) {

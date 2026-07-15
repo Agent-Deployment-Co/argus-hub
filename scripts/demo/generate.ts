@@ -276,7 +276,7 @@ function buildMessages(plan: ExpandedSession, asOfMs: number, rng: () => number)
   const turns = Math.max(3, (plan.template.turns ?? 6) + Math.round((rng() - 0.5) * 2));
   const dayStart = asOfMs - plan.dayOffset * DAY_MS;
   // Session starts somewhere in the working day; each turn a few minutes apart.
-  const startTs = dayStart - Math.round((6 + 6 * rng()) * 3600_000);
+  const startTs = dayStart + Math.round((6 + 6 * rng()) * 3600_000);
   const tools = plan.template.tools ?? [];
   const files = plan.template.files ?? [];
   const skills = plan.template.skills ?? [];
