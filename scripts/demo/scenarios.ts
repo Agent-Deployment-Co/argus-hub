@@ -174,6 +174,7 @@ const RACHEL: TeamMember = {
           tools: ["Read", GONG, SALESFORCE, "WebFetch"],
           turns: 6,
           friction: "heavy",
+          instances: 3,
           tasks: [
             {
               description: "Pull the open support tickets that could threaten the renewal",
@@ -261,6 +262,7 @@ const PRIYA: TeamMember = {
           skills: ["content-studio:blog-draft"],
           turns: 12,
           friction: "growth",
+          instances: 3,
           tasks: [
             {
               description: "Turn the positioning doc into a full campaign brief",
@@ -533,6 +535,7 @@ const DANA: TeamMember = {
           tools: ["Read", "Write", "Edit", "Bash", HUBSPOT, "WebFetch"],
           turns: 8,
           friction: "heavy",
+          instances: 3,
           tasks: [
             {
               description: "Connect the outreach agent to HubSpot and confirm it can read contacts",
@@ -594,6 +597,7 @@ const DANA: TeamMember = {
           tools: ["Read", "Edit", "Bash"],
           turns: 8,
           friction: "heavy",
+          instances: 2,
           tasks: [
             {
               description: "Add guardrails against fabricated account facts",
