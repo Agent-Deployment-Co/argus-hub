@@ -254,7 +254,7 @@ main:has(.sessions-split) .filter-bar { margin: 0; }
 /* Compact task list: dense single-line rows in one bordered container, so 1 task or 20 both read
    cleanly. Each row is a clickable button that opens the detail drawer; full text is in the drawer
    (and on hover via title). */
-.tasks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.tasks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; height: 510px; overflow-y: auto; }
 .tasks li + li .task-item { border-top: 1px solid var(--line); }
 .task-item { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 8px 12px; border: 0; background: var(--surface); color: inherit; font: inherit; cursor: pointer; }
 .task-item:hover { background: var(--hover); }

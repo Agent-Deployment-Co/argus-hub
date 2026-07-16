@@ -15,32 +15,8 @@ function qualityColumns(labelHeader: string, labelCell: (r: TaskQualityRow) => R
   ];
 }
 
-function rankMetric(r: TaskQualityRow): number {
-  // successRate ties broken by volume so a 1-task 100% row doesn't outrank a 50-task 90% row.
-  return r.successRate === null ? -1 : r.successRate * 1000 + Math.min(r.total, 999) / 1000;
-}
-
-function MiniRankList({ title, rows, ascending }: { title: string; rows: TaskQualityRow[]; ascending?: boolean }) {
-  return (
-    <div className="panel">
-      <h3>{title}</h3>
-      <ol className="rank-list">
-        {rows.map((r, i) => (
-          <li key={r.key} className="rank-row">
-            <span className="rank-num">{ascending ? rows.length - i : i + 1}</span>
-            <Link to="/users/$userId" params={{ userId: r.key }} className="table-link rank-name">{r.label}</Link>
-            <span className="muted">{fmt(r.total)} tasks</span>
-            <span className="rank-score">{pct(r.successRate)}</span>
-          </li>
-        ))}
-        {rows.length === 0 && <p className="muted">Not enough data yet.</p>}
-      </ol>
-    </div>
-  );
-}
-
-/** Task quality by user (SPEC.md 5.3) — top/bottom performers, mirroring Activity's user
- *  rankings, plus the full auditable table. Withheld below the org-wide privacy floor. */
+/** Task quality by user (SPEC.md 5.3) — the full auditable table. Withheld below the org-wide
+ *  privacy floor. */
 export function TaskQualityByUser({ rows, minCohortGuard }: { rows: TaskQualityRow[]; minCohortGuard: boolean }) {
   if (minCohortGuard) {
     return (
@@ -55,9 +31,6 @@ export function TaskQualityByUser({ rows, minCohortGuard }: { rows: TaskQualityR
   }
   if (rows.length === 0) return null;
 
-  const ranked = [...rows].sort((a, b) => rankMetric(b) - rankMetric(a));
-  const top = ranked.slice(0, 5);
-  const bottom = ranked.slice(-5).reverse();
   const columns = qualityColumns("User", (r) => (
     <Link to="/users/$userId" params={{ userId: r.key }} className="table-link">{r.label}</Link>
   ));
@@ -65,13 +38,7 @@ export function TaskQualityByUser({ rows, minCohortGuard }: { rows: TaskQualityR
   return (
     <section>
       <h2>Task quality by user</h2>
-      <div className="grid2">
-        <MiniRankList title="Best outcomes" rows={top} />
-        <MiniRankList title="Struggling most" rows={bottom} ascending />
-      </div>
-      <div style={{ marginTop: 16 }}>
-        <DataTable columns={columns} rows={rows} initialSort="total" />
-      </div>
+      <DataTable columns={columns} rows={rows} initialSort="total" />
     </section>
   );
 }
