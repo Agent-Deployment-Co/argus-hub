@@ -20,7 +20,12 @@ export function TaskDistributions({ outcomes, frustration }: { outcomes: TaskOut
             labels: ["Success", "Failure", "Unclear"],
             datasets: [{ data: [outcomes.success, outcomes.failure, outcomes.unknown], backgroundColor: OUTCOME_COLORS }],
           }}
-          options={{ plugins: { legend: { position: "right" } } } satisfies ChartOptions<"doughnut">}
+          options={
+            {
+              plugins: { legend: { position: "right" } },
+              scales: { x: { display: false }, y: { display: false } },
+            } satisfies ChartOptions<"doughnut">
+          }
         />
         {outcomes.total === 0 && <p className="muted">No outcomes recorded yet.</p>}
       </div>
@@ -33,7 +38,12 @@ export function TaskDistributions({ outcomes, frustration }: { outcomes: TaskOut
             labels: ["None", "Moderate", "High"],
             datasets: [{ data: [frustration.none, frustration.moderate, frustration.high], backgroundColor: FRUSTRATION_COLORS }],
           }}
-          options={{ plugins: { legend: { position: "right" } } } satisfies ChartOptions<"doughnut">}
+          options={
+            {
+              plugins: { legend: { position: "right" } },
+              scales: { x: { display: false }, y: { display: false } },
+            } satisfies ChartOptions<"doughnut">
+          }
         />
         {frustrationKnown === 0 && <p className="muted">No frustration signals recorded yet.</p>}
       </div>
