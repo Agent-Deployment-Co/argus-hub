@@ -286,6 +286,7 @@ function ToolsContent() {
               data={{ labels: tc.map((c) => c.label), datasets: [{ data: tc.map((c) => c.calls), backgroundColor: CATEGORY_PALETTE }] }}
               options={{
                 plugins: { legend: { position: "right" }, tooltip: { callbacks: { label: (c) => `${c.label}: ${fmt(Number(c.parsed))} calls · ${tc[c.dataIndex]!.tools} tools` } } },
+                scales: { x: { display: false }, y: { display: false } },
               } satisfies ChartOptions<"doughnut">}
             />
           </div>
