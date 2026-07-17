@@ -11,59 +11,30 @@ import { assembleTaskReport } from "../reporting/tasks.ts";
 import { loadPlugins } from "../reporting/inventory.ts";
 import { computeRecommendations } from "./recommendations.ts";
 import { buildSessionList, buildSessionDetail, type SessionListParams } from "./session-list.ts";
-import { buildTaskList, type TaskListParams, type TaskOutcomeFilter } from "./task-list.ts";
-import type { ResolvedQuery } from "../types.ts";
+import { buildTaskList, type TaskListParams } from "./task-list.ts";
 import type { SessionSort } from "./session-list.ts";
+import {
+  parseResolvedQuery as parseResolvedQueryFrom,
+  parseUserScope as parseUserScopeFrom,
+  parseOutcomeFilter as parseOutcomeFilterFrom,
+  parseIntOr,
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+  VALID_SORTS,
+} from "./query-params.ts";
 import { cost } from "../pricing.ts";
 import type { AdminAuth } from "../admin-auth.ts";
 import { verifySession, makeSessionCookie, clearSessionCookie } from "../admin-auth.ts";
 import { LOGIN_PAGE } from "./pages.ts";
 
 // ---- Query param parsing ----------------------------------------------------------------
+//
+// The parsers live in ./query-params.ts (shared with the MCP tools so the two surfaces can't
+// diverge); here they're adapted to read from a Hono Context's query string.
 
-const VALID_SOURCES = new Set(["claude", "codex", "gemini", "cowork"]);
-const VALID_SORTS = new Set<string>(["recent", "tokens", "cost"]);
-const DEFAULT_LIMIT = 50;
-const MAX_LIMIT = 200;
-
-function parseIntOr(v: string | undefined, fallback: number): number {
-  const n = Number.parseInt(v ?? "", 10);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-/** Parse since/until/project/source into a ResolvedQuery. Returns an error string on bad input. */
-function parseResolvedQuery(c: Context): ResolvedQuery | string {
-  const source = c.req.query("source");
-  if (source && !VALID_SOURCES.has(source)) return `Unknown source "${source}".`;
-  const q: ResolvedQuery = {};
-  const since = c.req.query("since");
-  const until = c.req.query("until");
-  const project = c.req.query("project");
-  if (since) q.since = since;
-  if (until) q.until = until;
-  if (project) q.projectSubstring = project;
-  if (source) q.sources = [source as "claude" | "codex" | "gemini" | "cowork"];
-  return q;
-}
-
-/** Parse the ?user= query param. Returns undefined (all users) or the specific userId. */
-function parseUserScope(c: Context): string | undefined {
-  return c.req.query("user")?.trim() || undefined;
-}
-
-const VALID_OUTCOMES = new Set<TaskOutcomeFilter>(["success", "failure", "unknown"]);
-
-/** Parse the ?outcome= query param (comma-separated success/failure/unknown). Returns
- *  undefined (no filter) or an error string on an unrecognized value. */
-function parseOutcomeFilter(c: Context): TaskOutcomeFilter[] | string | undefined {
-  const raw = c.req.query("outcome");
-  if (!raw) return undefined;
-  const values = raw.split(",").map((v) => v.trim()).filter(Boolean);
-  for (const v of values) {
-    if (!VALID_OUTCOMES.has(v as TaskOutcomeFilter)) return `Unknown outcome "${v}".`;
-  }
-  return values.length ? (values as TaskOutcomeFilter[]) : undefined;
-}
+const parseResolvedQuery = (c: Context) => parseResolvedQueryFrom((k) => c.req.query(k));
+const parseUserScope = (c: Context) => parseUserScopeFrom((k) => c.req.query(k));
+const parseOutcomeFilter = (c: Context) => parseOutcomeFilterFrom((k) => c.req.query(k));
 
 function requestHost(c: Context): string | undefined {
   return c.req.header("Host") ?? new URL(c.req.url).host;
