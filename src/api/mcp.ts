@@ -42,6 +42,20 @@ function argsGetter(args: Record<string, unknown> | undefined): QueryGetter {
   };
 }
 
+/** Every arg value `argsGetter` can actually read is a `string` or `number`; anything else
+ *  (array, boolean, object) would otherwise be silently read back as "filter omitted" instead
+ *  of the caller's mistake it actually is. Reject those up front so a dropped filter surfaces
+ *  as a tool error rather than a query that quietly ignores it. */
+function invalidArgShape(args: Record<string, unknown> | undefined): string | undefined {
+  if (!args) return undefined;
+  for (const [key, v] of Object.entries(args)) {
+    if (v !== undefined && v !== null && typeof v !== "string" && typeof v !== "number") {
+      return `Invalid value for "${key}": expected a string or number.`;
+    }
+  }
+  return undefined;
+}
+
 function toolError(message: string) {
   return { content: [{ type: "text" as const, text: message }], isError: true };
 }
@@ -251,6 +265,9 @@ async function handleListUsers(store: HubStore) {
 }
 
 async function callTool(store: HubStore, name: string, args: Record<string, unknown> | undefined) {
+  const invalid = invalidArgShape(args);
+  if (invalid) return toolError(invalid);
+
   switch (name) {
     case "query_activity":
       return handleQueryActivity(store, args);
