@@ -104,10 +104,11 @@ const TOOLS: Tool[] = [
 ];
 
 async function handleQueryActivity(store: HubStore, args: Record<string, unknown> | undefined) {
+  const get = argsGetter(args);
   const orgId = await store.getDefaultOrgId();
   if (!orgId) return toolError("No data yet.");
 
-  const query = parseResolvedQuery(argsGetter(args));
+  const query = parseResolvedQuery(get);
   if (typeof query === "string") return toolError(query);
 
   const now = new Date();
@@ -122,7 +123,8 @@ async function handleQueryActivity(store: HubStore, args: Record<string, unknown
   const { since: previousSince, until: previousUntil } = previousWindow(since, until);
   const previousQuery = { ...query, since: previousSince, until: previousUntil };
 
-  const scope = { orgId };
+  const userId = parseUserScope(get);
+  const scope = { orgId, userId };
   const [currentTotals, previousTotals, daily, byUser, bySource, currentTasks, previousTasks] =
     await Promise.all([
       store.readActivityTotals(scope, currentQuery),
