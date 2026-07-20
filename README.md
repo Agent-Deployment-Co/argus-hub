@@ -266,6 +266,9 @@ claude mcp add --transport http argus-hub https://hub.internal:4343/mcp \
   --header "Authorization: Bearer <admin password>"
 ```
 
+A Claude Code skill packaging this reference — connecting, the tools' filters/response shapes,
+and common query recipes — lives at `.claude/skills/argus-hub-query/` in this repo.
+
 Treat the admin password as a shared read credential for the org's pooled data once it's
 handed out this way — anyone holding it can query everyone's activity, tasks, and tool usage. The
 route is open (no auth required) only when Hub itself is run without `ADMIN_PASSWORD` configured,
