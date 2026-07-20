@@ -10,7 +10,7 @@ import type { HubStore } from "../store/hub-store.ts";
 import type { AdminAuth } from "../admin-auth.ts";
 import { parseBearerToken } from "./sync.ts";
 import {
-  parseResolvedQuery, parseUserScope, parseOutcomeFilter, parseIntOr,
+  parseResolvedQuery, parseUserScope, parseGroupScope, parseOutcomeFilter, parseIntOr,
   DEFAULT_LIMIT, MAX_LIMIT, VALID_SOURCES, type QueryGetter,
 } from "./query-params.ts";
 import { buildActivityReport, buildTaskQualityReport, buildUserRoster } from "./reports.ts";
@@ -109,9 +109,15 @@ const TOOLS: Tool[] = [
     name: "query_users",
     description:
       "Roster of known users in the org — userId, display name, email, last-sync time, session/" +
-      "client counts, total tokens, and total cost. Use this to discover valid `user` ids before " +
-      "scoping the other tools to one person.",
-    inputSchema: { type: "object", properties: {} },
+      "client counts, groupId/groupName, total tokens, and total cost. Use this to discover valid " +
+      "`user` ids before scoping the other tools to one person, or pass `group` to filter the " +
+      "roster to one group (matches groupId or groupName).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        group: { type: "string", description: "Filter to one group — matches groupId or groupName." },
+      },
+    },
   },
 ];
 
@@ -193,9 +199,15 @@ async function handleQueryToolUsage(store: HubStore, args: Record<string, unknow
   });
 }
 
-async function handleListUsers(store: HubStore) {
+async function handleListUsers(store: HubStore, args: Record<string, unknown> | undefined) {
+  const get = argsGetter(args);
+  const group = parseGroupScope(get);
+
   const orgId = await store.getDefaultOrgId();
-  const users = await buildUserRoster(store, orgId);
+  let users = await buildUserRoster(store, orgId);
+  if (group) {
+    users = users.filter((u) => u.groupId === group || u.groupName?.toLowerCase() === group.toLowerCase());
+  }
   return toolJson({ users });
 }
 
@@ -213,7 +225,7 @@ async function callTool(store: HubStore, name: string, args: Record<string, unkn
     case "query_tool_usage":
       return handleQueryToolUsage(store, args);
     case "query_users":
-      return handleListUsers(store);
+      return handleListUsers(store, args);
     default:
       return toolError(`Unknown tool "${name}".`);
   }

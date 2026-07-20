@@ -44,6 +44,12 @@ export function parseUserScope(get: QueryGetter): string | undefined {
   return get("user")?.trim() || undefined;
 }
 
+/** Parse the `group` param. Returns undefined (all groups) or the caller-supplied filter value
+ *  (matched by the caller against a user's groupId or groupName). */
+export function parseGroupScope(get: QueryGetter): string | undefined {
+  return get("group")?.trim() || undefined;
+}
+
 /** Parse the `outcome` param (comma-separated success/failure/unknown). Returns undefined (no
  *  filter) or an error string on an unrecognized value. */
 export function parseOutcomeFilter(get: QueryGetter): TaskOutcomeFilter[] | string | undefined {

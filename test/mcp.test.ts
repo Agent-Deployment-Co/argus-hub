@@ -92,21 +92,32 @@ async function openTestEnv(): Promise<TestEnv> {
 }
 
 async function syncSessions(env: TestEnv, sessions: Array<{ id: string }>): Promise<void> {
+  await syncSessionsAs(env, "alice@example.com", sessions);
+}
+
+/** Sync a fixture payload from an Argus client whose claude.oauth.email fingerprint is `email`.
+ *  Returns the resolved user_id so callers can use it to look up group membership. */
+async function syncSessionsAs(env: TestEnv, email: string, sessions: Array<{ id: string }>): Promise<string> {
   const app = createHubApp(env.store);
+  const clientId = `client-${randomUUID()}`;
   const payload = {
     ...buildUploadPayload(sessions),
-    fingerprint: [{ key: "claude.oauth.email", value: "alice@example.com", tsMs: 1_000_000 }],
+    fingerprint: [{ key: "claude.oauth.email", value: email, tsMs: 1_000_000 }],
   };
   const res = await app.request("/api/sync", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${env.apiKey}`,
-      "X-Argus-Client": `client-${randomUUID()}`,
+      "X-Argus-Client": clientId,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
   });
   if (res.status !== 200) throw new Error(`sync failed: ${res.status} ${await res.text()}`);
+  const users = (await (await app.request("/api/clients")).json()) as { clients: Array<{ clientId: string; userId: string | null }> };
+  const userId = users.clients.find((c) => c.clientId === clientId)?.userId;
+  if (!userId) throw new Error("could not resolve userId after sync");
+  return userId;
 }
 
 // ---- JSON-RPC helpers -------------------------------------------------------------------
@@ -373,6 +384,39 @@ describe("tools/call query_users", () => {
       const { body } = await callTool(app, "query_users");
       const result = (body as { result: { content: Array<{ text: string }> } }).result;
       expect(JSON.parse(result.content[0]!.text)).toEqual(restBody as object);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("group filters the roster to one group, matching by groupId or groupName", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const orgId = (await env.store.getDefaultOrgId())!;
+      const aliceId = await syncSessionsAs(env, "alice@example.com", [{ id: "s1" }]);
+      const bobId = await syncSessionsAs(env, "bob@example.com", [{ id: "s2" }]);
+      const group = await env.store.createGroup(orgId, "Engineering");
+      await env.store.setUserGroup(orgId, aliceId, group.groupId);
+
+      const byId = await callTool(app, "query_users", { group: group.groupId });
+      const byIdUsers = (JSON.parse(
+        (byId.body as { result: { content: Array<{ text: string }> } }).result.content[0]!.text,
+      ) as { users: Array<{ userId: string }> }).users;
+      expect(byIdUsers.map((u) => u.userId)).toEqual([aliceId]);
+      expect(byIdUsers.some((u) => u.userId === bobId)).toBe(false);
+
+      const byName = await callTool(app, "query_users", { group: "engineering" });
+      const byNameUsers = (JSON.parse(
+        (byName.body as { result: { content: Array<{ text: string }> } }).result.content[0]!.text,
+      ) as { users: Array<{ userId: string }> }).users;
+      expect(byNameUsers.map((u) => u.userId)).toEqual([aliceId]);
+
+      const unmatched = await callTool(app, "query_users", { group: "Sales" });
+      const unmatchedUsers = (JSON.parse(
+        (unmatched.body as { result: { content: Array<{ text: string }> } }).result.content[0]!.text,
+      ) as { users: unknown[] }).users;
+      expect(unmatchedUsers).toEqual([]);
     } finally {
       await env.store.close();
     }
