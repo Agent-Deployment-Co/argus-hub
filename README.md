@@ -245,10 +245,13 @@ MCP server; no session, no subprocess, just JSON-RPC over HTTPS.
 | `query_users` | The org's user roster — userId, display name, email, last-sync, sessions, tokens, cost |
 
 The first four take the same optional filters — `since`/`until` (ISO dates), `project`
-(substring), `source` (`claude`/`codex`/`gemini`/`cowork`), `user` (scope to one userId) —
-mirroring the dashboard's own filters, so an agent's answers can never disagree with what you see
-in the UI. `query_users` takes no arguments; use it to look up a `userId` before scoping the other
-tools to one person.
+(substring), `source` (`claude`/`codex`/`gemini`/`cowork`), `user` (scope to one userId) — read by
+the same query parsing the REST API uses, so an agent's answers can never disagree with what you
+see in the UI for the filters the UI itself exposes. `query_task_quality` and `query_tool_usage`'s
+`user` filter mirrors the dashboard's per-user page (`/users/$userId`); `query_activity`'s `user`
+filter has no dashboard equivalent — the Activity page is always team-wide — so use it to get a
+per-user usage/cost view the UI doesn't offer. `query_users` takes no arguments; use it to look up
+a `userId` before scoping the other tools to one person.
 
 **Auth** reuses the Hub's existing admin password — no new credential to issue or rotate:
 
