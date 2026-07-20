@@ -11,14 +11,12 @@ import type { AdminAuth } from "../admin-auth.ts";
 import { parseBearerToken } from "./sync.ts";
 import {
   parseResolvedQuery, parseUserScope, parseOutcomeFilter, parseIntOr,
-  DEFAULT_LIMIT, MAX_LIMIT, type QueryGetter,
+  DEFAULT_LIMIT, MAX_LIMIT, VALID_SOURCES, type QueryGetter,
 } from "./query-params.ts";
-import { assembleActivityReport, previousWindow } from "../reporting/activity.ts";
-import { assembleTaskReport } from "../reporting/tasks.ts";
+import { buildActivityReport, buildTaskQualityReport, buildUserRoster } from "./reports.ts";
 import { assembleDashboard } from "../reporting/snapshot.ts";
 import { loadPlugins } from "../reporting/inventory.ts";
 import { buildTaskList, type TaskListParams } from "./task-list.ts";
-import { cost } from "../pricing.ts";
 
 // ---- Shared input schema ------------------------------------------------------------------
 
@@ -26,7 +24,7 @@ const SHARED_PROPERTIES: Record<string, object> = {
   since: { type: "string", description: "ISO date YYYY-MM-DD, inclusive start of the window." },
   until: { type: "string", description: "ISO date YYYY-MM-DD, inclusive end of the window." },
   project: { type: "string", description: "Substring match on project path." },
-  source: { type: "string", enum: ["claude", "codex", "gemini", "cowork"], description: "Restrict to one agent source." },
+  source: { type: "string", enum: [...VALID_SOURCES], description: "Restrict to one agent source." },
   user: { type: "string", description: "Scope to one userId (omit for the whole org)." },
 };
 
@@ -125,42 +123,9 @@ async function handleQueryActivity(store: HubStore, args: Record<string, unknown
   const query = parseResolvedQuery(get);
   if (typeof query === "string") return toolError(query);
 
-  const now = new Date();
-  const isoDaysAgo = (n: number) => {
-    const d = new Date(now);
-    d.setUTCDate(d.getUTCDate() - n);
-    return d.toISOString().slice(0, 10);
-  };
-  const since = query.since ?? isoDaysAgo(30);
-  const until = query.until ?? isoDaysAgo(0);
-  const currentQuery = { ...query, since, until };
-  const { since: previousSince, until: previousUntil } = previousWindow(since, until);
-  const previousQuery = { ...query, since: previousSince, until: previousUntil };
-
   const userId = parseUserScope(get);
-  const scope = { orgId, userId };
-  const [currentTotals, previousTotals, daily, byUser, bySource, currentTasks, previousTasks] =
-    await Promise.all([
-      store.readActivityTotals(scope, currentQuery),
-      store.readActivityTotals(scope, previousQuery),
-      store.readActivityDaily(scope, currentQuery),
-      store.readActivityUserRollup(scope, currentQuery),
-      store.readActivitySourceRollup(scope, currentQuery),
-      store.readTaskFacts(scope, currentQuery),
-      store.readTaskFacts(scope, previousQuery),
-    ]);
-
-  if (currentTotals.sessions === 0 && previousTotals.sessions === 0 && byUser.length === 0) {
-    return toolError("No data yet.");
-  }
-
-  const report = assembleActivityReport({
-    since, until, previousSince, previousUntil,
-    currentTotals, previousTotals, daily, byUser, bySource,
-    currentTasks: currentTasks.map((r) => ({ task: r.task, userId: r.userId })),
-    previousTasks: previousTasks.map((r) => ({ task: r.task })),
-    nowMs: now.getTime(),
-  });
+  const report = await buildActivityReport(store, { orgId, userId }, query, new Date());
+  if (!report) return toolError("No data yet.");
   return toolJson(report);
 }
 
@@ -200,27 +165,9 @@ async function handleQueryTaskQuality(store: HubStore, args: Record<string, unkn
   const query = parseResolvedQuery(get);
   if (typeof query === "string") return toolError(query);
 
-  const now = new Date();
-  const isoDaysAgo = (n: number) => {
-    const d = new Date(now);
-    d.setUTCDate(d.getUTCDate() - n);
-    return d.toISOString().slice(0, 10);
-  };
-  const since = query.since ?? isoDaysAgo(30);
-  const until = query.until ?? isoDaysAgo(0);
-  const currentQuery = { ...query, since, until };
-
   const userId = parseUserScope(get);
-  const scope = { orgId, userId };
-  const [rows, friction, totals] = await Promise.all([
-    store.readTaskFacts(scope, currentQuery),
-    store.readWindowFrictionRollup(scope, currentQuery),
-    store.readActivityTotals(scope, currentQuery),
-  ]);
-
-  if (totals.sessions === 0) return toolError("No data yet.");
-
-  const report = assembleTaskReport({ since, until, rows, friction, nowMs: now.getTime() });
+  const report = await buildTaskQualityReport(store, { orgId, userId }, query, new Date());
+  if (!report) return toolError("No data yet.");
   return toolJson(report);
 }
 
@@ -248,19 +195,7 @@ async function handleQueryToolUsage(store: HubStore, args: Record<string, unknow
 
 async function handleListUsers(store: HubStore) {
   const orgId = await store.getDefaultOrgId();
-  if (!orgId) return toolJson({ users: [] });
-
-  const stats = await store.readUserStats(orgId);
-  const users = stats.map(({ userId, displayName, email, lastSyncMs, sessionCount, clientCount, byModel }) => {
-    const totalTokens = byModel.reduce(
-      (s, m) => s + m.input + m.output + m.cacheRead + m.cacheWrite5m + m.cacheWrite1h, 0,
-    );
-    const totalCost = byModel.reduce(
-      (s, m) => s + cost({ input: m.input, output: m.output, cacheRead: m.cacheRead, cacheWrite5m: m.cacheWrite5m, cacheWrite1h: m.cacheWrite1h }, m.model),
-      0,
-    );
-    return { userId, displayName, email, lastSyncMs, sessionCount, clientCount, totalTokens, cost: totalCost };
-  });
+  const users = await buildUserRoster(store, orgId);
   return toolJson({ users });
 }
 

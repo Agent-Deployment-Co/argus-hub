@@ -7,9 +7,8 @@ import type { HubStore } from "../store/hub-store.ts";
 import { syncHandler, unknownSessionsHandler } from "./sync.ts";
 import { mountMcp } from "./mcp.ts";
 import { assembleDashboard } from "../reporting/snapshot.ts";
-import { assembleActivityReport, previousWindow } from "../reporting/activity.ts";
-import { assembleTaskReport } from "../reporting/tasks.ts";
 import { loadPlugins } from "../reporting/inventory.ts";
+import { buildActivityReport, buildTaskQualityReport, buildUserRoster } from "./reports.ts";
 import { computeRecommendations } from "./recommendations.ts";
 import { buildSessionList, buildSessionDetail, type SessionListParams } from "./session-list.ts";
 import { buildTaskList, type TaskListParams } from "./task-list.ts";
@@ -23,7 +22,6 @@ import {
   MAX_LIMIT,
   VALID_SORTS,
 } from "./query-params.ts";
-import { cost } from "../pricing.ts";
 import type { AdminAuth } from "../admin-auth.ts";
 import { verifySession, makeSessionCookie, clearSessionCookie } from "../admin-auth.ts";
 import { LOGIN_PAGE } from "./pages.ts";
@@ -113,18 +111,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
   // The frontend uses this for the user picker and the /users tab.
   app.get("/api/users", async (c) => {
     const orgId = await store.getDefaultOrgId();
-    if (!orgId) return c.json({ users: [] });
-    const stats = await store.readUserStats(orgId);
-    const users = stats.map(({ userId, displayName, email, lastSyncMs, sessionCount, clientCount, byModel }) => {
-      const totalTokens = byModel.reduce(
-        (s, m) => s + m.input + m.output + m.cacheRead + m.cacheWrite5m + m.cacheWrite1h, 0,
-      );
-      const totalCost = byModel.reduce(
-        (s, m) => s + cost({ input: m.input, output: m.output, cacheRead: m.cacheRead, cacheWrite5m: m.cacheWrite5m, cacheWrite1h: m.cacheWrite1h }, m.model),
-        0,
-      );
-      return { userId, displayName, email, lastSyncMs, sessionCount, clientCount, totalTokens, cost: totalCost };
-    });
+    const users = await buildUserRoster(store, orgId);
     return c.json({ users });
   });
 
@@ -176,41 +163,8 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     const query = parseResolvedQuery(c);
     if (typeof query === "string") return c.json({ error: query }, 400);
 
-    const now = new Date();
-    const isoDaysAgo = (n: number) => {
-      const d = new Date(now);
-      d.setUTCDate(d.getUTCDate() - n);
-      return d.toISOString().slice(0, 10);
-    };
-    const since = query.since ?? isoDaysAgo(30);
-    const until = query.until ?? isoDaysAgo(0);
-    const currentQuery = { ...query, since, until };
-    const { since: previousSince, until: previousUntil } = previousWindow(since, until);
-    const previousQuery = { ...query, since: previousSince, until: previousUntil };
-
-    const scope = { orgId };
-    const [currentTotals, previousTotals, daily, byUser, bySource, currentTasks, previousTasks] =
-      await Promise.all([
-        store.readActivityTotals(scope, currentQuery),
-        store.readActivityTotals(scope, previousQuery),
-        store.readActivityDaily(scope, currentQuery),
-        store.readActivityUserRollup(scope, currentQuery),
-        store.readActivitySourceRollup(scope, currentQuery),
-        store.readTaskFacts(scope, currentQuery),
-        store.readTaskFacts(scope, previousQuery),
-      ]);
-
-    if (currentTotals.sessions === 0 && previousTotals.sessions === 0 && byUser.length === 0) {
-      return c.json({ error: "No data yet." }, 503);
-    }
-
-    const report = assembleActivityReport({
-      since, until, previousSince, previousUntil,
-      currentTotals, previousTotals, daily, byUser, bySource,
-      currentTasks: currentTasks.map((r) => ({ task: r.task, userId: r.userId })),
-      previousTasks: previousTasks.map((r) => ({ task: r.task })),
-      nowMs: now.getTime(),
-    });
+    const report = await buildActivityReport(store, { orgId }, query, new Date());
+    if (!report) return c.json({ error: "No data yet." }, 503);
     return c.json(report);
   });
 
@@ -286,29 +240,9 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     const query = parseResolvedQuery(c);
     if (typeof query === "string") return c.json({ error: query }, 400);
 
-    const now = new Date();
-    const isoDaysAgo = (n: number) => {
-      const d = new Date(now);
-      d.setUTCDate(d.getUTCDate() - n);
-      return d.toISOString().slice(0, 10);
-    };
-    const since = query.since ?? isoDaysAgo(30);
-    const until = query.until ?? isoDaysAgo(0);
-    const currentQuery = { ...query, since, until };
-
     const userId = parseUserScope(c);
-    const scope = { orgId, userId };
-    const [rows, friction, totals] = await Promise.all([
-      store.readTaskFacts(scope, currentQuery),
-      store.readWindowFrictionRollup(scope, currentQuery),
-      store.readActivityTotals(scope, currentQuery),
-    ]);
-
-    if (totals.sessions === 0) return c.json({ error: "No data yet." }, 503);
-
-    const report = assembleTaskReport({
-      since, until, rows, friction, nowMs: now.getTime(),
-    });
+    const report = await buildTaskQualityReport(store, { orgId, userId }, query, new Date());
+    if (!report) return c.json({ error: "No data yet." }, 503);
     return c.json(report);
   });
 
