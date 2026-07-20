@@ -147,7 +147,7 @@ function callTool(
 // ---- Tests -------------------------------------------------------------------------------
 
 describe("tools/list", () => {
-  test("returns all four tools with a JSON-schema input", async () => {
+  test("returns all five tools with a JSON-schema input", async () => {
     const env = await openTestEnv();
     const app = createHubApp(env.store);
     try {
@@ -155,7 +155,7 @@ describe("tools/list", () => {
       expect(status).toBe(200);
       const tools = (body as { result: { tools: Array<{ name: string; inputSchema: { type: string } }> } }).result.tools;
       expect(tools.map((t) => t.name)).toEqual([
-        "query_activity", "query_tasks", "query_task_quality", "query_tool_usage", "list_users",
+        "query_activity", "query_tasks", "query_task_quality", "query_tool_usage", "query_users",
       ]);
       for (const t of tools) expect(t.inputSchema.type).toBe("object");
     } finally {
@@ -349,12 +349,12 @@ describe("tools/call query_tool_usage", () => {
   });
 });
 
-describe("tools/call list_users", () => {
+describe("tools/call query_users", () => {
   test("returns an empty roster when the org has no sessions", async () => {
     const env = await openTestEnv();
     const app = createHubApp(env.store);
     try {
-      const { body } = await callTool(app, "list_users");
+      const { body } = await callTool(app, "query_users");
       const result = (body as { result: { content: Array<{ text: string }> } }).result;
       expect(JSON.parse(result.content[0]!.text)).toEqual({ users: [] });
     } finally {
@@ -370,7 +370,7 @@ describe("tools/call list_users", () => {
 
       const restBody = await (await app.request("/api/users")).json();
 
-      const { body } = await callTool(app, "list_users");
+      const { body } = await callTool(app, "query_users");
       const result = (body as { result: { content: Array<{ text: string }> } }).result;
       expect(JSON.parse(result.content[0]!.text)).toEqual(restBody as object);
     } finally {

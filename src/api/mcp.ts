@@ -94,7 +94,7 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: SHARED_PROPERTIES },
   },
   {
-    name: "list_users",
+    name: "query_users",
     description:
       "Roster of known users in the org — userId, display name, email, last-sync time, session/" +
       "client counts, total tokens, and total cost. Use this to discover valid `user` ids before " +
@@ -258,7 +258,7 @@ async function callTool(store: HubStore, name: string, args: Record<string, unkn
       return handleQueryTaskQuality(store, args);
     case "query_tool_usage":
       return handleQueryToolUsage(store, args);
-    case "list_users":
+    case "query_users":
       return handleListUsers(store);
     default:
       return toolError(`Unknown tool "${name}".`);

@@ -242,12 +242,12 @@ MCP server; no session, no subprocess, just JSON-RPC over HTTPS.
 | `query_tasks` | What did people ask agents to do — a paged, filterable list of extracted tasks |
 | `query_task_quality` | How *well* is agent work going — success/frustration/interrupted rates, outcomes over time, top failure signals |
 | `query_tool_usage` | Which tools and MCP servers are actually being used, and by how many people |
-| `list_users` | The org's user roster — userId, display name, email, last-sync, sessions, tokens, cost |
+| `query_users` | The org's user roster — userId, display name, email, last-sync, sessions, tokens, cost |
 
 The first four take the same optional filters — `since`/`until` (ISO dates), `project`
 (substring), `source` (`claude`/`codex`/`gemini`/`cowork`), `user` (scope to one userId) —
 mirroring the dashboard's own filters, so an agent's answers can never disagree with what you see
-in the UI. `list_users` takes no arguments; use it to look up a `userId` before scoping the other
+in the UI. `query_users` takes no arguments; use it to look up a `userId` before scoping the other
 tools to one person.
 
 **Auth** reuses the Hub's existing admin password — no new credential to issue or rotate:
