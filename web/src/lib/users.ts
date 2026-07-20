@@ -7,6 +7,8 @@ export interface HubUser {
   lastSyncMs: number;
   sessionCount: number;
   clientCount: number;
+  groupId: string | null;
+  groupName: string | null;
   totalTokens: number;
   cost: number;
 }
