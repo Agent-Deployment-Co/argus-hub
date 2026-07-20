@@ -227,11 +227,51 @@ time — sortable by any column.
 
 ---
 
+## Query the Hub from an agent (MCP)
+
+Hub exposes a small, read-only [MCP](https://modelcontextprotocol.io) surface at `POST /mcp` so an
+agent — Claude Code, or any other MCP client — can query an org's pooled Argus data directly,
+instead of scraping the dashboard. It's the same stateless Streamable HTTP transport as any other
+MCP server; no session, no subprocess, just JSON-RPC over HTTPS.
+
+**Tools:**
+
+| Tool | Answers |
+|------|---------|
+| `query_activity` | How much are we using agents, by whom, trending how (usage/cost over a window, vs. the previous window) |
+| `query_tasks` | What did people ask agents to do — a paged, filterable list of extracted tasks |
+| `query_task_quality` | How *well* is agent work going — success/frustration/interrupted rates, outcomes over time, top failure signals |
+| `query_tool_usage` | Which tools and MCP servers are actually being used, and by how many people |
+
+All four take the same optional filters — `since`/`until` (ISO dates), `project` (substring),
+`source` (`claude`/`codex`/`gemini`/`cowork`), `user` (scope to one userId) — mirroring the
+dashboard's own filters, so an agent's answers can never disagree with what you see in the UI.
+
+**Auth** reuses the Hub's existing admin password — no new credential to issue or rotate:
+
+```
+Authorization: Bearer <admin password>
+```
+
+**Add it to Claude Code:**
+
+```bash
+claude mcp add --transport http argus-hub https://hub.internal:4343/mcp \
+  --header "Authorization: Bearer <admin password>"
+```
+
+Treat the admin password as a shared read credential for the org's pooled data once it's
+handed out this way — anyone holding it can query everyone's activity, tasks, and tool usage. The
+route is open (no auth required) only when Hub itself is run without `ADMIN_PASSWORD` configured,
+matching how `/api/*` behaves in that case.
+
+---
+
 ## Security
 
 - **Two access layers.** API keys gate `/api/sync` uploads; the admin password gates the
-  dashboard via a session cookie. Put Hub behind a VPN or reverse proxy with TLS — do not
-  expose it directly to the internet.
+  dashboard (via session cookie) and the `/mcp` tools (via bearer token). Put Hub behind a VPN or
+  reverse proxy with TLS — do not expose it directly to the internet.
 - **`hub.db` is sensitive.** It contains the full session data of every syncing user. Restrict
   filesystem access (Hub chmods it to `0600` on creation) and include it in backups.
 - Uploaded payloads are JSON rows merged directly into `hub.db`; the client's raw `argus.db`
