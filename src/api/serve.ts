@@ -5,6 +5,7 @@ import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { HubStore } from "../store/hub-store.ts";
 import { syncHandler, unknownSessionsHandler } from "./sync.ts";
+import { mountMcp } from "./mcp.ts";
 import { assembleDashboard } from "../reporting/snapshot.ts";
 import { assembleActivityReport, previousWindow } from "../reporting/activity.ts";
 import { assembleTaskReport } from "../reporting/tasks.ts";
@@ -101,6 +102,10 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
 
   app.post("/api/sync", syncHandler(store));
   app.post("/api/sync/unknown-sessions", unknownSessionsHandler(store));
+
+  // ---- MCP (read-only query tools for external agents) --------------------------
+
+  mountMcp(app, store, auth);
 
   // ---- Users --------------------------------------------------------------------
 
