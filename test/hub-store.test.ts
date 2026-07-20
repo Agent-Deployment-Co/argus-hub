@@ -227,6 +227,7 @@ describe("schema", () => {
       const names = tables.map((t) => t.name);
       expect(names).toContain("organizations");
       expect(names).toContain("api_keys");
+      expect(names).toContain("groups");
       expect(names).toContain("users");
       expect(names).toContain("clients");
       expect(names).toContain("client_fingerprint");
@@ -265,12 +266,13 @@ describe("schema", () => {
     await store2.close();
   });
 
-  test("upgrades a v1 store to v2 in place, preserving data", async () => {
+  test("upgrades a v1 store to the current version in place, preserving data", async () => {
     const dataDir = tempDataDir();
     const dbPath = join(dataDir, "hub.db");
 
-    // Build a real v2 store with a synced session, then downgrade the file to look like v1
-    // (drop the v2 additions + reset user_version) so reopening exercises the migration.
+    // Build a real current-version store with a synced session, then downgrade the file to
+    // look like v1 (drop every additive migration's changes + reset user_version) so reopening
+    // exercises the full migration chain.
     const store = await openHubStore(dataDir, 1_000_000);
     const orgId = (await store.getDefaultOrgId())!;
     const clientId = newClientId();
@@ -282,6 +284,9 @@ describe("schema", () => {
       `DROP TABLE resolved_session_labels;
        ALTER TABLE resolved_sessions DROP COLUMN title;
        ALTER TABLE resolved_sessions DROP COLUMN summary;
+       DROP INDEX users_group;
+       ALTER TABLE users DROP COLUMN group_id;
+       DROP TABLE groups;
        PRAGMA user_version = 1;`);
     await closeRaw(raw);
 
@@ -301,6 +306,13 @@ describe("schema", () => {
       const labelTable = await rawGet<{ name: string }>(
         db, "SELECT name FROM sqlite_schema WHERE type='table' AND name='resolved_session_labels'");
       expect(labelTable?.name).toBe("resolved_session_labels");
+
+      const groupsTable = await rawGet<{ name: string }>(
+        db, "SELECT name FROM sqlite_schema WHERE type='table' AND name='groups'");
+      expect(groupsTable?.name).toBe("groups");
+
+      const userCols = (await rawAll<{ name: string }>(db, "PRAGMA table_info(users)")).map((c) => c.name);
+      expect(userCols).toContain("group_id");
 
       // Pre-existing session data survived the upgrade.
       const sess = await rawGet<{ session_id: string; title: string | null }>(

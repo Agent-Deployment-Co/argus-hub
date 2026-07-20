@@ -17,7 +17,7 @@ import type {
 } from "../types.ts";
 import { emptyFrictionTotals, foldFriction, HIGH_TOKEN_GROWTH_RATIO } from "../health.ts";
 
-export const HUB_SCHEMA_VERSION = 2;
+export const HUB_SCHEMA_VERSION = 3;
 export const HUB_APPLICATION_ID = 0x48554200; // "HUB\0"
 
 // ---- Raw row types (mirrors client argus.db resolved_* column shapes) -------------------
@@ -279,16 +279,30 @@ const CREATE_HUB_SCHEMA_SQL = `
   );
   CREATE INDEX api_keys_org ON api_keys(org_id);
 
+  -- Named buckets users can be assigned into, unique by name within an org.
+  CREATE TABLE groups (
+    group_id   TEXT PRIMARY KEY,
+    org_id     TEXT NOT NULL REFERENCES organizations(org_id),
+    name       TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (org_id, name)
+  );
+  CREATE INDEX groups_org ON groups(org_id);
+
   -- Reporting bucket: 1..N clients map onto one user via clients.user_id.
   CREATE TABLE users (
     user_id      TEXT PRIMARY KEY,
     org_id       TEXT NOT NULL REFERENCES organizations(org_id),
     display_name TEXT NOT NULL,
     email        TEXT,
-    created_at   INTEGER NOT NULL
+    created_at   INTEGER NOT NULL,
+    -- group_id comes last so this matches the v2->v3 ALTER TABLE ... ADD COLUMN order
+    -- (fresh installs and upgraded stores must have identical column layout).
+    group_id     TEXT REFERENCES groups(group_id)
   );
   CREATE INDEX users_org   ON users(org_id);
   CREATE INDEX users_email ON users(org_id, email);
+  CREATE INDEX users_group ON users(org_id, group_id);
 
   -- Every distinct Argus install we've heard from. user_pinned = 1 means the operator owns
   -- the user mapping and the auto-mapper must not overwrite it.
@@ -446,6 +460,19 @@ const HUB_MIGRATIONS: Record<number, string> = {
     ALTER TABLE resolved_sessions ADD COLUMN title TEXT;
     ALTER TABLE resolved_sessions ADD COLUMN summary TEXT;
     ${RESOLVED_SESSION_LABELS_DDL}
+  `,
+  // v2 → v3: user groups (#25).
+  2: `
+    CREATE TABLE groups (
+      group_id   TEXT PRIMARY KEY,
+      org_id     TEXT NOT NULL REFERENCES organizations(org_id),
+      name       TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE (org_id, name)
+    );
+    CREATE INDEX groups_org ON groups(org_id);
+    ALTER TABLE users ADD COLUMN group_id TEXT REFERENCES groups(group_id);
+    CREATE INDEX users_group ON users(org_id, group_id);
   `,
 };
 
