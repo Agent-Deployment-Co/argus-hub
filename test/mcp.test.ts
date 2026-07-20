@@ -155,7 +155,7 @@ describe("tools/list", () => {
       expect(status).toBe(200);
       const tools = (body as { result: { tools: Array<{ name: string; inputSchema: { type: string } }> } }).result.tools;
       expect(tools.map((t) => t.name)).toEqual([
-        "query_activity", "query_tasks", "query_task_quality", "query_tool_usage",
+        "query_activity", "query_tasks", "query_task_quality", "query_tool_usage", "list_users",
       ]);
       for (const t of tools) expect(t.inputSchema.type).toBe("object");
     } finally {
@@ -343,6 +343,36 @@ describe("tools/call query_tool_usage", () => {
       for (const key of Object.keys(mcpBody)) {
         expect(mcpBody[key]).toEqual(restBody.dashboard[key]);
       }
+    } finally {
+      await env.store.close();
+    }
+  });
+});
+
+describe("tools/call list_users", () => {
+  test("returns an empty roster when the org has no sessions", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const { body } = await callTool(app, "list_users");
+      const result = (body as { result: { content: Array<{ text: string }> } }).result;
+      expect(JSON.parse(result.content[0]!.text)).toEqual({ users: [] });
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("matches the equivalent /api/users response", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncSessions(env, [{ id: "s1" }, { id: "s2" }]);
+
+      const restBody = await (await app.request("/api/users")).json();
+
+      const { body } = await callTool(app, "list_users");
+      const result = (body as { result: { content: Array<{ text: string }> } }).result;
+      expect(JSON.parse(result.content[0]!.text)).toEqual(restBody as object);
     } finally {
       await env.store.close();
     }

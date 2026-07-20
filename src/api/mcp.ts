@@ -18,6 +18,7 @@ import { assembleTaskReport } from "../reporting/tasks.ts";
 import { assembleDashboard } from "../reporting/snapshot.ts";
 import { loadPlugins } from "../reporting/inventory.ts";
 import { buildTaskList, type TaskListParams } from "./task-list.ts";
+import { cost } from "../pricing.ts";
 
 // ---- Shared input schema ------------------------------------------------------------------
 
@@ -91,6 +92,14 @@ const TOOLS: Tool[] = [
       "Which tools and MCP servers are actually being used, by how many people: per-tool and " +
       "per-tool-category call stats, underused tools, shared-vs-solo reach, and source comparison.",
     inputSchema: { type: "object", properties: SHARED_PROPERTIES },
+  },
+  {
+    name: "list_users",
+    description:
+      "Roster of known users in the org — userId, display name, email, last-sync time, session/" +
+      "client counts, total tokens, and total cost. Use this to discover valid `user` ids before " +
+      "scoping the other tools to one person.",
+    inputSchema: { type: "object", properties: {} },
   },
 ];
 
@@ -221,6 +230,24 @@ async function handleQueryToolUsage(store: HubStore, args: Record<string, unknow
   });
 }
 
+async function handleListUsers(store: HubStore) {
+  const orgId = await store.getDefaultOrgId();
+  if (!orgId) return toolJson({ users: [] });
+
+  const stats = await store.readUserStats(orgId);
+  const users = stats.map(({ userId, displayName, email, lastSyncMs, sessionCount, clientCount, byModel }) => {
+    const totalTokens = byModel.reduce(
+      (s, m) => s + m.input + m.output + m.cacheRead + m.cacheWrite5m + m.cacheWrite1h, 0,
+    );
+    const totalCost = byModel.reduce(
+      (s, m) => s + cost({ input: m.input, output: m.output, cacheRead: m.cacheRead, cacheWrite5m: m.cacheWrite5m, cacheWrite1h: m.cacheWrite1h }, m.model),
+      0,
+    );
+    return { userId, displayName, email, lastSyncMs, sessionCount, clientCount, totalTokens, cost: totalCost };
+  });
+  return toolJson({ users });
+}
+
 async function callTool(store: HubStore, name: string, args: Record<string, unknown> | undefined) {
   switch (name) {
     case "query_activity":
@@ -231,6 +258,8 @@ async function callTool(store: HubStore, name: string, args: Record<string, unkn
       return handleQueryTaskQuality(store, args);
     case "query_tool_usage":
       return handleQueryToolUsage(store, args);
+    case "list_users":
+      return handleListUsers(store);
     default:
       return toolError(`Unknown tool "${name}".`);
   }
