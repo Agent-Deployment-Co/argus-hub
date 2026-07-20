@@ -154,6 +154,22 @@ export interface ClientInfo {
   fingerprint: Record<string, string>;
 }
 
+export interface GroupInfo {
+  groupId: string;
+  orgId: string;
+  name: string;
+  createdAt: number;
+  memberCount: number;
+}
+
+/** Thrown by createGroup/renameGroup when the name is already taken within the org. */
+export class DuplicateGroupNameError extends Error {
+  constructor(name: string) {
+    super(`A group named "${name}" already exists in this org`);
+    this.name = "DuplicateGroupNameError";
+  }
+}
+
 // ---- SQL helpers (same patterns as store.ts) --------------------------------------------
 
 function run(db: Database, sql: string, params: unknown[] = []): Promise<RunResult> {
@@ -1050,6 +1066,113 @@ export class HubStore {
         [orgId],
       );
       return row?.n ?? 0;
+    });
+  }
+
+  // ---- Groups ----------------------------------------------------------------------------
+
+  /** Create a group. Throws DuplicateGroupNameError if the name is already taken in this org. */
+  createGroup(orgId: string, name: string, now = Date.now()): Promise<GroupInfo> {
+    return this.schedule(async () => {
+      const existing = await get<{ group_id: string }>(
+        this.db,
+        "SELECT group_id FROM groups WHERE org_id = ? AND name = ?",
+        [orgId, name],
+      );
+      if (existing) throw new DuplicateGroupNameError(name);
+
+      const groupId = `group-${randomUUID()}`;
+      await run(
+        this.db,
+        "INSERT INTO groups(group_id, org_id, name, created_at) VALUES (?, ?, ?, ?)",
+        [groupId, orgId, name, now],
+      );
+      return { groupId, orgId, name, createdAt: now, memberCount: 0 };
+    });
+  }
+
+  /** Rename a group. Throws DuplicateGroupNameError if another group in this org already has
+   *  that name. No-op if `groupId` doesn't exist in the org. */
+  renameGroup(orgId: string, groupId: string, name: string): Promise<void> {
+    return this.schedule(async () => {
+      const existing = await get<{ group_id: string }>(
+        this.db,
+        "SELECT group_id FROM groups WHERE org_id = ? AND name = ? AND group_id != ?",
+        [orgId, name, groupId],
+      );
+      if (existing) throw new DuplicateGroupNameError(name);
+
+      await run(
+        this.db,
+        "UPDATE groups SET name = ? WHERE org_id = ? AND group_id = ?",
+        [name, orgId, groupId],
+      );
+    });
+  }
+
+  /** Delete a group. Members are ungrouped (group_id set to NULL), not deleted. No-op if
+   *  `groupId` doesn't exist in the org. */
+  deleteGroup(orgId: string, groupId: string): Promise<void> {
+    return this.schedule(async () => {
+      await run(
+        this.db,
+        "UPDATE users SET group_id = NULL WHERE org_id = ? AND group_id = ?",
+        [orgId, groupId],
+      );
+      await run(
+        this.db,
+        "DELETE FROM groups WHERE org_id = ? AND group_id = ?",
+        [orgId, groupId],
+      );
+    });
+  }
+
+  /** Set (or clear, with `groupId = null`) a single user's group. */
+  setUserGroup(orgId: string, userId: string, groupId: string | null): Promise<void> {
+    return this.schedule(async () => {
+      await run(
+        this.db,
+        "UPDATE users SET group_id = ? WHERE org_id = ? AND user_id = ?",
+        [groupId, orgId, userId],
+      );
+    });
+  }
+
+  /** Set (or clear, with `groupId = null`) the group for many users at once. */
+  setUsersGroup(orgId: string, userIds: string[], groupId: string | null): Promise<void> {
+    return this.schedule(async () => {
+      if (!userIds.length) return;
+      for (const part of chunk(userIds, 500)) {
+        const placeholders = part.map(() => "?").join(", ");
+        await run(
+          this.db,
+          `UPDATE users SET group_id = ? WHERE org_id = ? AND user_id IN (${placeholders})`,
+          [groupId, orgId, ...part],
+        );
+      }
+    });
+  }
+
+  /** Every group in an org with its current member count, ordered by name. */
+  listGroups(orgId: string): Promise<GroupInfo[]> {
+    return this.schedule(async () => {
+      const rows = await all<{ group_id: string; name: string; created_at: number; member_count: number }>(
+        this.db,
+        `SELECT g.group_id, g.name, g.created_at, COUNT(u.user_id) AS member_count
+         FROM groups g
+         LEFT JOIN users u ON u.org_id = g.org_id AND u.group_id = g.group_id
+         WHERE g.org_id = ?
+         GROUP BY g.group_id
+         ORDER BY g.name`,
+        [orgId],
+      );
+      return rows.map((r) => ({
+        groupId: r.group_id,
+        orgId,
+        name: r.name,
+        createdAt: r.created_at,
+        memberCount: r.member_count,
+      }));
     });
   }
 

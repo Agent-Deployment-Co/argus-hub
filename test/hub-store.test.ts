@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
+  DuplicateGroupNameError,
   HUB_APPLICATION_ID,
   HUB_SCHEMA_VERSION,
   openHubStore,
@@ -723,6 +724,154 @@ describe("listUsers / countUsers", () => {
     await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("s3"), 3_000_000);
 
     expect(await store.countUsers(orgId)).toBe(2);
+    await store.close();
+  });
+});
+
+describe("groups", () => {
+  test("createGroup creates a group and listGroups returns it with memberCount=0", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const group = await store.createGroup(orgId, "Engineering", 1_000_000);
+    expect(group.name).toBe("Engineering");
+    expect(group.orgId).toBe(orgId);
+    expect(group.memberCount).toBe(0);
+
+    const groups = await store.listGroups(orgId);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.groupId).toBe(group.groupId);
+    expect(groups[0]!.memberCount).toBe(0);
+    await store.close();
+  });
+
+  test("createGroup rejects a duplicate name within the same org", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    await store.createGroup(orgId, "Engineering");
+    await expect(store.createGroup(orgId, "Engineering")).rejects.toThrow(DuplicateGroupNameError);
+    await store.close();
+  });
+
+  test("renameGroup renames a group", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const group = await store.createGroup(orgId, "Engineering");
+    await store.renameGroup(orgId, group.groupId, "Platform Engineering");
+
+    const groups = await store.listGroups(orgId);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.name).toBe("Platform Engineering");
+    await store.close();
+  });
+
+  test("renameGroup rejects a name already used by another group in the org", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    await store.createGroup(orgId, "Engineering");
+    const sales = await store.createGroup(orgId, "Sales");
+
+    await expect(store.renameGroup(orgId, sales.groupId, "Engineering")).rejects.toThrow(DuplicateGroupNameError);
+    await store.close();
+  });
+
+  test("renameGroup allows renaming a group to its own current name", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const group = await store.createGroup(orgId, "Engineering");
+    await store.renameGroup(orgId, group.groupId, "Engineering");
+
+    const groups = await store.listGroups(orgId);
+    expect(groups[0]!.name).toBe("Engineering");
+    await store.close();
+  });
+
+  test("setUserGroup assigns and reassigns a user's group", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const userId = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("s1"), 1_000_000);
+    const eng = await store.createGroup(orgId, "Engineering");
+    const sales = await store.createGroup(orgId, "Sales");
+
+    await store.setUserGroup(orgId, userId, eng.groupId);
+    expect((await store.listGroups(orgId)).find((g) => g.groupId === eng.groupId)?.memberCount).toBe(1);
+
+    await store.setUserGroup(orgId, userId, sales.groupId);
+    const groups = await store.listGroups(orgId);
+    expect(groups.find((g) => g.groupId === eng.groupId)?.memberCount).toBe(0);
+    expect(groups.find((g) => g.groupId === sales.groupId)?.memberCount).toBe(1);
+    await store.close();
+  });
+
+  test("setUserGroup(null) ungroups a user", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const userId = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("s1"), 1_000_000);
+    const eng = await store.createGroup(orgId, "Engineering");
+    await store.setUserGroup(orgId, userId, eng.groupId);
+
+    await store.setUserGroup(orgId, userId, null);
+    expect((await store.listGroups(orgId)).find((g) => g.groupId === eng.groupId)?.memberCount).toBe(0);
+    await store.close();
+  });
+
+  test("setUsersGroup bulk-assigns many users at once", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const alice = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("s1"), 1_000_000);
+    const bob = await syncAs(store, orgId, newClientId(), "bob@example.com", minimalUploadRows("s2"), 1_000_000);
+    const eng = await store.createGroup(orgId, "Engineering");
+
+    await store.setUsersGroup(orgId, [alice, bob], eng.groupId);
+
+    const groups = await store.listGroups(orgId);
+    expect(groups.find((g) => g.groupId === eng.groupId)?.memberCount).toBe(2);
+    await store.close();
+  });
+
+  test("deleteGroup ungroups members instead of deleting them", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const userId = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("s1"), 1_000_000);
+    const eng = await store.createGroup(orgId, "Engineering");
+    await store.setUserGroup(orgId, userId, eng.groupId);
+
+    await store.deleteGroup(orgId, eng.groupId);
+
+    expect(await store.listGroups(orgId)).toHaveLength(0);
+    const users = await store.listUsers(orgId);
+    expect(users).toHaveLength(1);
+    expect(users[0]!.userId).toBe(userId);
+    await store.close();
+  });
+
+  test("after deleting a group, its name can be reused by a new group", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const first = await store.createGroup(orgId, "Engineering");
+    await store.deleteGroup(orgId, first.groupId);
+
+    const second = await store.createGroup(orgId, "Engineering");
+    expect(second.name).toBe("Engineering");
     await store.close();
   });
 });
