@@ -5,65 +5,35 @@ import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { HubStore } from "../store/hub-store.ts";
 import { syncHandler, unknownSessionsHandler } from "./sync.ts";
+import { mountMcp } from "./mcp.ts";
 import { assembleDashboard } from "../reporting/snapshot.ts";
-import { assembleActivityReport, previousWindow } from "../reporting/activity.ts";
-import { assembleTaskReport } from "../reporting/tasks.ts";
 import { loadPlugins } from "../reporting/inventory.ts";
+import { buildActivityReport, buildTaskQualityReport, buildUserRoster } from "./reports.ts";
 import { computeRecommendations } from "./recommendations.ts";
 import { buildSessionList, buildSessionDetail, type SessionListParams } from "./session-list.ts";
-import { buildTaskList, type TaskListParams, type TaskOutcomeFilter } from "./task-list.ts";
-import type { ResolvedQuery } from "../types.ts";
+import { buildTaskList, type TaskListParams } from "./task-list.ts";
 import type { SessionSort } from "./session-list.ts";
-import { cost } from "../pricing.ts";
+import {
+  parseResolvedQuery as parseResolvedQueryFrom,
+  parseUserScope as parseUserScopeFrom,
+  parseOutcomeFilter as parseOutcomeFilterFrom,
+  parseIntOr,
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+  VALID_SORTS,
+} from "./query-params.ts";
 import type { AdminAuth } from "../admin-auth.ts";
 import { verifySession, makeSessionCookie, clearSessionCookie } from "../admin-auth.ts";
 import { LOGIN_PAGE } from "./pages.ts";
 
 // ---- Query param parsing ----------------------------------------------------------------
+//
+// The parsers live in ./query-params.ts (shared with the MCP tools so the two surfaces can't
+// diverge); here they're adapted to read from a Hono Context's query string.
 
-const VALID_SOURCES = new Set(["claude", "codex", "gemini", "cowork"]);
-const VALID_SORTS = new Set<string>(["recent", "tokens", "cost"]);
-const DEFAULT_LIMIT = 50;
-const MAX_LIMIT = 200;
-
-function parseIntOr(v: string | undefined, fallback: number): number {
-  const n = Number.parseInt(v ?? "", 10);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-/** Parse since/until/project/source into a ResolvedQuery. Returns an error string on bad input. */
-function parseResolvedQuery(c: Context): ResolvedQuery | string {
-  const source = c.req.query("source");
-  if (source && !VALID_SOURCES.has(source)) return `Unknown source "${source}".`;
-  const q: ResolvedQuery = {};
-  const since = c.req.query("since");
-  const until = c.req.query("until");
-  const project = c.req.query("project");
-  if (since) q.since = since;
-  if (until) q.until = until;
-  if (project) q.projectSubstring = project;
-  if (source) q.sources = [source as "claude" | "codex" | "gemini" | "cowork"];
-  return q;
-}
-
-/** Parse the ?user= query param. Returns undefined (all users) or the specific userId. */
-function parseUserScope(c: Context): string | undefined {
-  return c.req.query("user")?.trim() || undefined;
-}
-
-const VALID_OUTCOMES = new Set<TaskOutcomeFilter>(["success", "failure", "unknown"]);
-
-/** Parse the ?outcome= query param (comma-separated success/failure/unknown). Returns
- *  undefined (no filter) or an error string on an unrecognized value. */
-function parseOutcomeFilter(c: Context): TaskOutcomeFilter[] | string | undefined {
-  const raw = c.req.query("outcome");
-  if (!raw) return undefined;
-  const values = raw.split(",").map((v) => v.trim()).filter(Boolean);
-  for (const v of values) {
-    if (!VALID_OUTCOMES.has(v as TaskOutcomeFilter)) return `Unknown outcome "${v}".`;
-  }
-  return values.length ? (values as TaskOutcomeFilter[]) : undefined;
-}
+const parseResolvedQuery = (c: Context) => parseResolvedQueryFrom((k) => c.req.query(k));
+const parseUserScope = (c: Context) => parseUserScopeFrom((k) => c.req.query(k));
+const parseOutcomeFilter = (c: Context) => parseOutcomeFilterFrom((k) => c.req.query(k));
 
 function requestHost(c: Context): string | undefined {
   return c.req.header("Host") ?? new URL(c.req.url).host;
@@ -131,24 +101,17 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
   app.post("/api/sync", syncHandler(store));
   app.post("/api/sync/unknown-sessions", unknownSessionsHandler(store));
 
+  // ---- MCP (read-only query tools for external agents) --------------------------
+
+  mountMcp(app, store, auth);
+
   // ---- Users --------------------------------------------------------------------
 
   // List known users with last-sync timestamps, session counts, and token/cost totals.
   // The frontend uses this for the user picker and the /users tab.
   app.get("/api/users", async (c) => {
     const orgId = await store.getDefaultOrgId();
-    if (!orgId) return c.json({ users: [] });
-    const stats = await store.readUserStats(orgId);
-    const users = stats.map(({ userId, displayName, email, lastSyncMs, sessionCount, clientCount, byModel }) => {
-      const totalTokens = byModel.reduce(
-        (s, m) => s + m.input + m.output + m.cacheRead + m.cacheWrite5m + m.cacheWrite1h, 0,
-      );
-      const totalCost = byModel.reduce(
-        (s, m) => s + cost({ input: m.input, output: m.output, cacheRead: m.cacheRead, cacheWrite5m: m.cacheWrite5m, cacheWrite1h: m.cacheWrite1h }, m.model),
-        0,
-      );
-      return { userId, displayName, email, lastSyncMs, sessionCount, clientCount, totalTokens, cost: totalCost };
-    });
+    const users = await buildUserRoster(store, orgId);
     return c.json({ users });
   });
 
@@ -200,41 +163,8 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     const query = parseResolvedQuery(c);
     if (typeof query === "string") return c.json({ error: query }, 400);
 
-    const now = new Date();
-    const isoDaysAgo = (n: number) => {
-      const d = new Date(now);
-      d.setUTCDate(d.getUTCDate() - n);
-      return d.toISOString().slice(0, 10);
-    };
-    const since = query.since ?? isoDaysAgo(30);
-    const until = query.until ?? isoDaysAgo(0);
-    const currentQuery = { ...query, since, until };
-    const { since: previousSince, until: previousUntil } = previousWindow(since, until);
-    const previousQuery = { ...query, since: previousSince, until: previousUntil };
-
-    const scope = { orgId };
-    const [currentTotals, previousTotals, daily, byUser, bySource, currentTasks, previousTasks] =
-      await Promise.all([
-        store.readActivityTotals(scope, currentQuery),
-        store.readActivityTotals(scope, previousQuery),
-        store.readActivityDaily(scope, currentQuery),
-        store.readActivityUserRollup(scope, currentQuery),
-        store.readActivitySourceRollup(scope, currentQuery),
-        store.readTaskFacts(scope, currentQuery),
-        store.readTaskFacts(scope, previousQuery),
-      ]);
-
-    if (currentTotals.sessions === 0 && previousTotals.sessions === 0 && byUser.length === 0) {
-      return c.json({ error: "No data yet." }, 503);
-    }
-
-    const report = assembleActivityReport({
-      since, until, previousSince, previousUntil,
-      currentTotals, previousTotals, daily, byUser, bySource,
-      currentTasks: currentTasks.map((r) => ({ task: r.task, userId: r.userId })),
-      previousTasks: previousTasks.map((r) => ({ task: r.task })),
-      nowMs: now.getTime(),
-    });
+    const report = await buildActivityReport(store, { orgId }, query, new Date());
+    if (!report) return c.json({ error: "No data yet." }, 503);
     return c.json(report);
   });
 
@@ -310,29 +240,9 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     const query = parseResolvedQuery(c);
     if (typeof query === "string") return c.json({ error: query }, 400);
 
-    const now = new Date();
-    const isoDaysAgo = (n: number) => {
-      const d = new Date(now);
-      d.setUTCDate(d.getUTCDate() - n);
-      return d.toISOString().slice(0, 10);
-    };
-    const since = query.since ?? isoDaysAgo(30);
-    const until = query.until ?? isoDaysAgo(0);
-    const currentQuery = { ...query, since, until };
-
     const userId = parseUserScope(c);
-    const scope = { orgId, userId };
-    const [rows, friction, totals] = await Promise.all([
-      store.readTaskFacts(scope, currentQuery),
-      store.readWindowFrictionRollup(scope, currentQuery),
-      store.readActivityTotals(scope, currentQuery),
-    ]);
-
-    if (totals.sessions === 0) return c.json({ error: "No data yet." }, 503);
-
-    const report = assembleTaskReport({
-      since, until, rows, friction, nowMs: now.getTime(),
-    });
+    const report = await buildTaskQualityReport(store, { orgId, userId }, query, new Date());
+    if (!report) return c.json({ error: "No data yet." }, 503);
     return c.json(report);
   });
 
