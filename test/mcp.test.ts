@@ -147,15 +147,17 @@ function callTool(
 // ---- Tests -------------------------------------------------------------------------------
 
 describe("tools/list", () => {
-  test("returns the query_activity tool with a JSON-schema input", async () => {
+  test("returns all four tools with a JSON-schema input", async () => {
     const env = await openTestEnv();
     const app = createHubApp(env.store);
     try {
       const { status, body } = await rpc(app, "tools/list");
       expect(status).toBe(200);
       const tools = (body as { result: { tools: Array<{ name: string; inputSchema: { type: string } }> } }).result.tools;
-      expect(tools.map((t) => t.name)).toEqual(["query_activity"]);
-      expect(tools[0]!.inputSchema.type).toBe("object");
+      expect(tools.map((t) => t.name)).toEqual([
+        "query_activity", "query_tasks", "query_task_quality", "query_tool_usage",
+      ]);
+      for (const t of tools) expect(t.inputSchema.type).toBe("object");
     } finally {
       await env.store.close();
     }
@@ -219,6 +221,128 @@ describe("tools/call query_activity", () => {
       const result = (body as { result: { isError?: boolean; content: Array<{ text: string }> } }).result;
       expect(result.isError).toBe(true);
       expect(result.content[0]!.text).toContain("Unknown tool");
+    } finally {
+      await env.store.close();
+    }
+  });
+});
+
+describe("tools/call query_tasks", () => {
+  test("returns the empty-state shape when the org has no sessions", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const { body } = await callTool(app, "query_tasks");
+      const result = (body as { result: { content: Array<{ text: string }> } }).result;
+      expect(JSON.parse(result.content[0]!.text)).toEqual({
+        rows: [], total: 0, offset: 0, limit: 50, counts: { success: 0, failure: 0, unknown: 0 },
+      });
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("returns a tool error for an unknown outcome", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncSessions(env, [{ id: "s1" }]);
+      const { body } = await callTool(app, "query_tasks", { outcome: "bogus" });
+      const result = (body as { result: { isError?: boolean; content: Array<{ text: string }> } }).result;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain("Unknown outcome");
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("matches the equivalent /api/tasks response, including limit/offset", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncSessions(env, [{ id: "s1" }, { id: "s2" }]);
+
+      const restRes = await app.request("/api/tasks?limit=1&offset=0");
+      const restBody = await restRes.json();
+
+      const { body } = await callTool(app, "query_tasks", { limit: 1, offset: 0 });
+      const result = (body as { result: { content: Array<{ text: string }> } }).result;
+      expect(JSON.parse(result.content[0]!.text)).toEqual(restBody as object);
+    } finally {
+      await env.store.close();
+    }
+  });
+});
+
+describe("tools/call query_task_quality", () => {
+  test("returns 'No data yet.' as a tool error when the org has no sessions", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const { body } = await callTool(app, "query_task_quality");
+      const result = (body as { result: { isError?: boolean; content: Array<{ text: string }> } }).result;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toBe("No data yet.");
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("matches the equivalent /api/tasks/report response for the same window", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncSessions(env, [{ id: "s1" }, { id: "s2" }]);
+
+      const query = "since=2020-01-01&until=2030-01-01";
+      const restBody = await (await app.request(`/api/tasks/report?${query}`)).json();
+
+      const { body } = await callTool(app, "query_task_quality", { since: "2020-01-01", until: "2030-01-01" });
+      const result = (body as { result: { content: Array<{ text: string }> } }).result;
+      const mcpBody = JSON.parse(result.content[0]!.text);
+
+      // Both calls stamp `generatedAtMs` with their own Date.now(); every other field must match.
+      expect({ ...mcpBody, generatedAtMs: 0 }).toEqual({ ...(restBody as object), generatedAtMs: 0 });
+    } finally {
+      await env.store.close();
+    }
+  });
+});
+
+describe("tools/call query_tool_usage", () => {
+  test("returns 'No data yet.' as a tool error when the org has no sessions", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const { body } = await callTool(app, "query_tool_usage");
+      const result = (body as { result: { isError?: boolean; content: Array<{ text: string }> } }).result;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toBe("No data yet.");
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("returns only the tool-facing slices of the dashboard, matching /api/snapshot", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncSessions(env, [{ id: "s1" }, { id: "s2" }]);
+
+      const restBody = await (await app.request("/api/snapshot")).json() as {
+        dashboard: Record<string, unknown>;
+      };
+
+      const { body } = await callTool(app, "query_tool_usage");
+      const result = (body as { result: { content: Array<{ text: string }> } }).result;
+      const mcpBody = JSON.parse(result.content[0]!.text);
+
+      expect(Object.keys(mcpBody).sort()).toEqual(
+        ["byTool", "byToolCategory", "underused", "sharedVsSolo", "sourceComparison"].sort(),
+      );
+      for (const key of Object.keys(mcpBody)) {
+        expect(mcpBody[key]).toEqual(restBody.dashboard[key]);
+      }
     } finally {
       await env.store.close();
     }
