@@ -250,6 +250,31 @@ describe("GET /api/users", () => {
       await env.store.close();
     }
   });
+
+  test("includes groupId/groupName for grouped users and null for ungrouped users", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const aliceId = await syncAs(env, "alice@example.com", [{ id: "s1" }]);
+      const bobId = await syncAs(env, "bob@example.com", [{ id: "s2" }]);
+      const group = await env.store.createGroup(env.orgId, "Engineering");
+      await env.store.setUserGroup(env.orgId, aliceId, group.groupId);
+
+      const res = await app.request("/api/users");
+      expect(res.status).toBe(200);
+      const body = await res.json() as {
+        users: Array<{ userId: string; groupId: string | null; groupName: string | null }>;
+      };
+      const alice = body.users.find((u) => u.userId === aliceId);
+      const bob = body.users.find((u) => u.userId === bobId);
+      expect(alice?.groupId).toBe(group.groupId);
+      expect(alice?.groupName).toBe("Engineering");
+      expect(bob?.groupId).toBeNull();
+      expect(bob?.groupName).toBeNull();
+    } finally {
+      await env.store.close();
+    }
+  });
 });
 
 // ---- GET /api/snapshot -----------------------------------------------------------------

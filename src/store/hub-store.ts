@@ -1647,6 +1647,8 @@ export class HubStore {
       lastSyncMs: number;
       sessionCount: number;
       clientCount: number;
+      groupId: string | null;
+      groupName: string | null;
       byModel: Array<{ model: string; input: number; output: number; cacheRead: number; cacheWrite5m: number; cacheWrite1h: number }>;
     }>
   > {
@@ -1654,16 +1656,20 @@ export class HubStore {
       const users = await all<{
         user_id: string; display_name: string; email: string | null;
         last_sync_ms: number | null; session_count: number; client_count: number;
+        group_id: string | null; group_name: string | null;
       }>(
         this.db,
         `SELECT u.user_id, u.display_name, u.email,
                 MAX(cs.last_sync_ms)                       AS last_sync_ms,
                 COUNT(DISTINCT rs.client_id || ':' || rs.session_id) AS session_count,
-                COUNT(DISTINCT c.client_id)                AS client_count
+                COUNT(DISTINCT c.client_id)                AS client_count,
+                u.group_id                                 AS group_id,
+                g.name                                      AS group_name
          FROM users u
          JOIN clients c ON c.org_id = u.org_id AND c.user_id = u.user_id
          LEFT JOIN client_syncs cs ON cs.org_id = c.org_id AND cs.client_id = c.client_id
          LEFT JOIN resolved_sessions rs ON rs.org_id = c.org_id AND rs.client_id = c.client_id
+         LEFT JOIN groups g ON g.org_id = u.org_id AND g.group_id = u.group_id
          WHERE u.org_id = ?
          GROUP BY u.user_id
          ORDER BY last_sync_ms DESC, u.user_id`,
@@ -1706,6 +1712,8 @@ export class HubStore {
         lastSyncMs: u.last_sync_ms ?? 0,
         sessionCount: u.session_count,
         clientCount: u.client_count,
+        groupId: u.group_id,
+        groupName: u.group_name,
         byModel: byUser.get(u.user_id) ?? [],
       }));
     });
