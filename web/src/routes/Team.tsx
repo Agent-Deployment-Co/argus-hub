@@ -302,8 +302,7 @@ function DeleteGroupDialog({ group, onClose }: { group: HubGroup; onClose: () =>
   return (
     <Modal title={`Delete "${group.name}"?`} onClose={onClose}>
       <p className="modal-copy">
-        This deletes the group itself. Its {group.memberCount} member{group.memberCount === 1 ? "" : "s"} will
-        not be deleted — they'll move to "Ungrouped".
+        This deletes the group itself, and all members will be ungrouped.
       </p>
       {deleteGroup.isError && <p className="modal-error">{(deleteGroup.error as Error).message}</p>}
       <div className="modal-actions">
