@@ -3,7 +3,7 @@ import { Dashboard } from "../components/Dashboard";
 import { FilterBar } from "../components/FilterBar";
 import { DEFAULT_SINCE, DEFAULT_UNTIL, isFilterActive } from "../lib/filters";
 import { SnapshotProvider, useSnapshotQuery } from "../lib/snapshot";
-import { useUserInfo } from "../lib/users";
+import { useUserInfo, useUsers } from "../lib/users";
 
 const routeApi = getRouteApi("/users/$userId");
 
@@ -12,6 +12,11 @@ export function UserActivity() {
   const search = routeApi.useSearch();
   const navigate = routeApi.useNavigate();
   const userInfo = useUserInfo(userId);
+  // useUsers (not a dedicated per-user endpoint) is the only source for group membership —
+  // /api/user/:userId doesn't carry it. Already warm from the Team page in the common
+  // Team -> user-detail navigation, and cheap to fetch fresh otherwise.
+  const usersQuery = useUsers();
+  const user = usersQuery.data?.find((u) => u.userId === userId);
   const since = search.since ?? DEFAULT_SINCE();
   const until = search.until ?? DEFAULT_UNTIL();
   const source = search.source ?? "";
@@ -46,6 +51,11 @@ export function UserActivity() {
         <div>
           <Link to="/users" className="hub-org-link">← Team</Link>
           <h1>{displayName}</h1>
+          {user?.groupName && (
+            <div className="user-group-line">
+              <span className="muted">{user.groupName}</span>
+            </div>
+          )}
         </div>
       </div>
       {query.isPending ? (

@@ -159,6 +159,7 @@ main { padding: 30px 32px 64px; }
 
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .page-head h1 { margin: 2px 0 0; font: 700 22px/1.2 "Poppins", "Avenir Next", Arial, sans-serif; color: var(--heading); }
+.user-group-line { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .page-range { flex: 0 0 auto; margin-top: 4px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .task-filters { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: -12px 0 20px; }
 .task-filters-outcomes { display: flex; align-items: center; gap: 8px; }
@@ -396,6 +397,16 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 .group-count { color: var(--muted); font: 600 12px "Poppins", "Avenir Next", Arial, sans-serif; }
 .group-section-actions { display: flex; gap: 6px; }
 .group-empty { margin: 0; }
+
+/* Each group section renders its own <table>, so widths auto-fit that table's own content by
+   default and drift out of alignment across sections. Fix the layout and give every column an
+   explicit width (User gets whatever's left) so they line up from one section to the next. */
+.group-section table { table-layout: fixed; }
+.group-section th:nth-child(3), .group-section td:nth-child(3) { width: 90px; }
+.group-section th:nth-child(4), .group-section td:nth-child(4) { width: 100px; }
+.group-section th:nth-child(5), .group-section td:nth-child(5) { width: 90px; }
+.group-section th:nth-child(6), .group-section td:nth-child(6) { width: 130px; }
+.group-section th:nth-child(7), .group-section td:nth-child(7) { width: 110px; }
 
 .group-move-btn { height: 26px; padding: 0 10px; font-size: 11.5px; }
 /* Positioned inline (position: fixed + top/left) by GroupPicker, since it's portaled to
