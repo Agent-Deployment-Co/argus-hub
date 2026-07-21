@@ -396,6 +396,28 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 .group-count { color: var(--muted); font: 600 12px "Poppins", "Avenir Next", Arial, sans-serif; }
 .group-section-actions { display: flex; gap: 6px; }
 .group-empty { margin: 0; }
+
+.group-move-btn { height: 26px; padding: 0 10px; font-size: 11.5px; }
+/* Positioned inline (position: fixed + top/left) by GroupPicker, since it's portaled to
+   document.body to escape the group table's `.scroll` (overflow: auto) container. */
+.group-popover { z-index: 20; width: 240px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 10px 30px rgba(0,0,0,.28); }
+.group-popover-head { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+.group-popover-clear { padding: 0; border: 0; background: transparent; color: var(--accent); font: 600 11.5px "Poppins", "Avenir Next", Arial, sans-serif; cursor: pointer; }
+.group-popover-clear:hover:not(:disabled) { text-decoration: underline; }
+.group-popover-clear:disabled { color: var(--muted); cursor: default; }
+.group-popover-input { box-sizing: border-box; width: 100%; height: 30px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: 13px "Aleo", Georgia, serif; }
+.group-popover-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.group-popover-error { margin-top: 6px; color: var(--racing-red); font: 600 11px "Poppins", "Avenir Next", Arial, sans-serif; }
+.group-popover-list { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; max-height: 260px; overflow-y: auto; }
+.group-popover-empty { padding: 8px 6px; color: var(--muted); font: 12px "Poppins", "Avenir Next", Arial, sans-serif; }
+.group-popover-pick { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; padding: 6px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font: 600 12.5px "Poppins", "Avenir Next", Arial, sans-serif; text-align: left; cursor: pointer; }
+.group-popover-pick:hover { background: var(--hover); }
+.group-popover-pick.is-applied { color: var(--accent); }
+.group-popover-check { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex: 0 0 auto; color: var(--accent); }
+.group-popover-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-popover-create { display: inline-flex; align-items: center; gap: 7px; margin-top: 2px; padding: 7px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--accent); font: 600 12.5px "Poppins", "Avenir Next", Arial, sans-serif; text-align: left; cursor: pointer; }
+.group-popover-create:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
 .checkbox-col { width: 32px; }
 .checkbox-col input[type="checkbox"] { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
 .bulk-toolbar {

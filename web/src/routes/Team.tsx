@@ -1,10 +1,11 @@
 import { Link } from "@tanstack/react-router";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { GroupPicker } from "../components/GroupPicker";
 import { fmt, usd } from "../lib/format";
 import { useUsers, type HubUser } from "../lib/users";
 import {
-  useCreateGroup, useDeleteGroup, useGroups, useRenameGroup, useSetUserGroup, useSetUsersGroup,
+  useCreateGroup, useDeleteGroup, useGroups, useRenameGroup, useSetUsersGroup,
   type HubGroup,
 } from "../lib/groups";
 
@@ -13,7 +14,6 @@ import {
 export function Team() {
   const usersQuery = useUsers();
   const groupsQuery = useGroups();
-  const setUserGroup = useSetUserGroup();
   const setUsersGroup = useSetUsersGroup();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -84,10 +84,8 @@ export function Team() {
             <GroupSection
               key={section.id}
               section={section}
-              groups={groups}
               selected={selected}
               onToggle={toggleSelected}
-              onSetUserGroup={(userId, groupId) => setUserGroup.mutate({ userId, groupId })}
               onRename={section.group ? () => setRenaming(section.group) : undefined}
               onDelete={section.group ? () => setDeleting(section.group) : undefined}
             />
@@ -112,7 +110,8 @@ interface GroupSectionData {
 
 /** Named groups sorted alphabetically, plus a trailing "Ungrouped" bucket for users with no
  *  group_id (omitted only when every group is empty and there's nothing ungrouped either, which
- *  can't happen once users exist, but keeps this honest about what it hides). */
+ *  can't happen once users exist, but keeps this honest about what it hides). Users within each
+ *  section are sorted alphabetically by display name. */
 function buildSections(users: HubUser[], groups: HubGroup[]): GroupSectionData[] {
   const byGroup = new Map<string, HubUser[]>();
   for (const u of users) {
@@ -120,22 +119,21 @@ function buildSections(users: HubUser[], groups: HubGroup[]): GroupSectionData[]
     const list = byGroup.get(key);
     if (list) list.push(u); else byGroup.set(key, [u]);
   }
+  const byName = (a: HubUser, b: HubUser) => a.displayName.localeCompare(b.displayName);
   const named = [...groups]
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map((g) => ({ id: g.groupId, name: g.name, group: g, users: byGroup.get(g.groupId) ?? [] }));
-  const ungrouped = byGroup.get("") ?? [];
+    .map((g) => ({ id: g.groupId, name: g.name, group: g, users: (byGroup.get(g.groupId) ?? []).sort(byName) }));
+  const ungrouped = (byGroup.get("") ?? []).sort(byName);
   if (ungrouped.length === 0 && named.length > 0) return named;
   return [...named, { id: "", name: "Ungrouped", group: null, users: ungrouped }];
 }
 
 function GroupSection({
-  section, groups, selected, onToggle, onSetUserGroup, onRename, onDelete,
+  section, selected, onToggle, onRename, onDelete,
 }: {
   section: GroupSectionData;
-  groups: HubGroup[];
   selected: Set<string>;
   onToggle: (userId: string) => void;
-  onSetUserGroup: (userId: string, groupId: string | null) => void;
   onRename?: () => void;
   onDelete?: () => void;
 }) {
@@ -165,12 +163,11 @@ function GroupSection({
               <tr>
                 <th className="checkbox-col" aria-hidden />
                 <th>User</th>
-                <th>Group</th>
-                <th className="num">Clients</th>
                 <th className="num">Sessions</th>
                 <th className="num">Tokens</th>
                 <th className="num">Cost</th>
                 <th>Last synced</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -189,24 +186,18 @@ function GroupSection({
                       {u.displayName}
                     </Link>
                   </td>
-                  <td>
-                    <select
-                      className="filter-input"
-                      value={u.groupId ?? ""}
-                      onChange={(e) => onSetUserGroup(u.userId, e.target.value || null)}
-                      aria-label={`Group for ${u.displayName}`}
-                    >
-                      <option value="">Ungrouped</option>
-                      {groups.map((g) => (
-                        <option key={g.groupId} value={g.groupId}>{g.name}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="num">{u.clientCount}</td>
                   <td className="num">{u.sessionCount}</td>
                   <td className="num">{fmt(u.totalTokens)}</td>
                   <td className="num">{usd(u.cost)}</td>
                   <td className="nowrap">{new Date(u.lastSyncMs).toLocaleDateString()}</td>
+                  <td>
+                    <GroupPicker
+                      userId={u.userId}
+                      userLabel={u.displayName}
+                      groupId={u.groupId}
+                      groupName={u.groupName}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
