@@ -3,7 +3,7 @@ import { Hono, type Context } from "hono";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { HubStore } from "../store/hub-store.ts";
+import { DuplicateGroupNameError, GroupNotFoundError, type HubStore } from "../store/hub-store.ts";
 import { syncHandler, unknownSessionsHandler } from "./sync.ts";
 import { mountMcp } from "./mcp.ts";
 import { assembleDashboard } from "../reporting/snapshot.ts";
@@ -125,6 +125,121 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     const orgs = await store.listOrgs();
     const orgName = orgs.find((o) => o.orgId === orgId)?.name ?? orgId;
     return c.json({ userId, displayName: display.displayName, email: display.email, orgId, orgName });
+  });
+
+  // Set (or clear, with `groupId: null`) a single user's group.
+  app.patch("/api/users/:userId", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+    const userId = c.req.param("userId").trim();
+
+    const body = await c.req.json().catch(() => null) as { groupId?: unknown } | null;
+    if (!body || !("groupId" in body)) return c.json({ error: 'Missing required "groupId".' }, 400);
+    const groupId = body.groupId;
+    if (groupId !== null && typeof groupId !== "string") {
+      return c.json({ error: '"groupId" must be a string or null.' }, 400);
+    }
+
+    try {
+      await store.setUserGroup(orgId, userId, groupId);
+    } catch (err) {
+      if (err instanceof GroupNotFoundError) return c.json({ error: "Group not found." }, 404);
+      throw err;
+    }
+    return c.json({ ok: true });
+  });
+
+  // ---- Groups ---------------------------------------------------------------------
+
+  // Groups with member counts. Backs group management + the grouped /users view.
+  app.get("/api/groups", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ groups: [] });
+    const groups = await store.listGroups(orgId);
+    return c.json({ groups });
+  });
+
+  app.post("/api/groups", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+
+    const body = await c.req.json().catch(() => null) as { name?: unknown } | null;
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    if (!name) return c.json({ error: 'Missing required "name".' }, 400);
+
+    try {
+      const group = await store.createGroup(orgId, name);
+      return c.json({ group }, 201);
+    } catch (err) {
+      if (err instanceof DuplicateGroupNameError) return c.json({ error: err.message }, 409);
+      throw err;
+    }
+  });
+
+  app.patch("/api/groups/:groupId", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+    const groupId = c.req.param("groupId").trim();
+
+    const body = await c.req.json().catch(() => null) as { name?: unknown } | null;
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    if (!name) return c.json({ error: 'Missing required "name".' }, 400);
+
+    if (!(await store.groupExists(orgId, groupId))) return c.json({ error: "Group not found." }, 404);
+
+    try {
+      await store.renameGroup(orgId, groupId, name);
+    } catch (err) {
+      if (err instanceof DuplicateGroupNameError) return c.json({ error: err.message }, 409);
+      throw err;
+    }
+    return c.json({ ok: true });
+  });
+
+  app.delete("/api/groups/:groupId", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+    const groupId = c.req.param("groupId").trim();
+
+    if (!(await store.groupExists(orgId, groupId))) return c.json({ error: "Group not found." }, 404);
+
+    // Ungroups members rather than deleting them (store.deleteGroup nulls their group_id).
+    await store.deleteGroup(orgId, groupId);
+    return c.json({ ok: true });
+  });
+
+  // Bulk membership changes for the row-selection toolbar in the UI.
+  app.post("/api/groups/:groupId/members", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+    const groupId = c.req.param("groupId").trim();
+
+    const body = await c.req.json().catch(() => null) as { userIds?: unknown } | null;
+    const userIds = Array.isArray(body?.userIds) ? body.userIds.filter((id): id is string => typeof id === "string") : null;
+    if (!userIds || !userIds.length) return c.json({ error: 'Missing required "userIds" array.' }, 400);
+
+    try {
+      await store.setUsersGroup(orgId, userIds, groupId);
+    } catch (err) {
+      if (err instanceof GroupNotFoundError) return c.json({ error: "Group not found." }, 404);
+      throw err;
+    }
+    return c.json({ ok: true });
+  });
+
+  app.delete("/api/groups/:groupId/members", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+    const groupId = c.req.param("groupId").trim();
+
+    const body = await c.req.json().catch(() => null) as { userIds?: unknown } | null;
+    const userIds = Array.isArray(body?.userIds) ? body.userIds.filter((id): id is string => typeof id === "string") : null;
+    if (!userIds || !userIds.length) return c.json({ error: 'Missing required "userIds" array.' }, 400);
+
+    if (!(await store.groupExists(orgId, groupId))) return c.json({ error: "Group not found." }, 404);
+
+    await store.setUsersGroup(orgId, userIds, null);
+    return c.json({ ok: true });
   });
 
   // Clients in the org with their fingerprint snapshot + current user mapping.

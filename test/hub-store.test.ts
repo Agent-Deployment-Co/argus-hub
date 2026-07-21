@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
+  DuplicateGroupNameError,
+  GroupNotFoundError,
   HUB_APPLICATION_ID,
   HUB_SCHEMA_VERSION,
   openHubStore,
@@ -227,6 +229,7 @@ describe("schema", () => {
       const names = tables.map((t) => t.name);
       expect(names).toContain("organizations");
       expect(names).toContain("api_keys");
+      expect(names).toContain("groups");
       expect(names).toContain("users");
       expect(names).toContain("clients");
       expect(names).toContain("client_fingerprint");
@@ -265,12 +268,13 @@ describe("schema", () => {
     await store2.close();
   });
 
-  test("upgrades a v1 store to v2 in place, preserving data", async () => {
+  test("upgrades a v1 store to the current version in place, preserving data", async () => {
     const dataDir = tempDataDir();
     const dbPath = join(dataDir, "hub.db");
 
-    // Build a real v2 store with a synced session, then downgrade the file to look like v1
-    // (drop the v2 additions + reset user_version) so reopening exercises the migration.
+    // Build a real current-version store with a synced session, then downgrade the file to
+    // look like v1 (drop every additive migration's changes + reset user_version) so reopening
+    // exercises the full migration chain.
     const store = await openHubStore(dataDir, 1_000_000);
     const orgId = (await store.getDefaultOrgId())!;
     const clientId = newClientId();
@@ -282,6 +286,9 @@ describe("schema", () => {
       `DROP TABLE resolved_session_labels;
        ALTER TABLE resolved_sessions DROP COLUMN title;
        ALTER TABLE resolved_sessions DROP COLUMN summary;
+       DROP INDEX users_group;
+       ALTER TABLE users DROP COLUMN group_id;
+       DROP TABLE groups;
        PRAGMA user_version = 1;`);
     await closeRaw(raw);
 
@@ -301,6 +308,13 @@ describe("schema", () => {
       const labelTable = await rawGet<{ name: string }>(
         db, "SELECT name FROM sqlite_schema WHERE type='table' AND name='resolved_session_labels'");
       expect(labelTable?.name).toBe("resolved_session_labels");
+
+      const groupsTable = await rawGet<{ name: string }>(
+        db, "SELECT name FROM sqlite_schema WHERE type='table' AND name='groups'");
+      expect(groupsTable?.name).toBe("groups");
+
+      const userCols = (await rawAll<{ name: string }>(db, "PRAGMA table_info(users)")).map((c) => c.name);
+      expect(userCols).toContain("group_id");
 
       // Pre-existing session data survived the upgrade.
       const sess = await rawGet<{ session_id: string; title: string | null }>(
@@ -711,6 +725,206 @@ describe("listUsers / countUsers", () => {
     await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("s3"), 3_000_000);
 
     expect(await store.countUsers(orgId)).toBe(2);
+    await store.close();
+  });
+});
+
+describe("groups", () => {
+  test("createGroup creates a group and listGroups returns it with memberCount=0", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const group = await store.createGroup(orgId, "Engineering", 1_000_000);
+    expect(group.name).toBe("Engineering");
+    expect(group.orgId).toBe(orgId);
+    expect(group.memberCount).toBe(0);
+
+    const groups = await store.listGroups(orgId);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.groupId).toBe(group.groupId);
+    expect(groups[0]!.memberCount).toBe(0);
+    await store.close();
+  });
+
+  test("createGroup rejects a duplicate name within the same org", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    await store.createGroup(orgId, "Engineering");
+    await expect(store.createGroup(orgId, "Engineering")).rejects.toThrow(DuplicateGroupNameError);
+    await store.close();
+  });
+
+  test("renameGroup renames a group", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const group = await store.createGroup(orgId, "Engineering");
+    await store.renameGroup(orgId, group.groupId, "Platform Engineering");
+
+    const groups = await store.listGroups(orgId);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.name).toBe("Platform Engineering");
+    await store.close();
+  });
+
+  test("renameGroup rejects a name already used by another group in the org", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    await store.createGroup(orgId, "Engineering");
+    const sales = await store.createGroup(orgId, "Sales");
+
+    await expect(store.renameGroup(orgId, sales.groupId, "Engineering")).rejects.toThrow(DuplicateGroupNameError);
+    await store.close();
+  });
+
+  test("createGroup rejects a name already used by another group case-insensitively", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    await store.createGroup(orgId, "Engineering");
+    await expect(store.createGroup(orgId, "engineering")).rejects.toThrow(DuplicateGroupNameError);
+    await store.close();
+  });
+
+  test("renameGroup rejects a name already used by another group case-insensitively", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    await store.createGroup(orgId, "Engineering");
+    const sales = await store.createGroup(orgId, "Sales");
+    await expect(store.renameGroup(orgId, sales.groupId, "engineering")).rejects.toThrow(DuplicateGroupNameError);
+    await store.close();
+  });
+
+  test("renameGroup allows renaming a group to its own current name", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const group = await store.createGroup(orgId, "Engineering");
+    await store.renameGroup(orgId, group.groupId, "Engineering");
+
+    const groups = await store.listGroups(orgId);
+    expect(groups[0]!.name).toBe("Engineering");
+    await store.close();
+  });
+
+  test("setUserGroup assigns and reassigns a user's group", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const userId = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("s1"), 1_000_000);
+    const eng = await store.createGroup(orgId, "Engineering");
+    const sales = await store.createGroup(orgId, "Sales");
+
+    await store.setUserGroup(orgId, userId, eng.groupId);
+    expect((await store.listGroups(orgId)).find((g) => g.groupId === eng.groupId)?.memberCount).toBe(1);
+
+    await store.setUserGroup(orgId, userId, sales.groupId);
+    const groups = await store.listGroups(orgId);
+    expect(groups.find((g) => g.groupId === eng.groupId)?.memberCount).toBe(0);
+    expect(groups.find((g) => g.groupId === sales.groupId)?.memberCount).toBe(1);
+    await store.close();
+  });
+
+  test("setUserGroup throws GroupNotFoundError for an unknown group", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const userId = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("s1"), 1_000_000);
+
+    await expect(store.setUserGroup(orgId, userId, "group-nope")).rejects.toThrow(GroupNotFoundError);
+    await store.close();
+  });
+
+  test("setUsersGroup throws GroupNotFoundError for an unknown group", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const userId = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("s1"), 1_000_000);
+
+    await expect(store.setUsersGroup(orgId, [userId], "group-nope")).rejects.toThrow(GroupNotFoundError);
+    await store.close();
+  });
+
+  test("groupExists reports true for a real group and false otherwise", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const group = await store.createGroup(orgId, "Engineering");
+
+    expect(await store.groupExists(orgId, group.groupId)).toBe(true);
+    expect(await store.groupExists(orgId, "group-nope")).toBe(false);
+    await store.close();
+  });
+
+  test("setUserGroup(null) ungroups a user", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const userId = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("s1"), 1_000_000);
+    const eng = await store.createGroup(orgId, "Engineering");
+    await store.setUserGroup(orgId, userId, eng.groupId);
+
+    await store.setUserGroup(orgId, userId, null);
+    expect((await store.listGroups(orgId)).find((g) => g.groupId === eng.groupId)?.memberCount).toBe(0);
+    await store.close();
+  });
+
+  test("setUsersGroup bulk-assigns many users at once", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const alice = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("s1"), 1_000_000);
+    const bob = await syncAs(store, orgId, newClientId(), "bob@example.com", minimalUploadRows("s2"), 1_000_000);
+    const eng = await store.createGroup(orgId, "Engineering");
+
+    await store.setUsersGroup(orgId, [alice, bob], eng.groupId);
+
+    const groups = await store.listGroups(orgId);
+    expect(groups.find((g) => g.groupId === eng.groupId)?.memberCount).toBe(2);
+    await store.close();
+  });
+
+  test("deleteGroup ungroups members instead of deleting them", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const userId = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("s1"), 1_000_000);
+    const eng = await store.createGroup(orgId, "Engineering");
+    await store.setUserGroup(orgId, userId, eng.groupId);
+
+    await store.deleteGroup(orgId, eng.groupId);
+
+    expect(await store.listGroups(orgId)).toHaveLength(0);
+    const users = await store.listUsers(orgId);
+    expect(users).toHaveLength(1);
+    expect(users[0]!.userId).toBe(userId);
+    await store.close();
+  });
+
+  test("after deleting a group, its name can be reused by a new group", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const first = await store.createGroup(orgId, "Engineering");
+    await store.deleteGroup(orgId, first.groupId);
+
+    const second = await store.createGroup(orgId, "Engineering");
+    expect(second.name).toBe("Engineering");
     await store.close();
   });
 });

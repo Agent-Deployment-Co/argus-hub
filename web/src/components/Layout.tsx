@@ -3,6 +3,7 @@ import { Activity, ListTodo, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Sun, U
 import { useCallback, useEffect, useState } from "react";
 import { useTheme } from "../lib/theme";
 import { useUserInfo } from "../lib/users";
+import { Modal } from "./Modal";
 import archMarkUrl from "../assets/arch-mark.svg";
 import wordmarkOnDarkUrl from "../assets/wordmark-on-dark.svg";
 import wordmarkOnLightUrl from "../assets/wordmark-on-light.svg";
@@ -75,10 +76,23 @@ function ThemeToggle() {
   );
 }
 
+function LogoutDialog({ onClose }: { onClose: () => void }) {
+  return (
+    <Modal title="Sign out?" onClose={onClose}>
+      <p className="modal-copy">You'll need to sign in again to access the Hub.</p>
+      <div className="modal-actions">
+        <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+        <a href="/logout" className="btn-danger">Sign out</a>
+      </div>
+    </Modal>
+  );
+}
+
 export function Layout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   useDocumentTitle();
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
   const toggleRail = useCallback(() => {
     setCollapsed((c) => {
       const next = !c;
@@ -118,9 +132,15 @@ export function Layout() {
         </nav>
         <div className="rail-footer">
           <ThemeToggle />
-          <a href="/logout" className="rail-icon-btn" title="Sign out" aria-label="Sign out">
+          <button
+            type="button"
+            className="rail-icon-btn"
+            title="Sign out"
+            aria-label="Sign out"
+            onClick={() => setConfirmingLogout(true)}
+          >
             <LogOut size={16} strokeWidth={1.75} />
-          </a>
+          </button>
           <button
             className="rail-icon-btn rail-toggle"
             type="button"
@@ -137,6 +157,7 @@ export function Layout() {
           <Outlet />
         </main>
       </div>
+      {confirmingLogout && <LogoutDialog onClose={() => setConfirmingLogout(false)} />}
     </div>
   );
 }

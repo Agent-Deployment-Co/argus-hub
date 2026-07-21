@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import sqlite3, { type Database } from "sqlite3";
+import type { Hono } from "hono";
 import { openHubStore, type HubStore, type HubUploadPayload } from "../src/store/hub-store.ts";
 import { createHubApp } from "../src/api/serve.ts";
 import { HUB_MAX_CLIENT_SCHEMA_VERSION } from "../src/api/sync.ts";
@@ -246,6 +247,260 @@ describe("GET /api/users", () => {
       expect(body.users[0]!.sessionCount).toBe(1);
       expect(body.users[1]!.userId).toBe(aliceId);
       expect(body.users[1]!.email).toBe("alice@example.com");
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("includes groupId/groupName for grouped users and null for ungrouped users", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const aliceId = await syncAs(env, "alice@example.com", [{ id: "s1" }]);
+      const bobId = await syncAs(env, "bob@example.com", [{ id: "s2" }]);
+      const group = await env.store.createGroup(env.orgId, "Engineering");
+      await env.store.setUserGroup(env.orgId, aliceId, group.groupId);
+
+      const res = await app.request("/api/users");
+      expect(res.status).toBe(200);
+      const body = await res.json() as {
+        users: Array<{ userId: string; groupId: string | null; groupName: string | null }>;
+      };
+      const alice = body.users.find((u) => u.userId === aliceId);
+      const bob = body.users.find((u) => u.userId === bobId);
+      expect(alice?.groupId).toBe(group.groupId);
+      expect(alice?.groupName).toBe("Engineering");
+      expect(bob?.groupId).toBeNull();
+      expect(bob?.groupName).toBeNull();
+    } finally {
+      await env.store.close();
+    }
+  });
+});
+
+// ---- /api/groups, /api/users/:userId ---------------------------------------------------
+
+function jsonRequest(app: Hono, path: string, method: string, body?: unknown) {
+  return app.request(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+describe("groups API", () => {
+  test("POST /api/groups creates a group; GET /api/groups lists it with memberCount", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const created = await jsonRequest(app, "/api/groups", "POST", { name: "Engineering" });
+      expect(created.status).toBe(201);
+      const createdBody = await created.json() as { group: { groupId: string; name: string; memberCount: number } };
+      expect(createdBody.group.name).toBe("Engineering");
+      expect(createdBody.group.memberCount).toBe(0);
+
+      const listed = await app.request("/api/groups");
+      expect(listed.status).toBe(200);
+      const listedBody = await listed.json() as { groups: Array<{ groupId: string; name: string }> };
+      expect(listedBody.groups).toHaveLength(1);
+      expect(listedBody.groups[0]!.groupId).toBe(createdBody.group.groupId);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("POST /api/groups rejects a duplicate name with 409", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await jsonRequest(app, "/api/groups", "POST", { name: "Engineering" });
+      const dupe = await jsonRequest(app, "/api/groups", "POST", { name: "Engineering" });
+      expect(dupe.status).toBe(409);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("POST /api/groups rejects a name already used (case-insensitively) with 409", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await jsonRequest(app, "/api/groups", "POST", { name: "Engineering" });
+      const dupe = await jsonRequest(app, "/api/groups", "POST", { name: "engineering" });
+      expect(dupe.status).toBe(409);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("POST /api/groups rejects a missing name with 400", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const res = await jsonRequest(app, "/api/groups", "POST", { name: "  " });
+      expect(res.status).toBe(400);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("PATCH /api/groups/:groupId renames a group", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const group = await env.store.createGroup(env.orgId, "Engineering");
+      const res = await jsonRequest(app, `/api/groups/${group.groupId}`, "PATCH", { name: "Platform" });
+      expect(res.status).toBe(200);
+
+      const groups = await env.store.listGroups(env.orgId);
+      expect(groups[0]!.name).toBe("Platform");
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("PATCH /api/groups/:groupId rejects a name already used by another group with 409", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await env.store.createGroup(env.orgId, "Engineering");
+      const sales = await env.store.createGroup(env.orgId, "Sales");
+      const res = await jsonRequest(app, `/api/groups/${sales.groupId}`, "PATCH", { name: "Engineering" });
+      expect(res.status).toBe(409);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("PATCH /api/groups/:groupId 404s for an unknown group", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const res = await jsonRequest(app, "/api/groups/group-nope", "PATCH", { name: "Anything" });
+      expect(res.status).toBe(404);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("DELETE /api/groups/:groupId ungroups members and removes the group", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const userId = await syncAs(env, "alice@example.com", [{ id: "s1" }]);
+      const group = await env.store.createGroup(env.orgId, "Engineering");
+      await env.store.setUserGroup(env.orgId, userId, group.groupId);
+
+      const res = await app.request(`/api/groups/${group.groupId}`, { method: "DELETE" });
+      expect(res.status).toBe(200);
+
+      expect(await env.store.listGroups(env.orgId)).toHaveLength(0);
+      const stats = await env.store.readUserStats(env.orgId);
+      expect(stats.find((u) => u.userId === userId)?.groupId).toBeNull();
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("DELETE /api/groups/:groupId 404s for an unknown group", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const res = await app.request("/api/groups/group-nope", { method: "DELETE" });
+      expect(res.status).toBe(404);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("POST /api/groups/:groupId/members bulk-assigns users to a group", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const alice = await syncAs(env, "alice@example.com", [{ id: "s1" }]);
+      const bob = await syncAs(env, "bob@example.com", [{ id: "s2" }]);
+      const group = await env.store.createGroup(env.orgId, "Engineering");
+
+      const res = await jsonRequest(app, `/api/groups/${group.groupId}/members`, "POST", { userIds: [alice, bob] });
+      expect(res.status).toBe(200);
+
+      const groups = await env.store.listGroups(env.orgId);
+      expect(groups[0]!.memberCount).toBe(2);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("DELETE /api/groups/:groupId/members bulk-ungroups users", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const alice = await syncAs(env, "alice@example.com", [{ id: "s1" }]);
+      const group = await env.store.createGroup(env.orgId, "Engineering");
+      await env.store.setUserGroup(env.orgId, alice, group.groupId);
+
+      const res = await jsonRequest(app, `/api/groups/${group.groupId}/members`, "DELETE", { userIds: [alice] });
+      expect(res.status).toBe(200);
+
+      const groups = await env.store.listGroups(env.orgId);
+      expect(groups[0]!.memberCount).toBe(0);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("POST /api/groups/:groupId/members 404s for an unknown group", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const alice = await syncAs(env, "alice@example.com", [{ id: "s1" }]);
+      const res = await jsonRequest(app, "/api/groups/group-nope/members", "POST", { userIds: [alice] });
+      expect(res.status).toBe(404);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("DELETE /api/groups/:groupId/members 404s for an unknown group", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const alice = await syncAs(env, "alice@example.com", [{ id: "s1" }]);
+      const res = await jsonRequest(app, "/api/groups/group-nope/members", "DELETE", { userIds: [alice] });
+      expect(res.status).toBe(404);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("PATCH /api/users/:userId sets and clears a single user's group", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const alice = await syncAs(env, "alice@example.com", [{ id: "s1" }]);
+      const group = await env.store.createGroup(env.orgId, "Engineering");
+
+      const set = await jsonRequest(app, `/api/users/${alice}`, "PATCH", { groupId: group.groupId });
+      expect(set.status).toBe(200);
+      let stats = await env.store.readUserStats(env.orgId);
+      expect(stats.find((u) => u.userId === alice)?.groupId).toBe(group.groupId);
+
+      const clear = await jsonRequest(app, `/api/users/${alice}`, "PATCH", { groupId: null });
+      expect(clear.status).toBe(200);
+      stats = await env.store.readUserStats(env.orgId);
+      expect(stats.find((u) => u.userId === alice)?.groupId).toBeNull();
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("PATCH /api/users/:userId 404s for an unknown groupId", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const alice = await syncAs(env, "alice@example.com", [{ id: "s1" }]);
+      const res = await jsonRequest(app, `/api/users/${alice}`, "PATCH", { groupId: "group-nope" });
+      expect(res.status).toBe(404);
     } finally {
       await env.store.close();
     }

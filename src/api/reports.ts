@@ -82,6 +82,8 @@ export interface UserRosterRow {
   lastSyncMs: number;
   sessionCount: number;
   clientCount: number;
+  groupId: string | null;
+  groupName: string | null;
   totalTokens: number;
   cost: number;
 }
@@ -90,7 +92,7 @@ export interface UserRosterRow {
 export async function buildUserRoster(store: HubStore, orgId: string | null | undefined): Promise<UserRosterRow[]> {
   if (!orgId) return [];
   const stats = await store.readUserStats(orgId);
-  return stats.map(({ userId, displayName, email, lastSyncMs, sessionCount, clientCount, byModel }) => {
+  return stats.map(({ userId, displayName, email, lastSyncMs, sessionCount, clientCount, groupId, groupName, byModel }) => {
     const totalTokens = byModel.reduce(
       (s, m) => s + m.input + m.output + m.cacheRead + m.cacheWrite5m + m.cacheWrite1h, 0,
     );
@@ -98,6 +100,6 @@ export async function buildUserRoster(store: HubStore, orgId: string | null | un
       (s, m) => s + cost({ input: m.input, output: m.output, cacheRead: m.cacheRead, cacheWrite5m: m.cacheWrite5m, cacheWrite1h: m.cacheWrite1h }, m.model),
       0,
     );
-    return { userId, displayName, email, lastSyncMs, sessionCount, clientCount, totalTokens, cost: totalCost };
+    return { userId, displayName, email, lastSyncMs, sessionCount, clientCount, groupId, groupName, totalTokens, cost: totalCost };
   });
 }

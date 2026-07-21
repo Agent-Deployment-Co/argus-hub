@@ -17,7 +17,7 @@ import type {
 } from "../types.ts";
 import { emptyFrictionTotals, foldFriction, HIGH_TOKEN_GROWTH_RATIO } from "../health.ts";
 
-export const HUB_SCHEMA_VERSION = 2;
+export const HUB_SCHEMA_VERSION = 3;
 export const HUB_APPLICATION_ID = 0x48554200; // "HUB\0"
 
 // ---- Raw row types (mirrors client argus.db resolved_* column shapes) -------------------
@@ -154,6 +154,30 @@ export interface ClientInfo {
   fingerprint: Record<string, string>;
 }
 
+export interface GroupInfo {
+  groupId: string;
+  orgId: string;
+  name: string;
+  createdAt: number;
+  memberCount: number;
+}
+
+/** Thrown by createGroup/renameGroup when the name is already taken within the org. */
+export class DuplicateGroupNameError extends Error {
+  constructor(name: string) {
+    super(`A group named "${name}" already exists in this org`);
+    this.name = "DuplicateGroupNameError";
+  }
+}
+
+/** Thrown by setUserGroup/setUsersGroup when `groupId` doesn't exist in the org. */
+export class GroupNotFoundError extends Error {
+  constructor(groupId: string) {
+    super(`Group "${groupId}" not found`);
+    this.name = "GroupNotFoundError";
+  }
+}
+
 // ---- SQL helpers (same patterns as store.ts) --------------------------------------------
 
 function run(db: Database, sql: string, params: unknown[] = []): Promise<RunResult> {
@@ -279,16 +303,30 @@ const CREATE_HUB_SCHEMA_SQL = `
   );
   CREATE INDEX api_keys_org ON api_keys(org_id);
 
+  -- Named buckets users can be assigned into, unique by name within an org.
+  CREATE TABLE groups (
+    group_id   TEXT PRIMARY KEY,
+    org_id     TEXT NOT NULL REFERENCES organizations(org_id),
+    name       TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (org_id, name)
+  );
+  CREATE INDEX groups_org ON groups(org_id);
+
   -- Reporting bucket: 1..N clients map onto one user via clients.user_id.
   CREATE TABLE users (
     user_id      TEXT PRIMARY KEY,
     org_id       TEXT NOT NULL REFERENCES organizations(org_id),
     display_name TEXT NOT NULL,
     email        TEXT,
-    created_at   INTEGER NOT NULL
+    created_at   INTEGER NOT NULL,
+    -- group_id comes last so this matches the v2->v3 ALTER TABLE ... ADD COLUMN order
+    -- (fresh installs and upgraded stores must have identical column layout).
+    group_id     TEXT REFERENCES groups(group_id)
   );
   CREATE INDEX users_org   ON users(org_id);
   CREATE INDEX users_email ON users(org_id, email);
+  CREATE INDEX users_group ON users(org_id, group_id);
 
   -- Every distinct Argus install we've heard from. user_pinned = 1 means the operator owns
   -- the user mapping and the auto-mapper must not overwrite it.
@@ -446,6 +484,19 @@ const HUB_MIGRATIONS: Record<number, string> = {
     ALTER TABLE resolved_sessions ADD COLUMN title TEXT;
     ALTER TABLE resolved_sessions ADD COLUMN summary TEXT;
     ${RESOLVED_SESSION_LABELS_DDL}
+  `,
+  // v2 → v3: user groups (#25).
+  2: `
+    CREATE TABLE groups (
+      group_id   TEXT PRIMARY KEY,
+      org_id     TEXT NOT NULL REFERENCES organizations(org_id),
+      name       TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE (org_id, name)
+    );
+    CREATE INDEX groups_org ON groups(org_id);
+    ALTER TABLE users ADD COLUMN group_id TEXT REFERENCES groups(group_id);
+    CREATE INDEX users_group ON users(org_id, group_id);
   `,
 };
 
@@ -1026,6 +1077,145 @@ export class HubStore {
     });
   }
 
+  // ---- Groups ----------------------------------------------------------------------------
+
+  /** Create a group. Throws DuplicateGroupNameError if the name is already taken in this org. */
+  createGroup(orgId: string, name: string, now = Date.now()): Promise<GroupInfo> {
+    return this.schedule(async () => {
+      const existing = await get<{ group_id: string }>(
+        this.db,
+        "SELECT group_id FROM groups WHERE org_id = ? AND name = ? COLLATE NOCASE",
+        [orgId, name],
+      );
+      if (existing) throw new DuplicateGroupNameError(name);
+
+      const groupId = `group-${randomUUID()}`;
+      await run(
+        this.db,
+        "INSERT INTO groups(group_id, org_id, name, created_at) VALUES (?, ?, ?, ?)",
+        [groupId, orgId, name, now],
+      );
+      return { groupId, orgId, name, createdAt: now, memberCount: 0 };
+    });
+  }
+
+  /** Rename a group. Throws DuplicateGroupNameError if another group in this org already has
+   *  that name. No-op if `groupId` doesn't exist in the org. */
+  renameGroup(orgId: string, groupId: string, name: string): Promise<void> {
+    return this.schedule(async () => {
+      const existing = await get<{ group_id: string }>(
+        this.db,
+        "SELECT group_id FROM groups WHERE org_id = ? AND name = ? COLLATE NOCASE AND group_id != ?",
+        [orgId, name, groupId],
+      );
+      if (existing) throw new DuplicateGroupNameError(name);
+
+      await run(
+        this.db,
+        "UPDATE groups SET name = ? WHERE org_id = ? AND group_id = ?",
+        [name, orgId, groupId],
+      );
+    });
+  }
+
+  /** Delete a group. Members are ungrouped (group_id set to NULL), not deleted. No-op if
+   *  `groupId` doesn't exist in the org. */
+  deleteGroup(orgId: string, groupId: string): Promise<void> {
+    return this.schedule(() => transaction(this.db, async () => {
+      await run(
+        this.db,
+        "UPDATE users SET group_id = NULL WHERE org_id = ? AND group_id = ?",
+        [orgId, groupId],
+      );
+      await run(
+        this.db,
+        "DELETE FROM groups WHERE org_id = ? AND group_id = ?",
+        [orgId, groupId],
+      );
+    }));
+  }
+
+  /** Cheap existence check for a group, without the member-count aggregation listGroups() does. */
+  groupExists(orgId: string, groupId: string): Promise<boolean> {
+    return this.schedule(async () => {
+      const row = await get<{ group_id: string }>(
+        this.db,
+        "SELECT group_id FROM groups WHERE org_id = ? AND group_id = ?",
+        [orgId, groupId],
+      );
+      return !!row;
+    });
+  }
+
+  /** Set (or clear, with `groupId = null`) a single user's group. Throws GroupNotFoundError if
+   *  `groupId` doesn't exist in the org — checked in the same scheduled operation as the
+   *  assignment so a concurrent group deletion can't race between the check and the write. */
+  setUserGroup(orgId: string, userId: string, groupId: string | null): Promise<void> {
+    return this.schedule(async () => {
+      if (groupId !== null) {
+        const exists = await get<{ group_id: string }>(
+          this.db,
+          "SELECT group_id FROM groups WHERE org_id = ? AND group_id = ?",
+          [orgId, groupId],
+        );
+        if (!exists) throw new GroupNotFoundError(groupId);
+      }
+      await run(
+        this.db,
+        "UPDATE users SET group_id = ? WHERE org_id = ? AND user_id = ?",
+        [groupId, orgId, userId],
+      );
+    });
+  }
+
+  /** Set (or clear, with `groupId = null`) the group for many users at once. Throws
+   *  GroupNotFoundError if `groupId` doesn't exist in the org (see setUserGroup for why the
+   *  check happens inside this same scheduled operation). */
+  setUsersGroup(orgId: string, userIds: string[], groupId: string | null): Promise<void> {
+    return this.schedule(async () => {
+      if (!userIds.length) return;
+      if (groupId !== null) {
+        const exists = await get<{ group_id: string }>(
+          this.db,
+          "SELECT group_id FROM groups WHERE org_id = ? AND group_id = ?",
+          [orgId, groupId],
+        );
+        if (!exists) throw new GroupNotFoundError(groupId);
+      }
+      for (const part of chunk(userIds, 500)) {
+        const placeholders = part.map(() => "?").join(", ");
+        await run(
+          this.db,
+          `UPDATE users SET group_id = ? WHERE org_id = ? AND user_id IN (${placeholders})`,
+          [groupId, orgId, ...part],
+        );
+      }
+    });
+  }
+
+  /** Every group in an org with its current member count, ordered by name. */
+  listGroups(orgId: string): Promise<GroupInfo[]> {
+    return this.schedule(async () => {
+      const rows = await all<{ group_id: string; name: string; created_at: number; member_count: number }>(
+        this.db,
+        `SELECT g.group_id, g.name, g.created_at, COUNT(u.user_id) AS member_count
+         FROM groups g
+         LEFT JOIN users u ON u.org_id = g.org_id AND u.group_id = g.group_id
+         WHERE g.org_id = ?
+         GROUP BY g.group_id
+         ORDER BY g.name`,
+        [orgId],
+      );
+      return rows.map((r) => ({
+        groupId: r.group_id,
+        orgId,
+        name: r.name,
+        createdAt: r.created_at,
+        memberCount: r.member_count,
+      }));
+    });
+  }
+
   // ---- Dashboard read queries -----------------------------------------------------------
   //
   // All resolved_* queries are scoped by (org_id [, client_id IN (...)]). For user-scoped
@@ -1497,6 +1687,8 @@ export class HubStore {
       lastSyncMs: number;
       sessionCount: number;
       clientCount: number;
+      groupId: string | null;
+      groupName: string | null;
       byModel: Array<{ model: string; input: number; output: number; cacheRead: number; cacheWrite5m: number; cacheWrite1h: number }>;
     }>
   > {
@@ -1504,16 +1696,20 @@ export class HubStore {
       const users = await all<{
         user_id: string; display_name: string; email: string | null;
         last_sync_ms: number | null; session_count: number; client_count: number;
+        group_id: string | null; group_name: string | null;
       }>(
         this.db,
         `SELECT u.user_id, u.display_name, u.email,
                 MAX(cs.last_sync_ms)                       AS last_sync_ms,
                 COUNT(DISTINCT rs.client_id || ':' || rs.session_id) AS session_count,
-                COUNT(DISTINCT c.client_id)                AS client_count
+                COUNT(DISTINCT c.client_id)                AS client_count,
+                u.group_id                                 AS group_id,
+                g.name                                      AS group_name
          FROM users u
          JOIN clients c ON c.org_id = u.org_id AND c.user_id = u.user_id
          LEFT JOIN client_syncs cs ON cs.org_id = c.org_id AND cs.client_id = c.client_id
          LEFT JOIN resolved_sessions rs ON rs.org_id = c.org_id AND rs.client_id = c.client_id
+         LEFT JOIN groups g ON g.org_id = u.org_id AND g.group_id = u.group_id
          WHERE u.org_id = ?
          GROUP BY u.user_id
          ORDER BY last_sync_ms DESC, u.user_id`,
@@ -1556,6 +1752,8 @@ export class HubStore {
         lastSyncMs: u.last_sync_ms ?? 0,
         sessionCount: u.session_count,
         clientCount: u.client_count,
+        groupId: u.group_id,
+        groupName: u.group_name,
         byModel: byUser.get(u.user_id) ?? [],
       }));
     });
