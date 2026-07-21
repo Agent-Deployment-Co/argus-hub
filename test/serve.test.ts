@@ -321,6 +321,18 @@ describe("groups API", () => {
     }
   });
 
+  test("POST /api/groups rejects a name already used (case-insensitively) with 409", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await jsonRequest(app, "/api/groups", "POST", { name: "Engineering" });
+      const dupe = await jsonRequest(app, "/api/groups", "POST", { name: "engineering" });
+      expect(dupe.status).toBe(409);
+    } finally {
+      await env.store.close();
+    }
+  });
+
   test("POST /api/groups rejects a missing name with 400", async () => {
     const env = await openTestEnv();
     const app = createHubApp(env.store);
@@ -432,6 +444,30 @@ describe("groups API", () => {
 
       const groups = await env.store.listGroups(env.orgId);
       expect(groups[0]!.memberCount).toBe(0);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("POST /api/groups/:groupId/members 404s for an unknown group", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const alice = await syncAs(env, "alice@example.com", [{ id: "s1" }]);
+      const res = await jsonRequest(app, "/api/groups/group-nope/members", "POST", { userIds: [alice] });
+      expect(res.status).toBe(404);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("DELETE /api/groups/:groupId/members 404s for an unknown group", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const alice = await syncAs(env, "alice@example.com", [{ id: "s1" }]);
+      const res = await jsonRequest(app, "/api/groups/group-nope/members", "DELETE", { userIds: [alice] });
+      expect(res.status).toBe(404);
     } finally {
       await env.store.close();
     }

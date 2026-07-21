@@ -89,6 +89,9 @@ export function Team() {
               <button type="button" className="btn-secondary" onClick={() => setSelected(new Set())}>
                 Clear
               </button>
+              {setUsersGroup.isError && (
+                <p className="modal-error">{(setUsersGroup.error as Error).message}</p>
+              )}
             </div>
           )}
           {buildSections(users, groups).map((section) => (

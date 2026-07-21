@@ -3,7 +3,7 @@ import { Hono, type Context } from "hono";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DuplicateGroupNameError, type HubStore } from "../store/hub-store.ts";
+import { DuplicateGroupNameError, GroupNotFoundError, type HubStore } from "../store/hub-store.ts";
 import { syncHandler, unknownSessionsHandler } from "./sync.ts";
 import { mountMcp } from "./mcp.ts";
 import { assembleDashboard } from "../reporting/snapshot.ts";
@@ -140,12 +140,12 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
       return c.json({ error: '"groupId" must be a string or null.' }, 400);
     }
 
-    if (groupId !== null) {
-      const groups = await store.listGroups(orgId);
-      if (!groups.some((g) => g.groupId === groupId)) return c.json({ error: "Group not found." }, 404);
+    try {
+      await store.setUserGroup(orgId, userId, groupId);
+    } catch (err) {
+      if (err instanceof GroupNotFoundError) return c.json({ error: "Group not found." }, 404);
+      throw err;
     }
-
-    await store.setUserGroup(orgId, userId, groupId);
     return c.json({ ok: true });
   });
 
@@ -185,8 +185,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     const name = typeof body?.name === "string" ? body.name.trim() : "";
     if (!name) return c.json({ error: 'Missing required "name".' }, 400);
 
-    const groups = await store.listGroups(orgId);
-    if (!groups.some((g) => g.groupId === groupId)) return c.json({ error: "Group not found." }, 404);
+    if (!(await store.groupExists(orgId, groupId))) return c.json({ error: "Group not found." }, 404);
 
     try {
       await store.renameGroup(orgId, groupId, name);
@@ -202,8 +201,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     if (!orgId) return c.json({ error: "No org configured." }, 503);
     const groupId = c.req.param("groupId").trim();
 
-    const groups = await store.listGroups(orgId);
-    if (!groups.some((g) => g.groupId === groupId)) return c.json({ error: "Group not found." }, 404);
+    if (!(await store.groupExists(orgId, groupId))) return c.json({ error: "Group not found." }, 404);
 
     // Ungroups members rather than deleting them (store.deleteGroup nulls their group_id).
     await store.deleteGroup(orgId, groupId);
@@ -220,10 +218,12 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     const userIds = Array.isArray(body?.userIds) ? body.userIds.filter((id): id is string => typeof id === "string") : null;
     if (!userIds || !userIds.length) return c.json({ error: 'Missing required "userIds" array.' }, 400);
 
-    const groups = await store.listGroups(orgId);
-    if (!groups.some((g) => g.groupId === groupId)) return c.json({ error: "Group not found." }, 404);
-
-    await store.setUsersGroup(orgId, userIds, groupId);
+    try {
+      await store.setUsersGroup(orgId, userIds, groupId);
+    } catch (err) {
+      if (err instanceof GroupNotFoundError) return c.json({ error: "Group not found." }, 404);
+      throw err;
+    }
     return c.json({ ok: true });
   });
 
@@ -236,8 +236,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     const userIds = Array.isArray(body?.userIds) ? body.userIds.filter((id): id is string => typeof id === "string") : null;
     if (!userIds || !userIds.length) return c.json({ error: 'Missing required "userIds" array.' }, 400);
 
-    const groups = await store.listGroups(orgId);
-    if (!groups.some((g) => g.groupId === groupId)) return c.json({ error: "Group not found." }, 404);
+    if (!(await store.groupExists(orgId, groupId))) return c.json({ error: "Group not found." }, 404);
 
     await store.setUsersGroup(orgId, userIds, null);
     return c.json({ ok: true });

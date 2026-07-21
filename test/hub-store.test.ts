@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   DuplicateGroupNameError,
+  GroupNotFoundError,
   HUB_APPLICATION_ID,
   HUB_SCHEMA_VERSION,
   openHubStore,
@@ -782,6 +783,27 @@ describe("groups", () => {
     await store.close();
   });
 
+  test("createGroup rejects a name already used by another group case-insensitively", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    await store.createGroup(orgId, "Engineering");
+    await expect(store.createGroup(orgId, "engineering")).rejects.toThrow(DuplicateGroupNameError);
+    await store.close();
+  });
+
+  test("renameGroup rejects a name already used by another group case-insensitively", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    await store.createGroup(orgId, "Engineering");
+    const sales = await store.createGroup(orgId, "Sales");
+    await expect(store.renameGroup(orgId, sales.groupId, "engineering")).rejects.toThrow(DuplicateGroupNameError);
+    await store.close();
+  });
+
   test("renameGroup allows renaming a group to its own current name", async () => {
     const dataDir = tempDataDir();
     const store = await openHubStore(dataDir, 1_000_000);
@@ -811,6 +833,37 @@ describe("groups", () => {
     const groups = await store.listGroups(orgId);
     expect(groups.find((g) => g.groupId === eng.groupId)?.memberCount).toBe(0);
     expect(groups.find((g) => g.groupId === sales.groupId)?.memberCount).toBe(1);
+    await store.close();
+  });
+
+  test("setUserGroup throws GroupNotFoundError for an unknown group", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const userId = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("s1"), 1_000_000);
+
+    await expect(store.setUserGroup(orgId, userId, "group-nope")).rejects.toThrow(GroupNotFoundError);
+    await store.close();
+  });
+
+  test("setUsersGroup throws GroupNotFoundError for an unknown group", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const userId = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("s1"), 1_000_000);
+
+    await expect(store.setUsersGroup(orgId, [userId], "group-nope")).rejects.toThrow(GroupNotFoundError);
+    await store.close();
+  });
+
+  test("groupExists reports true for a real group and false otherwise", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const group = await store.createGroup(orgId, "Engineering");
+
+    expect(await store.groupExists(orgId, group.groupId)).toBe(true);
+    expect(await store.groupExists(orgId, "group-nope")).toBe(false);
     await store.close();
   });
 

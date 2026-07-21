@@ -170,6 +170,14 @@ export class DuplicateGroupNameError extends Error {
   }
 }
 
+/** Thrown by setUserGroup/setUsersGroup when `groupId` doesn't exist in the org. */
+export class GroupNotFoundError extends Error {
+  constructor(groupId: string) {
+    super(`Group "${groupId}" not found`);
+    this.name = "GroupNotFoundError";
+  }
+}
+
 // ---- SQL helpers (same patterns as store.ts) --------------------------------------------
 
 function run(db: Database, sql: string, params: unknown[] = []): Promise<RunResult> {
@@ -1076,7 +1084,7 @@ export class HubStore {
     return this.schedule(async () => {
       const existing = await get<{ group_id: string }>(
         this.db,
-        "SELECT group_id FROM groups WHERE org_id = ? AND name = ?",
+        "SELECT group_id FROM groups WHERE org_id = ? AND name = ? COLLATE NOCASE",
         [orgId, name],
       );
       if (existing) throw new DuplicateGroupNameError(name);
@@ -1097,7 +1105,7 @@ export class HubStore {
     return this.schedule(async () => {
       const existing = await get<{ group_id: string }>(
         this.db,
-        "SELECT group_id FROM groups WHERE org_id = ? AND name = ? AND group_id != ?",
+        "SELECT group_id FROM groups WHERE org_id = ? AND name = ? COLLATE NOCASE AND group_id != ?",
         [orgId, name, groupId],
       );
       if (existing) throw new DuplicateGroupNameError(name);
@@ -1113,7 +1121,7 @@ export class HubStore {
   /** Delete a group. Members are ungrouped (group_id set to NULL), not deleted. No-op if
    *  `groupId` doesn't exist in the org. */
   deleteGroup(orgId: string, groupId: string): Promise<void> {
-    return this.schedule(async () => {
+    return this.schedule(() => transaction(this.db, async () => {
       await run(
         this.db,
         "UPDATE users SET group_id = NULL WHERE org_id = ? AND group_id = ?",
@@ -1124,12 +1132,34 @@ export class HubStore {
         "DELETE FROM groups WHERE org_id = ? AND group_id = ?",
         [orgId, groupId],
       );
+    }));
+  }
+
+  /** Cheap existence check for a group, without the member-count aggregation listGroups() does. */
+  groupExists(orgId: string, groupId: string): Promise<boolean> {
+    return this.schedule(async () => {
+      const row = await get<{ group_id: string }>(
+        this.db,
+        "SELECT group_id FROM groups WHERE org_id = ? AND group_id = ?",
+        [orgId, groupId],
+      );
+      return !!row;
     });
   }
 
-  /** Set (or clear, with `groupId = null`) a single user's group. */
+  /** Set (or clear, with `groupId = null`) a single user's group. Throws GroupNotFoundError if
+   *  `groupId` doesn't exist in the org — checked in the same scheduled operation as the
+   *  assignment so a concurrent group deletion can't race between the check and the write. */
   setUserGroup(orgId: string, userId: string, groupId: string | null): Promise<void> {
     return this.schedule(async () => {
+      if (groupId !== null) {
+        const exists = await get<{ group_id: string }>(
+          this.db,
+          "SELECT group_id FROM groups WHERE org_id = ? AND group_id = ?",
+          [orgId, groupId],
+        );
+        if (!exists) throw new GroupNotFoundError(groupId);
+      }
       await run(
         this.db,
         "UPDATE users SET group_id = ? WHERE org_id = ? AND user_id = ?",
@@ -1138,10 +1168,20 @@ export class HubStore {
     });
   }
 
-  /** Set (or clear, with `groupId = null`) the group for many users at once. */
+  /** Set (or clear, with `groupId = null`) the group for many users at once. Throws
+   *  GroupNotFoundError if `groupId` doesn't exist in the org (see setUserGroup for why the
+   *  check happens inside this same scheduled operation). */
   setUsersGroup(orgId: string, userIds: string[], groupId: string | null): Promise<void> {
     return this.schedule(async () => {
       if (!userIds.length) return;
+      if (groupId !== null) {
+        const exists = await get<{ group_id: string }>(
+          this.db,
+          "SELECT group_id FROM groups WHERE org_id = ? AND group_id = ?",
+          [orgId, groupId],
+        );
+        if (!exists) throw new GroupNotFoundError(groupId);
+      }
       for (const part of chunk(userIds, 500)) {
         const placeholders = part.map(() => "?").join(", ");
         await run(
