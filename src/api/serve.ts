@@ -230,10 +230,14 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
   app.delete("/api/groups/:groupId/members", async (c) => {
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
+    const groupId = c.req.param("groupId").trim();
 
     const body = await c.req.json().catch(() => null) as { userIds?: unknown } | null;
     const userIds = Array.isArray(body?.userIds) ? body.userIds.filter((id): id is string => typeof id === "string") : null;
     if (!userIds || !userIds.length) return c.json({ error: 'Missing required "userIds" array.' }, 400);
+
+    const groups = await store.listGroups(orgId);
+    if (!groups.some((g) => g.groupId === groupId)) return c.json({ error: "Group not found." }, 404);
 
     await store.setUsersGroup(orgId, userIds, null);
     return c.json({ ok: true });

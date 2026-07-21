@@ -10,6 +10,10 @@ import {
   type HubGroup,
 } from "../lib/groups";
 
+/** Sentinel for the bulk-move dropdown's "Ungrouped" option — distinct from "", which means
+ *  "nothing chosen yet" so the Move button stays disabled until the user picks a real target. */
+const UNGROUPED = "__ungrouped__";
+
 /** Every team member the Hub has heard from, organized by group, with group management (create/
  *  rename/delete) and single/bulk group assignment. */
 export function Team() {
@@ -31,9 +35,9 @@ export function Team() {
     });
 
   const applyBulkMove = () => {
-    if (!selected.size) return;
+    if (!selected.size || !bulkTarget) return;
     setUsersGroup.mutate(
-      { userIds: [...selected], groupId: bulkTarget || null },
+      { userIds: [...selected], groupId: bulkTarget === UNGROUPED ? null : bulkTarget },
       { onSuccess: () => { setSelected(new Set()); setBulkTarget(""); } },
     );
   };
@@ -68,12 +72,18 @@ export function Team() {
                 onChange={(e) => setBulkTarget(e.target.value)}
                 aria-label="Move selected users to group"
               >
-                <option value="">Ungrouped</option>
+                <option value="" disabled>Choose a group…</option>
+                <option value={UNGROUPED}>Ungrouped</option>
                 {groups.map((g) => (
                   <option key={g.groupId} value={g.groupId}>{g.name}</option>
                 ))}
               </select>
-              <button type="button" className="btn-primary" onClick={applyBulkMove} disabled={setUsersGroup.isPending}>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={applyBulkMove}
+                disabled={!bulkTarget || setUsersGroup.isPending}
+              >
                 Move
               </button>
               <button type="button" className="btn-secondary" onClick={() => setSelected(new Set())}>

@@ -84,7 +84,7 @@ export function GroupPicker({
   }, [open, clampPosition]);
 
   const pick = (nextGroupId: string | null) => {
-    setUserGroup.mutate({ userId, groupId: nextGroupId === groupId ? null : nextGroupId });
+    setUserGroup.mutate({ userId, groupId: nextGroupId });
     setOpen(false);
   };
 
