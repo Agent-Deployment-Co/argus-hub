@@ -399,6 +399,11 @@ export interface SqlExecutor {
 
 async function connectSnowflake(config: SnowflakeConnectionConfig): Promise<SqlExecutor> {
   const snowflake = await import("snowflake-sdk");
+  // The driver's default PUT upload streams the file with fs.createReadStream, which stalls under
+  // Bun (and Bun-compiled builds): the request body never flushes, so the internal-stage socket
+  // idle-times-out and large tables fail with "RequestTimeout". The experimental multipart path
+  // reads the file into buffered chunks instead and uploads reliably under both Bun and Node.
+  snowflake.configure({ enableExperimentalMultipartUploads: true } as never);
   const connectionOptions: ConnectionOptions = {
     account: config.account,
     username: config.username,
