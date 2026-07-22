@@ -4,13 +4,11 @@ Argus Hub can export a transactionally consistent snapshot of a running Hub data
 Snowflake-ready JSON Lines files. It can then either load the files directly with Snowflake's
 Node.js driver or leave a bundle for review and manual loading.
 
-The recommended path is to generate a bundle and load it with the Snowflake CLI (see
-[Manual export and load](#manual-export-and-load-recommended)). It is the most reliable option,
-particularly for larger datasets: the direct connector streams each table with the Node.js driver,
-and a large table can exceed the driver's `PUT` socket idle timeout and fail the load, whereas the
-Snowflake CLI uploads the same files without stalling. Both paths perform the identical atomic
-replacement, so choose the direct connector only when a fully unattended single command is worth
-that risk.
+Both paths run the identical SQL and perform the same atomic replacement. Use the
+[direct connector](#direct-connector) when you want a single unattended command. Use the
+[manual export and load](#manual-export-and-load) path when you want to review the manifest and
+generated SQL before any data changes, or when the loading machine cannot reach Snowflake and a
+separate host performs the load.
 
 The export is a full snapshot, not an incremental feed. During a direct load, Hub uploads each
 table into a temporary Snowflake table and only replaces the reporting tables after every upload
@@ -68,14 +66,10 @@ jobs.
 
 ## Direct connector
 
-Use the direct connector when you need a single unattended command and your tables are small
-enough to upload well within the driver's request timeout. For larger snapshots, prefer the
-[manual export and load](#manual-export-and-load-recommended) path, which is more resilient to
-slow uploads.
-
-For either path, [key-pair authentication](https://docs.snowflake.com/en/user-guide/key-pair-auth)
-is the recommended credential for an unattended job. Store the private key outside the Hub data
-directory and restrict its file permissions.
+The direct connector loads the snapshot in a single unattended command.
+[Key-pair authentication](https://docs.snowflake.com/en/user-guide/key-pair-auth) is the
+recommended credential for an unattended job. Store the private key outside the Hub data directory
+and restrict its file permissions.
 
 ```bash
 export SNOWFLAKE_ACCOUNT=myorg-myaccount
@@ -99,12 +93,11 @@ private temporary export directory, runs `PUT` and `COPY INTO` for each non-empt
 the complete replacement, and deletes the local temporary files. Pass `--output-dir PATH` if you
 need to retain the bundle for auditing; the path must not already exist.
 
-If a table is large, the driver's `PUT` upload to the internal stage can exceed its socket idle
-timeout and fail with `RequestTimeout: Your socket connection to the server was not read from or
-written to within the timeout period`. Because the replacement is atomic, a failed load leaves the
-previous data in place. If you hit this, rerun with `--output-dir PATH` (without `--load`) and load
-the generated `load.sql` with the Snowflake CLI as described below — its `PUT` implementation
-uploads large files reliably.
+If a `PUT` upload fails with `RequestTimeout: Your socket connection to the server was not read
+from or written to within the timeout period`, the internal-stage upload could not reach the
+storage endpoint in time; confirm the host has outbound access to Snowflake's cloud-storage
+endpoints. Because the replacement is atomic, a failed load leaves the previous data in place, and
+you can fall back to the [manual export and load](#manual-export-and-load) path.
 
 Other supported authentication modes are:
 
@@ -124,12 +117,11 @@ Run `argus-hub export snowflake --help` for all connection flags. The command re
 `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_ROLE`, `SNOWFLAKE_AUTHENTICATOR`, and
 `SNOWFLAKE_PRIVATE_KEY_PATH` as their environment equivalents.
 
-## Manual export and load (recommended)
+## Manual export and load
 
-This two-step path — generate a bundle, then load it with the Snowflake CLI — is the recommended
-default. It is the most reliable option because the Snowflake CLI uploads large tables without the
-`PUT` timeouts the direct connector can hit, and it lets you review the manifest and SQL before any
-data changes.
+This two-step path — generate a bundle, then load it with the Snowflake CLI — lets you review the
+manifest and SQL before any data changes, and lets a separate host perform the load when the
+machine holding `hub.db` cannot reach Snowflake.
 
 Without `--load`, the command makes no Snowflake connection. It writes one `.jsonl` file per
 table, `manifest.json` with row counts and schema versions, and a generated `load.sql`:
@@ -163,9 +155,7 @@ after placing it there.
 
 For a simple hourly job, put the non-secret connection values and credentials in a root-readable
 environment file, for example `/etc/argus-hub/snowflake.env`, and set its mode to `0600`. A cron
-entry can then load it without placing secrets in the crontab. The direct-connector form below is
-the most compact; for larger datasets, schedule the two-step form instead — `export snowflake
---output-dir` followed by `snow sql --filename` — to avoid the driver's `PUT` timeouts:
+entry can then load it without placing secrets in the crontab:
 
 ```cron
 15 * * * * set -a; . /etc/argus-hub/snowflake.env; set +a; cd /srv/argus-hub && /usr/bin/npx @agentdeploymentco/argus-hub export snowflake --data-dir /var/lib/argus-hub --load --authenticator SNOWFLAKE_JWT >> /var/log/argus-hub-snowflake.log 2>&1
