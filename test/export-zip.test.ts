@@ -106,6 +106,19 @@ describe("createZipReadable", () => {
     await collect(createZipReadable([{ name: "a.txt", path: join(dir, "a.txt") }], { onClose: () => { closed++; } }));
     expect(closed).toBe(1);
   });
+
+  test("surfaces a source read error as a stream error (no crash) and still runs onClose", async () => {
+    const dir = tempDir();
+    let closed = 0;
+    // A file that doesn't exist makes createReadStream emit 'error'; the stream must reject rather
+    // than emit an unhandled 'error' that would crash the process.
+    const readable = createZipReadable(
+      [{ name: "missing.txt", path: join(dir, "does-not-exist.txt") }],
+      { onClose: () => { closed++; } },
+    );
+    await expect(collect(readable)).rejects.toThrow();
+    expect(closed).toBe(1);
+  });
 });
 
 describe("openSnowflakeZipStream", () => {

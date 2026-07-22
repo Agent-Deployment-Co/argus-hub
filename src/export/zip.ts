@@ -85,10 +85,20 @@ async function* zipChunks(
         for (let i = 0; i < chunk.length; i++) crc = CRC_TABLE[(crc ^ chunk[i]!)! & 0xff]! ^ (crc >>> 8);
       });
       const deflate = createDeflateRaw();
-      source.pipe(deflate); // pipe propagates source errors to deflate, surfacing them below
-      for await (const chunk of deflate) {
-        compressedSize += (chunk as Buffer).length;
-        yield chunk as Buffer;
+      // pipe() does NOT forward source errors, so wire them through explicitly: without this a read
+      // failure would emit an unhandled 'error' on `source` (crashing the process) and leave the
+      // deflate consumer below hanging forever.
+      source.once("error", (err) => deflate.destroy(err));
+      source.pipe(deflate);
+      try {
+        for await (const chunk of deflate) {
+          compressedSize += (chunk as Buffer).length;
+          yield chunk as Buffer;
+        }
+      } finally {
+        // Always release the file descriptor — on normal end, on error, and on consumer
+        // cancellation (which destroys `deflate` but would otherwise leave `source` open).
+        source.destroy();
       }
       crc = (crc ^ 0xffffffff) >>> 0;
 

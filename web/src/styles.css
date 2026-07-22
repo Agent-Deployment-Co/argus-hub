@@ -370,7 +370,6 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 /* ---- Export page ---------------------------------------------------------------------- */
 .export-copy { color: var(--text); font-size: 13px; line-height: 1.55; margin: 0 0 12px; max-width: 640px; }
 .export-btn { margin-top: 4px; }
-.export-error { color: var(--racing-red); }
 
 /* ---- Buttons (groups CRUD, bulk toolbar, modals) -------------------------------------- */
 .btn-primary, .btn-secondary, .btn-danger {
