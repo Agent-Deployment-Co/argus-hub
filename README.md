@@ -276,6 +276,17 @@ matching how `/api/*` behaves in that case.
 
 ---
 
+## Export to Snowflake
+
+`argus-hub export snowflake` creates a consistent Snowflake-ready snapshot of the live Hub
+database. Add `--load` to upload it with the built-in Snowflake connector, or use the generated
+JSONL files and `load.sql` for a manual or externally scheduled load.
+
+See [Export Argus Hub data to Snowflake](docs/snowflake.md) for data coverage, one-time role and
+schema setup, authentication, scheduling, and limitations.
+
+---
+
 ## Security
 
 - **Two access layers.** API keys gate `/api/sync` uploads; the admin password gates the
