@@ -9,6 +9,7 @@ import { mountMcp } from "./mcp.ts";
 import { assembleDashboard } from "../reporting/snapshot.ts";
 import { loadPlugins } from "../reporting/inventory.ts";
 import { buildActivityReport, buildTaskQualityReport, buildUserRoster } from "./reports.ts";
+import { openSnowflakeZipStream } from "../export/snowflake.ts";
 import { computeRecommendations } from "./recommendations.ts";
 import { buildSessionList, buildSessionDetail, type SessionListParams } from "./session-list.ts";
 import { buildTaskList, type TaskListParams } from "./task-list.ts";
@@ -385,6 +386,32 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
 
     const session = buildSessionDetail(sessionId, messages, meta, tasks);
     return c.json({ session });
+  });
+
+  // ---- Export -------------------------------------------------------------------
+  //
+  // Download the full Hub dataset as a .zip of Snowflake-ready JSONL (one file per table) plus
+  // manifest.json and load.sql — the same bundle as `argus-hub export snowflake`, served straight
+  // from the browser. api_keys is intentionally excluded (see SNOWFLAKE_EXPORT_TABLES).
+  app.get("/api/export", async (c) => {
+    let result: Awaited<ReturnType<typeof openSnowflakeZipStream>>;
+    try {
+      // Snapshot + open the stream before responding, so a snapshot failure is a clean JSON 500
+      // rather than a truncated download. Streaming errors after this point tear down the response.
+      result = await openSnowflakeZipStream({ dbPath: store.path });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Export failed." }, 500);
+    }
+    const stamp = result.manifest.exportedAt.replace(/[:.]/g, "-");
+    // No Content-Length: the archive is streamed and its final size isn't known up front.
+    return new Response(result.stream, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="argus-hub-export-${stamp}.zip"`,
+        "Cache-Control": "no-store",
+      },
+    });
   });
 
   // ---- SPA ------------------------------------------------------------------------

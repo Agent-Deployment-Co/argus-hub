@@ -367,6 +367,10 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 ::selection { background: var(--sel-bg); color: var(--sel-text); }
 .center-state { max-width: 1200px; margin: 0 auto; padding: 80px 32px; color: var(--muted); text-align: center; }
 
+/* ---- Export page ---------------------------------------------------------------------- */
+.export-copy { color: var(--text); font-size: 13px; line-height: 1.55; margin: 0 0 12px; max-width: 640px; }
+.export-btn { margin-top: 4px; }
+
 /* ---- Buttons (groups CRUD, bulk toolbar, modals) -------------------------------------- */
 .btn-primary, .btn-secondary, .btn-danger {
   display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px;
