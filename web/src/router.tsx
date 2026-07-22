@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
 import { Layout } from "./components/Layout";
 import { Activity } from "./routes/Activity";
+import { Export } from "./routes/Export";
 import { Tasks } from "./routes/Tasks";
 import { Team } from "./routes/Team";
 import { Tools } from "./routes/Tools";
@@ -52,6 +53,7 @@ const routeTree = rootRoute.addChildren([
     validateSearch: validateSnapshotSearch,
   }),
   createRoute({ getParentRoute: () => rootRoute, path: "/users", component: Team }),
+  createRoute({ getParentRoute: () => rootRoute, path: "/export", component: Export }),
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/users/$userId",

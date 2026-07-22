@@ -216,6 +216,25 @@ describe("POST /login", () => {
 
 // ---- GET /api/users --------------------------------------------------------------------
 
+describe("GET /api/export", () => {
+  test("streams a downloadable zip of the export bundle", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const res = await app.request("/api/export");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("application/zip");
+      expect(res.headers.get("Content-Disposition")).toMatch(/^attachment; filename="argus-hub-export-.*\.zip"$/);
+
+      const body = Buffer.from(await res.arrayBuffer());
+      expect(body.length).toBeGreaterThan(0);
+      expect(body.readUInt32LE(0)).toBe(0x04034b50); // local file header — a real zip
+    } finally {
+      await env.store.close();
+    }
+  });
+});
+
 describe("GET /api/users", () => {
   test("returns empty list when no data has been synced", async () => {
     const { store } = await openTestEnv();

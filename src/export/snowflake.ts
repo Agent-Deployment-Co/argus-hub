@@ -1,11 +1,14 @@
 import { createWriteStream } from "node:fs";
-import { chmod, lstat, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
 import { finished } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import sqlite3, { type Database } from "sqlite3";
 import { HUB_APPLICATION_ID, HUB_SCHEMA_VERSION } from "../store/hub-store.ts";
+import { createZipReadable } from "./zip.ts";
 import type { ConnectionOptions } from "snowflake-sdk";
 
 interface ExportColumn {
@@ -342,6 +345,39 @@ export async function writeSnowflakeBundle(options: WriteSnowflakeBundleOptions)
   } finally {
     await closeDatabase(db);
   }
+}
+
+export interface SnowflakeZipStream {
+  /** Web ReadableStream of the .zip bytes, suitable as an HTTP Response body. */
+  stream: ReadableStream<Uint8Array>;
+  manifest: SnowflakeBundleManifest;
+}
+
+/** Stream the full Snowflake export bundle as a .zip. Writes the bundle to a private temp directory
+ *  (reusing writeSnowflakeBundle for the transactionally consistent snapshot), then returns a
+ *  ReadableStream that deflates each file on the fly. The temp directory is removed when the stream
+ *  finishes, errors, or is cancelled — so nothing but one file's buffers is ever held in memory. */
+export async function openSnowflakeZipStream(
+  options: { dbPath: string; target?: SnowflakeTarget; now?: Date },
+): Promise<SnowflakeZipStream> {
+  const outputDir = join(tmpdir(), `argus-hub-export-${randomUUID()}`);
+  let manifest: SnowflakeBundleManifest;
+  let names: string[];
+  try {
+    const bundle = await writeSnowflakeBundle({ dbPath: options.dbPath, outputDir, target: options.target, now: options.now });
+    manifest = bundle.manifest;
+    names = (await readdir(outputDir)).sort();
+  } catch (error) {
+    await rm(outputDir, { recursive: true, force: true });
+    throw error;
+  }
+
+  const files = names.map((name) => ({ name, path: join(outputDir, name) }));
+  const readable = createZipReadable(files, {
+    now: options.now,
+    onClose: () => rm(outputDir, { recursive: true, force: true }),
+  });
+  return { stream: Readable.toWeb(readable) as unknown as ReadableStream<Uint8Array>, manifest };
 }
 
 export interface SnowflakeConnectionConfig extends SnowflakeTarget {
