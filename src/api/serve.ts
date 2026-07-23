@@ -17,6 +17,7 @@ import type { SessionSort } from "./session-list.ts";
 import {
   parseResolvedQuery as parseResolvedQueryFrom,
   parseUserScope as parseUserScopeFrom,
+  parseGroupScope as parseGroupScopeFrom,
   parseGroupIdScope as parseGroupIdScopeFrom,
   parseOutcomeFilter as parseOutcomeFilterFrom,
   parseIntOr,
@@ -35,6 +36,7 @@ import { LOGIN_PAGE } from "./pages.ts";
 
 const parseResolvedQuery = (c: Context) => parseResolvedQueryFrom((k) => c.req.query(k));
 const parseUserScope = (c: Context) => parseUserScopeFrom((k) => c.req.query(k));
+const parseGroupScope = (c: Context) => parseGroupScopeFrom((k) => c.req.query(k));
 const parseGroupIdScope = (c: Context) => parseGroupIdScopeFrom((k) => c.req.query(k));
 const parseOutcomeFilter = (c: Context) => parseOutcomeFilterFrom((k) => c.req.query(k));
 
@@ -111,10 +113,15 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
   // ---- Users --------------------------------------------------------------------
 
   // List known users with last-sync timestamps, session counts, and token/cost totals.
-  // The frontend uses this for the user picker and the /users tab.
+  // The frontend uses this for the user picker and the /users tab. `group` matches groupId or
+  // groupName (same JS-side filter as MCP's query_users — see handleListUsers in mcp.ts).
   app.get("/api/users", async (c) => {
     const orgId = await store.getDefaultOrgId();
-    const users = await buildUserRoster(store, orgId);
+    let users = await buildUserRoster(store, orgId);
+    const group = parseGroupScope(c);
+    if (group) {
+      users = users.filter((u) => u.groupId === group || u.groupName?.toLowerCase() === group.toLowerCase());
+    }
     return c.json({ users });
   });
 
