@@ -960,6 +960,73 @@ describe("readResolved", () => {
     expect(aliceResult.sessions.has("bob-only")).toBe(false);
     await store.close();
   });
+
+  test("scopes to a specific group when groupId is provided (joining all of the group's users)", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const eng = await store.createGroup(orgId, "Engineering");
+    const alice = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("alice-eng"), 1_000_000);
+    const bob = await syncAs(store, orgId, newClientId(), "bob@example.com", minimalUploadRows("bob-eng"), 2_000_000);
+    await syncAs(store, orgId, newClientId(), "carol@example.com", minimalUploadRows("carol-sales"), 3_000_000);
+    await store.setUserGroup(orgId, alice, eng.groupId);
+    await store.setUserGroup(orgId, bob, eng.groupId);
+
+    const result = await store.readResolved({ orgId, groupId: eng.groupId });
+    expect(result.sessions.has("alice-eng")).toBe(true);
+    expect(result.sessions.has("bob-eng")).toBe(true);
+    expect(result.sessions.has("carol-sales")).toBe(false);
+    await store.close();
+  });
+
+  test("scopes to ungrouped users when groupId is null", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const eng = await store.createGroup(orgId, "Engineering");
+    const alice = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("alice-eng"), 1_000_000);
+    await syncAs(store, orgId, newClientId(), "carol@example.com", minimalUploadRows("carol-ungrouped"), 2_000_000);
+    await store.setUserGroup(orgId, alice, eng.groupId);
+
+    const result = await store.readResolved({ orgId, groupId: null });
+    expect(result.sessions.has("alice-eng")).toBe(false);
+    expect(result.sessions.has("carol-ungrouped")).toBe(true);
+    await store.close();
+  });
+
+  test("intersects userId and groupId scopes when both are provided", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const eng = await store.createGroup(orgId, "Engineering");
+    const alice = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("alice-eng"), 1_000_000);
+    const bob = await syncAs(store, orgId, newClientId(), "bob@example.com", minimalUploadRows("bob-eng"), 2_000_000);
+    await store.setUserGroup(orgId, alice, eng.groupId);
+    await store.setUserGroup(orgId, bob, eng.groupId);
+
+    const result = await store.readResolved({ orgId, userId: alice, groupId: eng.groupId });
+    expect(result.sessions.has("alice-eng")).toBe(true);
+    expect(result.sessions.has("bob-eng")).toBe(false);
+    await store.close();
+  });
+
+  test("groupId scoped to a group the user isn't in resolves to an empty result", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const eng = await store.createGroup(orgId, "Engineering");
+    const sales = await store.createGroup(orgId, "Sales");
+    const alice = await syncAs(store, orgId, newClientId(), "alice@example.com", minimalUploadRows("alice-eng"), 1_000_000);
+    await store.setUserGroup(orgId, alice, eng.groupId);
+
+    const result = await store.readResolved({ orgId, userId: alice, groupId: sales.groupId });
+    expect(result.sessions.size).toBe(0);
+    await store.close();
+  });
 });
 
 // ---- readDashboardAggregates -----------------------------------------------------------

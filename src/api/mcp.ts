@@ -10,8 +10,8 @@ import type { HubStore } from "../store/hub-store.ts";
 import type { AdminAuth } from "../admin-auth.ts";
 import { parseBearerToken } from "./sync.ts";
 import {
-  parseResolvedQuery, parseUserScope, parseGroupScope, parseOutcomeFilter, parseIntOr,
-  DEFAULT_LIMIT, MAX_LIMIT, VALID_SOURCES, type QueryGetter,
+  parseResolvedQuery, parseUserScope, parseGroupScope, parseGroupIdScope, parseOutcomeFilter,
+  parseIntOr, DEFAULT_LIMIT, MAX_LIMIT, VALID_SOURCES, UNGROUPED_SENTINEL, type QueryGetter,
 } from "./query-params.ts";
 import { buildActivityReport, buildTaskQualityReport, buildUserRoster } from "./reports.ts";
 import { assembleDashboard } from "../reporting/snapshot.ts";
@@ -26,6 +26,12 @@ const SHARED_PROPERTIES: Record<string, object> = {
   project: { type: "string", description: "Substring match on project path." },
   source: { type: "string", enum: [...VALID_SOURCES], description: "Restrict to one agent source." },
   user: { type: "string", description: "Scope to one userId (omit for the whole org)." },
+  group: {
+    type: "string",
+    description:
+      `Scope to one groupId, or "${UNGROUPED_SENTINEL}" for users with no group assigned ` +
+      "(omit for all groups).",
+  },
 };
 
 /** Adapt a tool call's JSON args object into the `QueryGetter` the shared parsers expect.
@@ -130,7 +136,8 @@ async function handleQueryActivity(store: HubStore, args: Record<string, unknown
   if (typeof query === "string") return toolError(query);
 
   const userId = parseUserScope(get);
-  const report = await buildActivityReport(store, { orgId, userId }, query, new Date());
+  const groupId = parseGroupIdScope(get);
+  const report = await buildActivityReport(store, { orgId, userId, groupId }, query, new Date());
   if (!report) return toolError("No data yet.");
   return toolJson(report);
 }
@@ -152,7 +159,8 @@ async function handleQueryTasks(store: HubStore, args: Record<string, unknown> |
   if (typeof outcomes === "string") return toolError(outcomes);
 
   const userId = parseUserScope(get);
-  const taskRows = await store.readTaskFacts({ orgId, userId }, query);
+  const groupId = parseGroupIdScope(get);
+  const taskRows = await store.readTaskFacts({ orgId, userId, groupId }, query);
 
   const params: TaskListParams = {
     limit: Math.min(MAX_LIMIT, Math.max(1, parseIntOr(get("limit"), DEFAULT_LIMIT))),
@@ -172,7 +180,8 @@ async function handleQueryTaskQuality(store: HubStore, args: Record<string, unkn
   if (typeof query === "string") return toolError(query);
 
   const userId = parseUserScope(get);
-  const report = await buildTaskQualityReport(store, { orgId, userId }, query, new Date());
+  const groupId = parseGroupIdScope(get);
+  const report = await buildTaskQualityReport(store, { orgId, userId, groupId }, query, new Date());
   if (!report) return toolError("No data yet.");
   return toolJson(report);
 }
@@ -186,7 +195,8 @@ async function handleQueryToolUsage(store: HubStore, args: Record<string, unknow
   if (typeof query === "string") return toolError(query);
 
   const userId = parseUserScope(get);
-  const aggregates = await store.readDashboardAggregates({ orgId, userId }, query);
+  const groupId = parseGroupIdScope(get);
+  const aggregates = await store.readDashboardAggregates({ orgId, userId, groupId }, query);
   if (aggregates.sessionsBySource.length === 0) return toolError("No data yet.");
 
   const dashboard = assembleDashboard(aggregates, loadPlugins());

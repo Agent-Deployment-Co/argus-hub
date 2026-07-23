@@ -50,6 +50,19 @@ export function parseGroupScope(get: QueryGetter): string | undefined {
   return get("group")?.trim() || undefined;
 }
 
+/** Sentinel `group` value meaning "ungrouped" (users with no group assigned). */
+export const UNGROUPED_SENTINEL = "__none__";
+
+/** Parse the `group` param into a groupId-only HubScope value: undefined (no filter), null
+ *  ("ungrouped", i.e. `group=__none__`), or the groupId string. Unlike `parseGroupScope`, this
+ *  is a real join key for the report queries/tools — no groupName matching. */
+export function parseGroupIdScope(get: QueryGetter): string | null | undefined {
+  const raw = get("group")?.trim();
+  if (!raw) return undefined;
+  if (raw === UNGROUPED_SENTINEL) return null;
+  return raw;
+}
+
 /** Parse the `outcome` param (comma-separated success/failure/unknown). Returns undefined (no
  *  filter) or an error string on an unrecognized value. */
 export function parseOutcomeFilter(get: QueryGetter): TaskOutcomeFilter[] | string | undefined {

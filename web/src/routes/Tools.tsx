@@ -404,23 +404,30 @@ function ToolsContent() {
 
 const routeApi = getRouteApi("/tools");
 
-/** Org-wide access-layer usage — tools, skills, MCP servers, and plugins, scoped to the whole team. */
+/** Access-layer usage — tools, skills, MCP servers, and plugins — org-wide by default, or scoped
+ *  to a single user or group via the FilterBar. */
 export function Tools() {
   const search = routeApi.useSearch();
   const navigate = routeApi.useNavigate();
   const since = search.since ?? DEFAULT_SINCE();
   const until = search.until ?? DEFAULT_UNTIL();
   const source = search.source ?? "";
-  const query = useSnapshotQuery({ since, until, source });
+  const user = search.user ?? "";
+  const group = search.group ?? "";
+  const query = useSnapshotQuery({ since, until, source, userId: user, groupId: group });
   const snap = query.data;
 
-  const patchFilters = (patch: Partial<{ since: string; until: string; source: string }>) =>
+  const patchFilters = (
+    patch: Partial<{ since: string; until: string; source: string; userId: string; groupId: string }>,
+  ) =>
     navigate({
       to: ".",
-      search: (prev: { since?: string; until?: string; source?: string }) => ({
+      search: (prev: { since?: string; until?: string; source?: string; user?: string; group?: string }) => ({
         since: "since" in patch ? patch.since || undefined : prev.since,
         until: "until" in patch ? patch.until || undefined : prev.until,
         source: "source" in patch ? patch.source || undefined : prev.source,
+        user: "userId" in patch ? patch.userId || undefined : prev.user,
+        group: "groupId" in patch ? patch.groupId || undefined : prev.group,
       }),
       replace: true,
     });
@@ -431,6 +438,10 @@ export function Tools() {
         since={since}
         until={until}
         source={source}
+        userId={user}
+        showUser
+        groupId={group}
+        showGroup
         loading={query.isFetching}
         onChange={patchFilters}
         onReset={() => navigate({ to: ".", search: {}, replace: true })}

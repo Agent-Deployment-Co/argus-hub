@@ -295,6 +295,29 @@ describe("GET /api/users", () => {
       await env.store.close();
     }
   });
+
+  test("?group= filters to a group, matching by groupId or groupName (case-insensitive)", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const aliceId = await syncAs(env, "alice@example.com", [{ id: "s1" }]);
+      await syncAs(env, "bob@example.com", [{ id: "s2" }]);
+      const group = await env.store.createGroup(env.orgId, "Engineering");
+      await env.store.setUserGroup(env.orgId, aliceId, group.groupId);
+
+      const byId = await app.request(`/api/users?group=${group.groupId}`);
+      const byIdBody = await byId.json() as { users: Array<{ userId: string }> };
+      expect(byIdBody.users).toHaveLength(1);
+      expect(byIdBody.users[0]!.userId).toBe(aliceId);
+
+      const byName = await app.request("/api/users?group=engineering");
+      const byNameBody = await byName.json() as { users: Array<{ userId: string }> };
+      expect(byNameBody.users).toHaveLength(1);
+      expect(byNameBody.users[0]!.userId).toBe(aliceId);
+    } finally {
+      await env.store.close();
+    }
+  });
 });
 
 // ---- /api/groups, /api/users/:userId ---------------------------------------------------

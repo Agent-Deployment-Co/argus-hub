@@ -1,6 +1,10 @@
-import { Calendar, FilterX, Layers, RotateCw, User } from "lucide-react";
+import { Calendar, FilterX, Layers, RotateCw, User, Users } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useUsers } from "../lib/users";
-import { DATE_PRESETS, SORTED_SOURCES, daysAgo, formatDateShort, sourceLabel, type FilterValues } from "../lib/filters";
+import { useGroups } from "../lib/groups";
+import {
+  DATE_PRESETS, SORTED_SOURCES, UNGROUPED_SENTINEL, daysAgo, formatDateShort, sourceLabel, type FilterValues,
+} from "../lib/filters";
 import { FilterDropdown, FilterDropdownOption } from "./FilterDropdown";
 
 interface Props {
@@ -8,58 +12,212 @@ interface Props {
   until: string;
   source: string;
   userId?: string;
+  groupId?: string;
   /** Show the user/client-scope pill (only relevant for org-wide views). */
   showUser?: boolean;
+  /** Show the group-scope pill. */
+  showGroup?: boolean;
   loading?: boolean;
   onChange: (patch: Partial<FilterValues>) => void;
   onReset: () => void;
   resettable: boolean;
 }
 
-/** Global date-range + source (+ optional user scope) filter bar, pinned above every data view
- *  that opts in. Fully controlled — the owning route is responsible for URL search-param sync.
- *  Pill/dropdown shape borrowed from the /sessions-inbox toolbar (FilterDropdown) so every data
- *  view reads as one filter system. */
-export function FilterBar({ since, until, source, userId, showUser, loading, onChange, onReset, resettable }: Props) {
+/** Global date-range + source (+ optional user/group scope) filter bar, pinned above every data
+ *  view that opts in. Fully controlled — the owning route is responsible for URL search-param
+ *  sync. Pill/dropdown shape borrowed from the /sessions-inbox toolbar (FilterDropdown) so every
+ *  data view reads as one filter system. */
+export function FilterBar({
+  since, until, source, userId, groupId, showUser, showGroup, loading, onChange, onReset, resettable,
+}: Props) {
   const usersQuery = useUsers();
+  const groupsQuery = useGroups();
+  // Wait for users to load before deciding — otherwise the toggle flashes away during the
+  // initial fetch. Only hide once we know for sure no user actually belongs to a group.
+  const hasGroups = usersQuery.data === undefined || usersQuery.data.some((u) => u.groupId !== null);
+  const canShowGroup = Boolean(showGroup && hasGroups);
+  const combineUserAndGroup = Boolean(showUser && canShowGroup);
+  const [scopeMode, setScopeMode] = useState<"user" | "group">(groupId ? "group" : "user");
+  const ungroupedCount = usersQuery.data?.filter((u) => u.groupId === null).length ?? 0;
+
+  // Fully controlled: if a group/user scope is set from outside the toggle (a deep link, a
+  // "view this group" button elsewhere), reflect it so the visible pill matches the active filter.
+  useEffect(() => {
+    if (groupId && canShowGroup && scopeMode !== "group") setScopeMode("group");
+    else if (userId && scopeMode !== "user") setScopeMode("user");
+  }, [userId, groupId, canShowGroup, scopeMode]);
 
   const today = daysAgo(0);
   const dateIsDefault = since === daysAgo(30) && until === today;
   const dateSummary = `${formatDateShort(since)} → ${formatDateShort(until)}`;
   const sourcesSummary = source ? sourceLabel(source) : "All sources";
   const userSummary = userId ? (usersQuery.data?.find((u) => u.userId === userId)?.displayName ?? "1 user") : "All users";
+  const groupSummary = groupId
+    ? (groupId === UNGROUPED_SENTINEL ? "Ungrouped" : (groupsQuery.data?.find((g) => g.groupId === groupId)?.name ?? "1 group"))
+    : "All groups";
 
   const setSince = (v: string) => v && onChange({ since: v > today ? today : v > until ? until : v });
   const setUntil = (v: string) => v && onChange({ until: v > today ? today : v < since ? since : v });
 
   return (
     <div className="filter-bar" role="group" aria-label="Dashboard filters">
-      {showUser && (
-        <FilterDropdown
-          icon={<User size={14} strokeWidth={2} aria-hidden />}
-          label="User"
-          summary={userSummary}
-          active={Boolean(userId)}
-          onClear={userId ? () => onChange({ userId: undefined }) : undefined}
-          align="right"
-        >
-          {(close) => (
-            <div className="filter-dropdown-list" role="listbox" aria-label="Users">
-              {usersQuery.data?.map((u) => (
-                <FilterDropdownOption
-                  key={u.userId}
-                  label={u.displayName}
-                  selected={userId === u.userId}
-                  onToggle={() => {
-                    onChange({ userId: userId === u.userId ? undefined : u.userId });
-                    close();
-                  }}
-                />
-              ))}
-              {!usersQuery.data?.length && <p className="filter-dropdown-empty">No users yet.</p>}
-            </div>
+      {combineUserAndGroup ? (
+        <div className="filter-scope">
+          <div className="filter-scope-toggle" role="group" aria-label="Scope type">
+            <button
+              type="button"
+              className={`filter-scope-btn${scopeMode === "user" ? " active" : ""}`}
+              aria-pressed={scopeMode === "user"}
+              title="Scope by user"
+              onClick={() => {
+                if (scopeMode === "user") return;
+                setScopeMode("user");
+                onChange({ userId: undefined, groupId: undefined });
+              }}
+            >
+              <User size={14} strokeWidth={2} aria-hidden />
+            </button>
+            <button
+              type="button"
+              className={`filter-scope-btn${scopeMode === "group" ? " active" : ""}`}
+              aria-pressed={scopeMode === "group"}
+              title="Scope by group"
+              onClick={() => {
+                if (scopeMode === "group") return;
+                setScopeMode("group");
+                onChange({ userId: undefined, groupId: undefined });
+              }}
+            >
+              <Users size={14} strokeWidth={2} aria-hidden />
+            </button>
+          </div>
+
+          {scopeMode === "user" ? (
+            <FilterDropdown
+              icon={null}
+              label="User"
+              summary={userSummary}
+              active={Boolean(userId)}
+              onClear={userId ? () => onChange({ userId: undefined }) : undefined}
+              align="right"
+            >
+              {(close) => (
+                <div className="filter-dropdown-list" role="listbox" aria-label="Users">
+                  {usersQuery.data?.map((u) => (
+                    <FilterDropdownOption
+                      key={u.userId}
+                      label={u.displayName}
+                      selected={userId === u.userId}
+                      onToggle={() => {
+                        onChange({ userId: userId === u.userId ? undefined : u.userId });
+                        close();
+                      }}
+                    />
+                  ))}
+                  {!usersQuery.data?.length && <p className="filter-dropdown-empty">No users yet.</p>}
+                </div>
+              )}
+            </FilterDropdown>
+          ) : (
+            <FilterDropdown
+              icon={null}
+              label="Group"
+              summary={groupSummary}
+              active={Boolean(groupId)}
+              onClear={groupId ? () => onChange({ groupId: undefined }) : undefined}
+              align="right"
+            >
+              {(close) => (
+                <div className="filter-dropdown-list" role="listbox" aria-label="Groups">
+                  {groupsQuery.data?.map((g) => (
+                    <FilterDropdownOption
+                      key={g.groupId}
+                      label={`${g.name} (${g.memberCount})`}
+                      selected={groupId === g.groupId}
+                      onToggle={() => {
+                        onChange({ groupId: groupId === g.groupId ? undefined : g.groupId });
+                        close();
+                      }}
+                    />
+                  ))}
+                  <FilterDropdownOption
+                    label={`Ungrouped (${ungroupedCount})`}
+                    selected={groupId === UNGROUPED_SENTINEL}
+                    onToggle={() => {
+                      onChange({ groupId: groupId === UNGROUPED_SENTINEL ? undefined : UNGROUPED_SENTINEL });
+                      close();
+                    }}
+                  />
+                </div>
+              )}
+            </FilterDropdown>
           )}
-        </FilterDropdown>
+        </div>
+      ) : (
+        <>
+          {showUser && (
+            <FilterDropdown
+              icon={<User size={14} strokeWidth={2} aria-hidden />}
+              label="User"
+              summary={userSummary}
+              active={Boolean(userId)}
+              onClear={userId ? () => onChange({ userId: undefined }) : undefined}
+              align="right"
+            >
+              {(close) => (
+                <div className="filter-dropdown-list" role="listbox" aria-label="Users">
+                  {usersQuery.data?.map((u) => (
+                    <FilterDropdownOption
+                      key={u.userId}
+                      label={u.displayName}
+                      selected={userId === u.userId}
+                      onToggle={() => {
+                        onChange({ userId: userId === u.userId ? undefined : u.userId });
+                        close();
+                      }}
+                    />
+                  ))}
+                  {!usersQuery.data?.length && <p className="filter-dropdown-empty">No users yet.</p>}
+                </div>
+              )}
+            </FilterDropdown>
+          )}
+
+          {canShowGroup && (
+            <FilterDropdown
+              icon={<Users size={14} strokeWidth={2} aria-hidden />}
+              label="Group"
+              summary={groupSummary}
+              active={Boolean(groupId)}
+              onClear={groupId ? () => onChange({ groupId: undefined }) : undefined}
+              align="right"
+            >
+              {(close) => (
+                <div className="filter-dropdown-list" role="listbox" aria-label="Groups">
+                  {groupsQuery.data?.map((g) => (
+                    <FilterDropdownOption
+                      key={g.groupId}
+                      label={`${g.name} (${g.memberCount})`}
+                      selected={groupId === g.groupId}
+                      onToggle={() => {
+                        onChange({ groupId: groupId === g.groupId ? undefined : g.groupId });
+                        close();
+                      }}
+                    />
+                  ))}
+                  <FilterDropdownOption
+                    label={`Ungrouped (${ungroupedCount})`}
+                    selected={groupId === UNGROUPED_SENTINEL}
+                    onToggle={() => {
+                      onChange({ groupId: groupId === UNGROUPED_SENTINEL ? undefined : UNGROUPED_SENTINEL });
+                      close();
+                    }}
+                  />
+                </div>
+              )}
+            </FilterDropdown>
+          )}
+        </>
       )}
 
       <FilterDropdown

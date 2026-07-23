@@ -656,6 +656,8 @@ export interface HubScope {
   orgId: string;
   userId?: string;
   clientId?: string;
+  /** null = "ungrouped" (users with no group assigned); undefined = no group filter. */
+  groupId?: string | null;
 }
 
 export interface HubTaskRow {
@@ -861,6 +863,20 @@ export class HubStore {
       this.db,
       "SELECT client_id FROM clients WHERE org_id = ? AND user_id = ?",
       [orgId, userId],
+    );
+    return rows.map((r) => r.client_id);
+  }
+
+  /** Resolve clientIds for all users currently in a group (or currently ungrouped, when
+   *  `groupId` is null). Used internally to translate a group-scoped read into a
+   *  `client_id IN (...)` clause. */
+  private async clientIdsForGroup(orgId: string, groupId: string | null): Promise<string[]> {
+    const rows = await all<{ client_id: string }>(
+      this.db,
+      `SELECT c.client_id FROM clients c
+       JOIN users u ON u.org_id = c.org_id AND u.user_id = c.user_id
+       WHERE u.org_id = ? AND u.group_id IS ?`,
+      [orgId, groupId],
     );
     return rows.map((r) => r.client_id);
   }
@@ -2230,16 +2246,21 @@ export class HubStore {
    *  bundle. Public reads call this once up front so SQL clauses can be assembled outside
    *  the scheduled work item (avoids nested schedule()). */
   private async expandScope(scope: HubScope): Promise<ExpandedScope> {
+    let clientIds: string[] | null = null;
+
     if (scope.clientId) {
-      return { orgId: scope.orgId, clientIds: [scope.clientId], empty: false };
+      clientIds = [scope.clientId];
+    } else if (scope.userId) {
+      clientIds = await this.schedule(() => this.clientIdsForUser(scope.orgId, scope.userId!));
     }
-    if (scope.userId) {
-      return this.schedule(async () => {
-        const ids = await this.clientIdsForUser(scope.orgId, scope.userId!);
-        return { orgId: scope.orgId, clientIds: ids, empty: ids.length === 0 };
-      });
+
+    if (scope.groupId !== undefined) {
+      const groupId = scope.groupId;
+      const groupIds = await this.schedule(() => this.clientIdsForGroup(scope.orgId, groupId));
+      clientIds = clientIds === null ? groupIds : clientIds.filter((id) => groupIds.includes(id));
     }
-    return { orgId: scope.orgId, clientIds: null, empty: false };
+
+    return { orgId: scope.orgId, clientIds, empty: clientIds !== null && clientIds.length === 0 };
   }
 
   // ---- Close ----------------------------------------------------------------------------

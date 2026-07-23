@@ -123,6 +123,15 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 "Al
 .filter-dropdown-dates { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .filter-dropdown-dates .filter-input { flex: 0 0 auto; width: 132px; }
 
+.filter-scope { display: flex; align-items: center; gap: 0; flex: 0 0 auto; }
+.filter-scope-toggle { display: inline-flex; height: 32px; border: 1px solid var(--line); border-right: 0; border-radius: 999px 0 0 999px; overflow: hidden; }
+.filter-scope-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 100%; border: 0; background: var(--bg); color: var(--muted); cursor: pointer; }
+.filter-scope-btn + .filter-scope-btn { border-left: 1px solid var(--line); }
+.filter-scope-btn:hover { color: var(--heading); background: var(--hover); }
+.filter-scope-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.filter-scope-btn.active { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--heading); }
+.filter-scope .filter-dropdown-btn { border-radius: 0 999px 999px 0; }
+
 .rail { position: sticky; top: 0; align-self: start; height: 100vh; display: flex; flex-direction: column; gap: 6px; padding: 16px 12px; border-right: 1px solid var(--line); background: var(--surface); overflow-y: auto; }
 .rail-brand { display: flex; align-items: center; gap: 6px; padding: 4px 8px 14px; }
 /* Expanded rail shows the full wordmark (arch + "ARGUS HUB"); the bare arch is for the collapsed rail. */

@@ -6,12 +6,16 @@ import { sanitizedSource, type FilterValues } from "./filters";
 export type SnapshotFilters = FilterValues;
 
 function snapshotQueryKey(filters: SnapshotFilters) {
-  return ["snapshot", filters.userId ?? null, filters.since ?? null, filters.until ?? null, sanitizedSource(filters.source)] as const;
+  return [
+    "snapshot", filters.userId ?? null, filters.groupId ?? null, filters.since ?? null, filters.until ?? null,
+    sanitizedSource(filters.source),
+  ] as const;
 }
 
 function snapshotUrl(filters: SnapshotFilters): string {
   const params = new URLSearchParams();
   if (filters.userId) params.set("user", filters.userId);
+  if (filters.groupId) params.set("group", filters.groupId);
   if (filters.since) params.set("since", filters.since);
   if (filters.until) params.set("until", filters.until);
   const source = sanitizedSource(filters.source);
