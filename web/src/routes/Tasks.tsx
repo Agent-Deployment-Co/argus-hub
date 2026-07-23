@@ -24,6 +24,7 @@ interface TaskFilters {
   q: string;
   outcome: string[];
   user: string;
+  group: string;
   since: string;
   until: string;
   source: string;
@@ -34,6 +35,7 @@ async function fetchTasks(f: TaskFilters): Promise<TaskListResponse> {
   if (f.q) params.set("q", f.q);
   if (f.outcome.length) params.set("outcome", f.outcome.join(","));
   if (f.user) params.set("user", f.user);
+  if (f.group) params.set("group", f.group);
   const source = sanitizedSource(f.source);
   if (source) params.set("source", source);
   const res = await fetch(`/api/tasks?${params}`);
@@ -80,17 +82,18 @@ export function Tasks() {
   const q = search.q ?? "";
   const outcome = search.outcome ?? [];
   const user = search.user ?? "";
+  const group = search.group ?? "";
   const since = search.since ?? DEFAULT_SINCE();
   const until = search.until ?? DEFAULT_UNTIL();
   const source = search.source ?? "";
   const [draft, setDraft] = useState(q);
   const [openId, setOpenId] = useState<string | null>(null);
   const query = useQuery({
-    queryKey: ["tasks", q, outcome, user, since, until, source],
-    queryFn: () => fetchTasks({ q, outcome, user, since, until, source }),
+    queryKey: ["tasks", q, outcome, user, group, since, until, source],
+    queryFn: () => fetchTasks({ q, outcome, user, group, since, until, source }),
     staleTime: 30_000,
   });
-  const reportQuery = useTaskReportQuery({ since, until, source, userId: user });
+  const reportQuery = useTaskReportQuery({ since, until, source, userId: user, groupId: group });
   const report = reportQuery.data;
 
   const toggleOutcome = (key: string) => {
@@ -98,7 +101,9 @@ export function Tasks() {
     navigate({ to: ".", search: { ...search, outcome: next.length ? next : undefined }, replace: true });
   };
 
-  const patchFilters = (patch: Partial<{ since: string; until: string; source: string; userId: string }>) =>
+  const patchFilters = (
+    patch: Partial<{ since: string; until: string; source: string; userId: string; groupId: string }>,
+  ) =>
     navigate({
       to: ".",
       search: {
@@ -107,6 +112,7 @@ export function Tasks() {
         until: "until" in patch ? patch.until || undefined : search.until,
         source: "source" in patch ? patch.source || undefined : search.source,
         user: "userId" in patch ? patch.userId || undefined : search.user,
+        group: "groupId" in patch ? patch.groupId || undefined : search.group,
       },
       replace: true,
     });
@@ -131,6 +137,8 @@ export function Tasks() {
         source={source}
         userId={user}
         showUser
+        groupId={group}
+        showGroup
         loading={query.isFetching}
         onChange={patchFilters}
         onReset={() => { setDraft(""); navigate({ to: ".", search: {}, replace: true }); }}

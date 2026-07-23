@@ -23,24 +23,27 @@ function errorMessage(err: Error): ReactNode {
 const routeApi = getRouteApi("/");
 
 /** The Hub's home page: at a glance, how much agent work the org did in the window, and how
- *  it's distributed across people and tools (SPEC.md 4). Org-wide only — no ?user= scope. */
+ *  it's distributed across people and tools (SPEC.md 4). Org-wide only — no ?user= scope, but
+ *  ?group= narrows to a group's members. */
 export function Activity() {
   const search = routeApi.useSearch();
   const navigate = routeApi.useNavigate();
   const since = search.since ?? DEFAULT_SINCE();
   const until = search.until ?? DEFAULT_UNTIL();
   const source = search.source ?? "";
-  const filters = { since, until, source };
+  const group = search.group ?? "";
+  const filters = { since, until, source, groupId: group };
   const query = useActivityQuery(filters);
   const report = query.data;
 
-  const patchFilters = (patch: Partial<{ since: string; until: string; source: string }>) =>
+  const patchFilters = (patch: Partial<{ since: string; until: string; source: string; groupId: string }>) =>
     navigate({
       to: ".",
-      search: (prev: { since?: string; until?: string; source?: string }) => ({
+      search: (prev: { since?: string; until?: string; source?: string; group?: string }) => ({
         since: "since" in patch ? patch.since || undefined : prev.since,
         until: "until" in patch ? patch.until || undefined : prev.until,
         source: "source" in patch ? patch.source || undefined : prev.source,
+        group: "groupId" in patch ? patch.groupId || undefined : prev.group,
       }),
       replace: true,
     });
@@ -51,10 +54,12 @@ export function Activity() {
         since={since}
         until={until}
         source={source}
+        groupId={group}
+        showGroup
         loading={query.isFetching}
         onChange={patchFilters}
         onReset={() => navigate({ to: ".", search: {}, replace: true })}
-        resettable={isFilterActive(search, { since: DEFAULT_SINCE(), until: DEFAULT_UNTIL() })}
+        resettable={isFilterActive(filters, { since: DEFAULT_SINCE(), until: DEFAULT_UNTIL() })}
       />
       <div className="page-head">
         <h1>Activity</h1>

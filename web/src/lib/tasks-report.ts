@@ -9,6 +9,7 @@ function taskReportQueryKey(filters: FilterValues) {
     filters.until ?? null,
     sanitizedSource(filters.source),
     filters.userId ?? null,
+    filters.groupId ?? null,
   ] as const;
 }
 
@@ -19,6 +20,7 @@ function taskReportUrl(filters: FilterValues): string {
   const source = sanitizedSource(filters.source);
   if (source) params.set("source", source);
   if (filters.userId) params.set("user", filters.userId);
+  if (filters.groupId) params.set("group", filters.groupId);
   return `/api/tasks/report?${params.toString()}`;
 }
 

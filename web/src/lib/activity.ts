@@ -5,7 +5,10 @@ import { sanitizedSource, type FilterValues } from "./filters";
 export type ActivityFilters = Omit<FilterValues, "userId">;
 
 function activityQueryKey(filters: ActivityFilters) {
-  return ["activity", filters.since ?? null, filters.until ?? null, sanitizedSource(filters.source)] as const;
+  return [
+    "activity", filters.since ?? null, filters.until ?? null, sanitizedSource(filters.source),
+    filters.groupId ?? null,
+  ] as const;
 }
 
 function activityUrl(filters: ActivityFilters): string {
@@ -14,6 +17,7 @@ function activityUrl(filters: ActivityFilters): string {
   if (filters.until) params.set("until", filters.until);
   const source = sanitizedSource(filters.source);
   if (source) params.set("source", source);
+  if (filters.groupId) params.set("group", filters.groupId);
   return `/api/activity?${params.toString()}`;
 }
 
