@@ -8,6 +8,7 @@ import { TaskDistributions } from "../components/TaskDistributions";
 import { TaskSuccessTrend } from "../components/TaskSuccessTrend";
 import { TaskQualityByUser, TaskQualityBySource, TaskQualityByProject } from "../components/TaskQuality";
 import { TaskSignalsAndFriction } from "../components/TaskSignalsAndFriction";
+import { TaskLabelPicker } from "../components/TaskLabelPicker";
 import { useTaskReportQuery } from "../lib/tasks-report";
 import { DEFAULT_SINCE, DEFAULT_UNTIL, isFilterActive, sanitizedSource } from "../lib/filters";
 import type { TaskListResponse } from "../types";
@@ -233,6 +234,9 @@ export function Tasks() {
                 >
                   <span className="task-item-desc">{t.description}</span>
                   <span className="pill">{compactProject(t.project)}</span>
+                  {t.labels.map((l) => (
+                    <span key={l.labelId} className={`pill label-kind-pill label-kind-${l.kind}`}>{l.name}</span>
+                  ))}
                   {frust && <span className={`pill ${frust.cls}`}>{frust.label}</span>}
                   <span className={`pill ${outcome.cls}`}>{outcome.label}</span>
                   <span className="task-item-tokens">
@@ -262,6 +266,15 @@ export function Tasks() {
                         <span className="task-panel-label">Session</span>
                         <span className="task-panel-value">
                           {t.source} · {t.project} · {t.sessionId}
+                        </span>
+                      </div>
+                      <div className="task-panel-field">
+                        <span className="task-panel-label">Labels</span>
+                        <span className="task-panel-value">
+                          <TaskLabelPicker
+                            taskRef={{ clientId: t.clientId, sessionId: t.sessionId, taskSeq: t.taskSeq }}
+                            applied={t.labels}
+                          />
                         </span>
                       </div>
                     </div>
