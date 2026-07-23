@@ -20,8 +20,9 @@ The image listens on port `4343` and writes its SQLite database under `/data` (s
 
 ## Pull the prebuilt image
 
-CI publishes multi-arch (`linux/amd64`, `linux/arm64`) images to GitHub Container Registry on
-every push, so you usually don't need to build locally:
+A manually-triggered GitHub Actions workflow (`publish-docker.yml`, run via `workflow_dispatch`)
+publishes multi-arch (`linux/amd64`, `linux/arm64`) images to GitHub Container Registry, so you
+usually don't need to build locally:
 
 ```bash
 docker pull ghcr.io/agent-deployment-co/argus-hub:latest
