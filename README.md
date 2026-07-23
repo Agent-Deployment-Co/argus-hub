@@ -73,6 +73,7 @@ CLI flags — highest precedence last.
 | `--data-dir` | `HUB_DATA_DIR` | `dataDir` | `./data` | Directory for `hub.db` |
 | —        | `ADMIN_PASSWORD` | —     | _(random)_ | Dashboard login password (pinned across restarts when set) |
 | —        | `HUB_INSECURE_COOKIE_HOSTS` | — | _(none)_ | Comma-separated hostnames (no port) that get a non-`Secure` session cookie, for plain-HTTP-only deployments (e.g. a cluster-internal address reachable only via a private network). **Never** list a host reachable from the public internet. |
+| —        | `ANTHROPIC_API_KEY` | — | _(none)_ | Required to run candidate search when creating an auto label from the Labels tab; manual labels don't need it |
 
 Example `hub.json`:
 
@@ -198,6 +199,11 @@ synced. Use it to scope all views (Activity, Sessions, Projects, Tools, Health) 
 user, or leave it on "All users" for an org-wide view. The **Users** tab (rail link, visible in
 hub mode) shows a per-user summary table — sessions, total tokens, estimated cost, and last-sync
 time — sortable by any column.
+
+The **Labels** tab manages hub-level task labels — distinct from any labels an Argus client
+applies itself. Create a manual label to apply by hand from the Tasks tab, or an auto label
+(name + description) to have the hub search existing tasks for matches via an LLM, review the
+candidates, and apply/backfill the label onto the reviewed set in one step.
 
 ---
 
