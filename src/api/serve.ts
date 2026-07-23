@@ -17,6 +17,7 @@ import type { SessionSort } from "./session-list.ts";
 import {
   parseResolvedQuery as parseResolvedQueryFrom,
   parseUserScope as parseUserScopeFrom,
+  parseGroupIdScope as parseGroupIdScopeFrom,
   parseOutcomeFilter as parseOutcomeFilterFrom,
   parseIntOr,
   DEFAULT_LIMIT,
@@ -34,6 +35,7 @@ import { LOGIN_PAGE } from "./pages.ts";
 
 const parseResolvedQuery = (c: Context) => parseResolvedQueryFrom((k) => c.req.query(k));
 const parseUserScope = (c: Context) => parseUserScopeFrom((k) => c.req.query(k));
+const parseGroupIdScope = (c: Context) => parseGroupIdScopeFrom((k) => c.req.query(k));
 const parseOutcomeFilter = (c: Context) => parseOutcomeFilterFrom((k) => c.req.query(k));
 
 function requestHost(c: Context): string | undefined {
@@ -279,7 +281,8 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     const query = parseResolvedQuery(c);
     if (typeof query === "string") return c.json({ error: query }, 400);
 
-    const report = await buildActivityReport(store, { orgId }, query, new Date());
+    const groupId = parseGroupIdScope(c);
+    const report = await buildActivityReport(store, { orgId, groupId }, query, new Date());
     if (!report) return c.json({ error: "No data yet." }, 503);
     return c.json(report);
   });
@@ -333,7 +336,8 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     if (typeof outcomes === "string") return c.json({ error: outcomes }, 400);
 
     const userId = parseUserScope(c);
-    const taskRows = await store.readTaskFacts({ orgId, userId }, query);
+    const groupId = parseGroupIdScope(c);
+    const taskRows = await store.readTaskFacts({ orgId, userId, groupId }, query);
 
     const params: TaskListParams = {
       limit: Math.min(MAX_LIMIT, Math.max(1, parseIntOr(c.req.query("limit"), DEFAULT_LIMIT))),
@@ -357,7 +361,8 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     if (typeof query === "string") return c.json({ error: query }, 400);
 
     const userId = parseUserScope(c);
-    const report = await buildTaskQualityReport(store, { orgId, userId }, query, new Date());
+    const groupId = parseGroupIdScope(c);
+    const report = await buildTaskQualityReport(store, { orgId, userId, groupId }, query, new Date());
     if (!report) return c.json({ error: "No data yet." }, 503);
     return c.json(report);
   });
