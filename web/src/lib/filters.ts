@@ -32,12 +32,18 @@ export function formatDateShort(iso: string): string {
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/** Wire sentinel for "ungrouped" (users with no group assigned) — must match the backend's
+ *  UNGROUPED_SENTINEL in src/api/query-params.ts. */
+export const UNGROUPED_SENTINEL = "__none__";
+
 export interface FilterValues {
   since?: string;
   until?: string;
   source?: string;
   /** Scope to one user's data. Omit for the org-wide team rollup. */
   userId?: string;
+  /** Scope to one group's data (a groupId, or UNGROUPED_SENTINEL). Omit for all groups. */
+  groupId?: string;
 }
 
 export function sanitizedSource(source: string | undefined): string | null {
@@ -59,6 +65,7 @@ export function isFilterActive(filters: FilterValues, defaults: { since: string;
     (filters.since ?? defaults.since) !== defaults.since ||
     (filters.until ?? defaults.until) !== defaults.until ||
     !!sanitizedSource(filters.source) ||
-    !!filters.userId
+    !!filters.userId ||
+    !!filters.groupId
   );
 }
