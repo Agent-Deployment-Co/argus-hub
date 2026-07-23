@@ -1,5 +1,5 @@
 import { Calendar, FilterX, Layers, RotateCw, User, Users } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useUsers } from "../lib/users";
 import { useGroups } from "../lib/groups";
 import {
@@ -35,6 +35,13 @@ export function FilterBar({
   const combineUserAndGroup = Boolean(showUser && showGroup);
   const [scopeMode, setScopeMode] = useState<"user" | "group">(groupId ? "group" : "user");
   const ungroupedCount = usersQuery.data?.filter((u) => u.groupId === null).length ?? 0;
+
+  // Fully controlled: if a group/user scope is set from outside the toggle (a deep link, a
+  // "view this group" button elsewhere), reflect it so the visible pill matches the active filter.
+  useEffect(() => {
+    if (groupId && scopeMode !== "group") setScopeMode("group");
+    else if (userId && scopeMode !== "user") setScopeMode("user");
+  }, [userId, groupId, scopeMode]);
 
   const today = daysAgo(0);
   const dateIsDefault = since === daysAgo(30) && until === today;
