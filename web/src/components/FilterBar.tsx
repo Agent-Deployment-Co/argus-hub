@@ -32,16 +32,20 @@ export function FilterBar({
 }: Props) {
   const usersQuery = useUsers();
   const groupsQuery = useGroups();
-  const combineUserAndGroup = Boolean(showUser && showGroup);
+  // Wait for users to load before deciding — otherwise the toggle flashes away during the
+  // initial fetch. Only hide once we know for sure no user actually belongs to a group.
+  const hasGroups = usersQuery.data === undefined || usersQuery.data.some((u) => u.groupId !== null);
+  const canShowGroup = Boolean(showGroup && hasGroups);
+  const combineUserAndGroup = Boolean(showUser && canShowGroup);
   const [scopeMode, setScopeMode] = useState<"user" | "group">(groupId ? "group" : "user");
   const ungroupedCount = usersQuery.data?.filter((u) => u.groupId === null).length ?? 0;
 
   // Fully controlled: if a group/user scope is set from outside the toggle (a deep link, a
   // "view this group" button elsewhere), reflect it so the visible pill matches the active filter.
   useEffect(() => {
-    if (groupId && scopeMode !== "group") setScopeMode("group");
+    if (groupId && canShowGroup && scopeMode !== "group") setScopeMode("group");
     else if (userId && scopeMode !== "user") setScopeMode("user");
-  }, [userId, groupId, scopeMode]);
+  }, [userId, groupId, canShowGroup, scopeMode]);
 
   const today = daysAgo(0);
   const dateIsDefault = since === daysAgo(30) && until === today;
@@ -179,7 +183,7 @@ export function FilterBar({
             </FilterDropdown>
           )}
 
-          {showGroup && (
+          {canShowGroup && (
             <FilterDropdown
               icon={<Users size={14} strokeWidth={2} aria-hidden />}
               label="Group"
