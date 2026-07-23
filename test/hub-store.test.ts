@@ -5,9 +5,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   DuplicateGroupNameError,
+  DuplicateLabelNameError,
   GroupNotFoundError,
   HUB_APPLICATION_ID,
   HUB_SCHEMA_VERSION,
+  LabelNotFoundError,
   openHubStore,
   type HubStore,
   type HubUploadRows,
@@ -196,6 +198,24 @@ function addInvocation(rows: HubUploadRows, sessionId: string): void {
   });
 }
 
+function addTask(rows: HubUploadRows, sessionId: string, seq: number, description: string): void {
+  rows.tasks.push({
+    session_id: sessionId,
+    seq,
+    source: "claude",
+    ts: 1_000_000,
+    task_json: JSON.stringify({
+      id: `task-${sessionId}-${seq}`,
+      source: "claude",
+      sourceSessionId: sessionId,
+      description,
+      evidence: "",
+      evidenceKind: "llm_inference",
+      position: { originKey: "x", recordIndex: 0, itemIndex: 0 },
+    }),
+  });
+}
+
 // ---- Schema creation -------------------------------------------------------------------
 
 describe("schema", () => {
@@ -283,7 +303,9 @@ describe("schema", () => {
 
     const raw = await openRaw(dbPath);
     await rawExec(raw,
-      `DROP TABLE resolved_session_labels;
+      `DROP TABLE hub_task_labels;
+       DROP TABLE hub_labels;
+       DROP TABLE resolved_session_labels;
        ALTER TABLE resolved_sessions DROP COLUMN title;
        ALTER TABLE resolved_sessions DROP COLUMN summary;
        DROP INDEX users_group;
@@ -312,6 +334,13 @@ describe("schema", () => {
       const groupsTable = await rawGet<{ name: string }>(
         db, "SELECT name FROM sqlite_schema WHERE type='table' AND name='groups'");
       expect(groupsTable?.name).toBe("groups");
+
+      const hubLabelsTable = await rawGet<{ name: string }>(
+        db, "SELECT name FROM sqlite_schema WHERE type='table' AND name='hub_labels'");
+      expect(hubLabelsTable?.name).toBe("hub_labels");
+      const hubTaskLabelsTable = await rawGet<{ name: string }>(
+        db, "SELECT name FROM sqlite_schema WHERE type='table' AND name='hub_task_labels'");
+      expect(hubTaskLabelsTable?.name).toBe("hub_task_labels");
 
       const userCols = (await rawAll<{ name: string }>(db, "PRAGMA table_info(users)")).map((c) => c.name);
       expect(userCols).toContain("group_id");
@@ -1095,5 +1124,115 @@ describe("readWindowFrictionRollup", () => {
     expect(friction.rejections).toBe(1);
     expect(friction.compactions).toBe(2);
     expect(friction.turns).toBe(9);
+  });
+});
+
+describe("hub labels", () => {
+  test("createLabel rejects duplicate names within an org (case-insensitive)", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    await store.createLabel(orgId, "Bug fix", "manual", null);
+    await expect(store.createLabel(orgId, "bug fix", "manual", null)).rejects.toBeInstanceOf(DuplicateLabelNameError);
+
+    await store.close();
+  });
+
+  test("listLabels reports non-removed task counts", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+
+    const rows = minimalUploadRows("sess-labels");
+    addTask(rows, "sess-labels", 0, "Fix the login bug");
+    addTask(rows, "sess-labels", 1, "Write docs");
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+
+    const label = await store.createLabel(orgId, "Bug fix", "manual", null);
+    await store.setTaskLabel(orgId, { clientId, sessionId: "sess-labels", taskSeq: 0 }, label.labelId, "manual", true);
+    await store.setTaskLabel(orgId, { clientId, sessionId: "sess-labels", taskSeq: 1 }, label.labelId, "manual", true);
+
+    let listed = await store.listLabels(orgId);
+    expect(listed.find((l) => l.labelId === label.labelId)?.taskCount).toBe(2);
+
+    // Removing on one task is sticky and drops the count.
+    await store.setTaskLabel(orgId, { clientId, sessionId: "sess-labels", taskSeq: 1 }, label.labelId, "manual", false);
+    listed = await store.listLabels(orgId);
+    expect(listed.find((l) => l.labelId === label.labelId)?.taskCount).toBe(1);
+
+    await store.close();
+  });
+
+  test("setTaskLabel throws LabelNotFoundError for an unknown labelId", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+    await syncAs(store, orgId, clientId, "alice@example.com", minimalUploadRows("sess-x"), 1_000_000);
+
+    await expect(
+      store.setTaskLabel(orgId, { clientId, sessionId: "sess-x", taskSeq: 0 }, "label-nope", "manual", true),
+    ).rejects.toBeInstanceOf(LabelNotFoundError);
+
+    await store.close();
+  });
+
+  test("applyLabelToTasks (bulk/backfill) skips a task with a sticky removed override", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+
+    const rows = minimalUploadRows("sess-bulk");
+    addTask(rows, "sess-bulk", 0, "Fix the login bug");
+    addTask(rows, "sess-bulk", 1, "Refactor the login bug fix");
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+
+    const label = await store.createLabel(orgId, "Bug fix", "auto", "Tasks about fixing bugs");
+    // Admin rejects task 1 as a non-match up front.
+    await store.setTaskLabel(orgId, { clientId, sessionId: "sess-bulk", taskSeq: 1 }, label.labelId, "manual", false);
+
+    await store.applyLabelToTasks(
+      orgId,
+      label.labelId,
+      [
+        { clientId, sessionId: "sess-bulk", taskSeq: 0 },
+        { clientId, sessionId: "sess-bulk", taskSeq: 1 },
+      ],
+      "auto",
+    );
+
+    const byTasks = await store.listLabelsForTasks(orgId, [
+      { clientId, sessionId: "sess-bulk", taskSeq: 0 },
+      { clientId, sessionId: "sess-bulk", taskSeq: 1 },
+    ]);
+    expect(byTasks.get(`${clientId}:sess-bulk:0`)?.map((l) => l.labelId)).toEqual([label.labelId]);
+    expect(byTasks.get(`${clientId}:sess-bulk:1`)).toBeUndefined();
+
+    await store.close();
+  });
+
+  test("deleteLabel removes every application of it", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+
+    const rows = minimalUploadRows("sess-del");
+    addTask(rows, "sess-del", 0, "Fix the login bug");
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+
+    const label = await store.createLabel(orgId, "Bug fix", "manual", null);
+    await store.setTaskLabel(orgId, { clientId, sessionId: "sess-del", taskSeq: 0 }, label.labelId, "manual", true);
+    await store.deleteLabel(orgId, label.labelId);
+
+    const listed = await store.listLabels(orgId);
+    expect(listed.find((l) => l.labelId === label.labelId)).toBeUndefined();
+    const byTasks = await store.listLabelsForTasks(orgId, [{ clientId, sessionId: "sess-del", taskSeq: 0 }]);
+    expect(byTasks.size).toBe(0);
+
+    await store.close();
   });
 });

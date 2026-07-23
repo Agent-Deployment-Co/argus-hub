@@ -3,7 +3,13 @@ import { Hono, type Context } from "hono";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DuplicateGroupNameError, GroupNotFoundError, type HubStore } from "../store/hub-store.ts";
+import {
+  DuplicateGroupNameError,
+  DuplicateLabelNameError,
+  GroupNotFoundError,
+  LabelNotFoundError,
+  type HubStore,
+} from "../store/hub-store.ts";
 import { syncHandler, unknownSessionsHandler } from "./sync.ts";
 import { mountMcp } from "./mcp.ts";
 import { assembleDashboard } from "../reporting/snapshot.ts";
@@ -13,6 +19,8 @@ import { openSnowflakeZipStream } from "../export/snowflake.ts";
 import { computeRecommendations } from "./recommendations.ts";
 import { buildSessionList, buildSessionDetail, type SessionListParams } from "./session-list.ts";
 import { buildTaskList, type TaskListParams } from "./task-list.ts";
+import { attachLabels, parseTaskRef, runCandidateSearch } from "./task-labels.ts";
+import type { ClassifyBatch } from "../classify/task-labeler.ts";
 import type { SessionSort } from "./session-list.ts";
 import {
   parseResolvedQuery as parseResolvedQueryFrom,
@@ -46,11 +54,17 @@ function requestHost(c: Context): string | undefined {
 
 // ---- App factory (pure wiring, no networking) -------------------------------------------
 
+export interface HubAppDeps {
+  /** Override the label candidate-search classifier (default: the real Anthropic-backed one).
+   *  Tests inject a stub here instead of hitting the network. */
+  classifyBatch?: ClassifyBatch;
+}
+
 /** Build the Hub Hono app. Pure wiring — no listening, no I/O — so tests can call
  *  `app.request(...)` directly without starting a real server.
  *  `auth` is required in production (passed by cli.ts); omit in tests that don't
  *  exercise the login flow — routes are open when auth is undefined. */
-export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
+export function createHubApp(store: HubStore, auth?: AdminAuth, deps?: HubAppDeps): Hono {
   const app = new Hono();
 
   // ---- Health check (no auth) ---------------------------------------------------
@@ -252,6 +266,111 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     return c.json({ ok: true });
   });
 
+  // ---- Hub labels -------------------------------------------------------------------
+  //
+  // Distinct from the client-synced resolved_session_labels: these are defined and applied by
+  // the Hub itself. Manual labels are created and applied directly; auto labels are seeded by
+  // an LLM candidate search (POST /api/labels/candidates) that the admin reviews before
+  // creating the label with the accepted refs — that single create-with-refs call both commits
+  // the label and backfills it onto the reviewed tasks (see ARGUS_HUB_LABELS_PLAN.md).
+
+  app.get("/api/labels", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ labels: [] });
+    const labels = await store.listLabels(orgId);
+    return c.json({ labels });
+  });
+
+  // Preview which existing tasks match a prospective auto-label's description, without creating
+  // anything yet. The admin reviews this list (removing non-matches) before POSTing /api/labels
+  // with the accepted refs.
+  app.post("/api/labels/candidates", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+
+    const body = await c.req.json().catch(() => null) as { name?: unknown; description?: unknown } | null;
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    const description = typeof body?.description === "string" ? body.description.trim() : "";
+    if (!name) return c.json({ error: 'Missing required "name".' }, 400);
+    if (!description) return c.json({ error: 'Missing required "description".' }, 400);
+
+    try {
+      const result = await runCandidateSearch(store, orgId, name, description, deps?.classifyBatch);
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Candidate search failed." }, 502);
+    }
+  });
+
+  // Create a label. Manual labels are created bare; auto labels are created with the reviewed
+  // set of task refs from /api/labels/candidates and applied to them in the same call.
+  app.post("/api/labels", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+
+    const body = await c.req.json().catch(() => null) as {
+      name?: unknown; kind?: unknown; description?: unknown; taskRefs?: unknown;
+    } | null;
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    if (!name) return c.json({ error: 'Missing required "name".' }, 400);
+    const kind = body?.kind === "auto" ? "auto" : "manual";
+    const description = typeof body?.description === "string" && body.description.trim()
+      ? body.description.trim()
+      : null;
+    if (kind === "auto" && !description) {
+      return c.json({ error: 'Auto labels require a "description".' }, 400);
+    }
+
+    const refs = Array.isArray(body?.taskRefs)
+      ? body.taskRefs.map((r) => parseTaskRef(r as Record<string, unknown>)).filter((r) => r !== null)
+      : [];
+
+    try {
+      const label = await store.createLabel(orgId, name, kind, description);
+      if (kind === "auto" && refs.length) {
+        await store.applyLabelToTasks(orgId, label.labelId, refs, "auto");
+      }
+      return c.json({ label: { ...label, taskCount: refs.length } }, 201);
+    } catch (err) {
+      if (err instanceof DuplicateLabelNameError) return c.json({ error: err.message }, 409);
+      throw err;
+    }
+  });
+
+  app.delete("/api/labels/:labelId", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+    const labelId = c.req.param("labelId").trim();
+
+    if (!(await store.labelExists(orgId, labelId))) return c.json({ error: "Label not found." }, 404);
+    await store.deleteLabel(orgId, labelId);
+    return c.json({ ok: true });
+  });
+
+  // Apply or remove one label on one task. `applied: false` is a sticky override (survives
+  // future candidate-search runs for the same label), not a hard delete.
+  app.post("/api/task-labels", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+
+    const body = await c.req.json().catch(() => null) as {
+      labelId?: unknown; applied?: unknown; clientId?: unknown; sessionId?: unknown; taskSeq?: unknown;
+    } | null;
+    const labelId = typeof body?.labelId === "string" ? body.labelId : "";
+    if (!labelId) return c.json({ error: 'Missing required "labelId".' }, 400);
+    const applied = body?.applied !== false;
+    const ref = parseTaskRef(body ?? {});
+    if (!ref) return c.json({ error: 'Missing or invalid "clientId"/"sessionId"/"taskSeq".' }, 400);
+
+    try {
+      await store.setTaskLabel(orgId, ref, labelId, "manual", applied);
+    } catch (err) {
+      if (err instanceof LabelNotFoundError) return c.json({ error: err.message }, 404);
+      throw err;
+    }
+    return c.json({ ok: true });
+  });
+
   // Clients in the org with their fingerprint snapshot + current user mapping.
   app.get("/api/clients", async (c) => {
     const orgId = await store.getDefaultOrgId();
@@ -353,7 +472,13 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
       q: c.req.query("q") || undefined,
       outcomes,
     };
-    return c.json(buildTaskList(taskRows, params));
+    const result = buildTaskList(taskRows, params);
+    const labelsByKey = await store.listLabelsForTasks(
+      orgId,
+      result.rows.map((r) => ({ clientId: r.clientId, sessionId: r.sessionId, taskSeq: r.taskSeq })),
+    );
+    attachLabels(result.rows, labelsByKey);
+    return c.json(result);
   });
 
   // ---- Task report (Page 2 — Tasks) ----------------------------------------------
