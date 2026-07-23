@@ -270,7 +270,8 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     if (typeof query === "string") return c.json({ error: query }, 400);
 
     const userId = parseUserScope(c);
-    const aggregates = await store.readDashboardAggregates({ orgId, userId }, query);
+    const groupId = parseGroupIdScope(c);
+    const aggregates = await store.readDashboardAggregates({ orgId, userId, groupId }, query);
     if (aggregates.sessionsBySource.length === 0) return c.json({ error: "No data yet." }, 503);
     const dashboard = assembleDashboard(aggregates, loadPlugins());
     const generatedAtMs = Date.now();

@@ -15,8 +15,11 @@ function str(v: unknown): string | undefined {
 
 function validateSnapshotSearch(
   search: Record<string, unknown>,
-): { since?: string; until?: string; source?: string; group?: string } {
-  return { since: str(search.since), until: str(search.until), source: str(search.source), group: str(search.group) };
+): { since?: string; until?: string; source?: string; user?: string; group?: string } {
+  return {
+    since: str(search.since), until: str(search.until), source: str(search.source),
+    user: str(search.user), group: str(search.group),
+  };
 }
 
 const routeTree = rootRoute.addChildren([
