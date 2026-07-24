@@ -58,7 +58,7 @@ export function parseClassifierOutput(text: string, tasks: ClassifyTaskInput[]):
 export function createProviderClassifier(
   config: ResolvedLlmConfig,
   deps: LlmClientDeps = {},
-  timeoutMs = 20_000,
+  timeoutMs = 40_000,
 ): ClassifyBatch {
   return async (labelName, labelDescription, tasks) => {
     const controller = new AbortController();
