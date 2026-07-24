@@ -3,7 +3,13 @@ import { Hono, type Context } from "hono";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DuplicateGroupNameError, GroupNotFoundError, type HubStore } from "../store/hub-store.ts";
+import {
+  DuplicateGroupNameError,
+  DuplicateLabelNameError,
+  GroupNotFoundError,
+  LabelNotFoundError,
+  type HubStore,
+} from "../store/hub-store.ts";
 import { syncHandler, unknownSessionsHandler } from "./sync.ts";
 import { mountMcp } from "./mcp.ts";
 import { assembleDashboard } from "../reporting/snapshot.ts";
@@ -13,6 +19,7 @@ import { openSnowflakeZipStream } from "../export/snowflake.ts";
 import { computeRecommendations } from "./recommendations.ts";
 import { buildSessionList, buildSessionDetail, type SessionListParams } from "./session-list.ts";
 import { buildTaskList, type TaskListParams } from "./task-list.ts";
+import { attachLabels, parseTaskRef } from "./task-labels.ts";
 import type { SessionSort } from "./session-list.ts";
 import {
   parseResolvedQuery as parseResolvedQueryFrom,
@@ -252,6 +259,68 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     return c.json({ ok: true });
   });
 
+  // ---- Hub labels -------------------------------------------------------------------
+  //
+  // Distinct from the client-synced resolved_session_labels: these are created and applied
+  // directly by a hub admin.
+
+  app.get("/api/labels", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ labels: [] });
+    const labels = await store.listLabels(orgId);
+    return c.json({ labels });
+  });
+
+  app.post("/api/labels", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+
+    const body = await c.req.json().catch(() => null) as { name?: unknown } | null;
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    if (!name) return c.json({ error: 'Missing required "name".' }, 400);
+
+    try {
+      const label = await store.createLabel(orgId, name);
+      return c.json({ label }, 201);
+    } catch (err) {
+      if (err instanceof DuplicateLabelNameError) return c.json({ error: err.message }, 409);
+      throw err;
+    }
+  });
+
+  app.delete("/api/labels/:labelId", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+    const labelId = c.req.param("labelId").trim();
+
+    if (!(await store.labelExists(orgId, labelId))) return c.json({ error: "Label not found." }, 404);
+    await store.deleteLabel(orgId, labelId);
+    return c.json({ ok: true });
+  });
+
+  // Apply or remove one label on one task.
+  app.post("/api/task-labels", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+
+    const body = await c.req.json().catch(() => null) as {
+      labelId?: unknown; applied?: unknown; clientId?: unknown; sessionId?: unknown; taskSeq?: unknown;
+    } | null;
+    const labelId = typeof body?.labelId === "string" ? body.labelId : "";
+    if (!labelId) return c.json({ error: 'Missing required "labelId".' }, 400);
+    const applied = body?.applied !== false;
+    const ref = parseTaskRef(body ?? {});
+    if (!ref) return c.json({ error: 'Missing or invalid "clientId"/"sessionId"/"taskSeq".' }, 400);
+
+    try {
+      await store.setTaskLabel(orgId, ref, labelId, applied);
+    } catch (err) {
+      if (err instanceof LabelNotFoundError) return c.json({ error: err.message }, 404);
+      throw err;
+    }
+    return c.json({ ok: true });
+  });
+
   // Clients in the org with their fingerprint snapshot + current user mapping.
   app.get("/api/clients", async (c) => {
     const orgId = await store.getDefaultOrgId();
@@ -353,7 +422,13 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
       q: c.req.query("q") || undefined,
       outcomes,
     };
-    return c.json(buildTaskList(taskRows, params));
+    const result = buildTaskList(taskRows, params);
+    const labelsByKey = await store.listLabelsForTasks(
+      orgId,
+      result.rows.map((r) => ({ clientId: r.clientId, sessionId: r.sessionId, taskSeq: r.taskSeq })),
+    );
+    attachLabels(result.rows, labelsByKey);
+    return c.json(result);
   });
 
   // ---- Task report (Page 2 — Tasks) ----------------------------------------------

@@ -422,6 +422,9 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 .group-section th:nth-child(7), .group-section td:nth-child(7) { width: 110px; }
 
 .group-move-btn { height: 26px; padding: 0 10px; font-size: 11.5px; }
+.task-label-btn { height: 26px; padding: 0 10px; font-size: 11.5px; }
+.task-label-popover { width: 260px; }
+.pill.label-pill { color: var(--accent); border-color: var(--accent); }
 /* Positioned inline (position: fixed + top/left) by GroupPicker, since it's portaled to
    document.body to escape the group table's `.scroll` (overflow: auto) container. */
 .group-popover { z-index: 20; width: 240px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 10px 30px rgba(0,0,0,.28); }

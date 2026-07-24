@@ -199,6 +199,10 @@ user, or leave it on "All users" for an org-wide view. The **Users** tab (rail l
 hub mode) shows a per-user summary table — sessions, total tokens, estimated cost, and last-sync
 time — sortable by any column.
 
+The **Labels** tab manages hub-level task labels — distinct from any labels an Argus client
+applies itself. Create a label there, then apply or remove it on individual tasks from the
+Tasks tab.
+
 ---
 
 ## Query the Hub from an agent (MCP)
