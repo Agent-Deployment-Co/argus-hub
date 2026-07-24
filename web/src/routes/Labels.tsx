@@ -74,7 +74,7 @@ export function Labels() {
               {labels.map((label) => (
                 <tr key={label.labelId}>
                   <td>
-                    <span className="table-link" style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
                       <Tag size={13} strokeWidth={2} aria-hidden /> {label.name}
                     </span>
                   </td>
@@ -200,9 +200,12 @@ function CreateAutoLabelDialog({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Modal title="New auto label" onClose={onClose}>
+    <Modal title="New auto label" onClose={onClose} className="auto-label-modal">
       {step === "describe" ? (
         <form className="modal-form" onSubmit={onSearch}>
+          <p className="auto-label-intro">
+            Describe the label and Argus will suggest matching tasks for you to review.
+          </p>
           <label className="modal-field">
             <span>Name</span>
             <input
@@ -220,7 +223,7 @@ function CreateAutoLabelDialog({ onClose }: { onClose: () => void }) {
               rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Describe what tasks should get this label — the hub searches existing tasks for matches."
+              placeholder="Which tasks belong under this label?"
             />
           </label>
           {search.isError && <p className="modal-error">{(search.error as Error).message}</p>}
@@ -237,39 +240,39 @@ function CreateAutoLabelDialog({ onClose }: { onClose: () => void }) {
         </form>
       ) : (
         <div className="modal-form">
-          <p className="modal-copy">
-            Found {candidates.length} matching task{candidates.length === 1 ? "" : "s"} out of{" "}
-            {meta?.consideredCount ?? 0} considered
-            {meta?.truncated ? " (only the most recent tasks were searched)" : ""}. Remove any that
-            don't belong before creating the label — removed tasks stay excluded even if they'd
-            match again later.
-          </p>
+          <div className="auto-label-summary">
+            <div>
+              <strong>{kept.length} selected</strong>
+              <span> from {candidates.length} suggestion{candidates.length === 1 ? "" : "s"}</span>
+            </div>
+            <span className="muted">
+              {meta?.consideredCount ?? 0} tasks searched{meta?.truncated ? " · recent tasks only" : ""}
+            </span>
+          </div>
           {candidates.length === 0 ? (
             <p className="muted">No matching tasks found.</p>
           ) : (
-            <div className="scroll" style={{ maxHeight: "16rem" }}>
-              <ul className="tasks">
+            <div className="auto-label-candidates">
+              <ul>
                 {candidates.map((c) => {
                   const key = candidateKey(c);
                   const isRemoved = removed.has(key);
                   return (
                     <li key={key}>
-                      <div className={`task-item${isRemoved ? " label-candidate-removed" : ""}`}>
-                        <span className="task-item-desc">{c.description}</span>
-                        <button
-                          type="button"
-                          className="btn-secondary"
-                          onClick={() =>
+                      <label className={isRemoved ? "label-candidate-removed" : ""}>
+                        <input
+                          type="checkbox"
+                          checked={!isRemoved}
+                          onChange={() =>
                             setRemoved((prev) => {
                               const next = new Set(prev);
                               if (next.has(key)) next.delete(key); else next.add(key);
                               return next;
                             })
                           }
-                        >
-                          {isRemoved ? "Include" : "Remove"}
-                        </button>
-                      </div>
+                        />
+                        <span>{c.description}</span>
+                      </label>
                     </li>
                   );
                 })}
@@ -280,7 +283,7 @@ function CreateAutoLabelDialog({ onClose }: { onClose: () => void }) {
           <div className="modal-actions">
             <button type="button" className="btn-secondary" onClick={() => setStep("describe")}>Back</button>
             <button type="button" className="btn-primary" onClick={onCommit} disabled={createLabel.isPending}>
-              {createLabel.isPending ? "Creating…" : `Create label & apply to ${kept.length} task${kept.length === 1 ? "" : "s"}`}
+              {createLabel.isPending ? "Creating…" : "Create label"}
             </button>
           </div>
         </div>

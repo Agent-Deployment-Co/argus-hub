@@ -472,9 +472,29 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 .modal-form { display: flex; flex-direction: column; gap: 14px; }
 .modal-field { display: flex; flex-direction: column; gap: 6px; font: 600 12px "Poppins", "Avenir Next", Arial, sans-serif; color: var(--muted); }
 .modal-field .filter-input { height: 34px; width: 100%; }
+.modal-field textarea.filter-input { height: auto; min-height: 78px; resize: vertical; line-height: 1.45; padding-top: 8px; }
 .modal-copy { color: var(--text); font-size: 13.5px; line-height: 1.5; margin: 0 0 14px; }
 .modal-error { color: var(--racing-red); font-size: 12.5px; margin: 0; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.auto-label-modal { max-width: 520px; }
+.auto-label-intro { margin: -4px 0 2px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.auto-label-summary {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--line); font-size: 12px;
+}
+.auto-label-summary strong { color: var(--heading); font-size: 14px; }
+.auto-label-candidates {
+  max-height: min(42vh, 20rem); overflow-y: auto; border: 1px solid var(--line); border-radius: 9px;
+}
+.auto-label-candidates ul { margin: 0; padding: 0; list-style: none; }
+.auto-label-candidates li + li { border-top: 1px solid var(--line); }
+.auto-label-candidates label {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+  color: var(--text); font-size: 13px; line-height: 1.4; cursor: pointer;
+}
+.auto-label-candidates label:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.auto-label-candidates input { flex: 0 0 auto; width: 14px; height: 14px; margin: 2px 0 0; accent-color: var(--accent); }
+.auto-label-candidates .label-candidate-removed { opacity: .55; text-decoration: none; }
 @media (max-width: 640px) {
   /* Force the rail to its icon-only width on narrow screens. */
   .app-shell { --rail-w: 60px; }
@@ -483,6 +503,7 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
   .rail-brand, .rail-link { justify-content: center; padding-left: 0; padding-right: 0; }
   .rail-footer { flex-direction: column-reverse; }
   main { padding-left: 18px; padding-right: 18px; }
+  .auto-label-summary { align-items: flex-start; flex-direction: column; gap: 2px; }
   .filter-bar { margin-left: -18px; margin-right: -18px; padding-left: 18px; padding-right: 18px; gap: 12px; }
   main:has(.sessions-split) .filter-bar { margin: 0; }
 }
