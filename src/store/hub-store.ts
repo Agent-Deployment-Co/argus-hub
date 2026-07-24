@@ -17,7 +17,7 @@ import type {
 } from "../types.ts";
 import { emptyFrictionTotals, foldFriction, HIGH_TOKEN_GROWTH_RATIO } from "../health.ts";
 
-export const HUB_SCHEMA_VERSION = 3;
+export const HUB_SCHEMA_VERSION = 4;
 export const HUB_APPLICATION_ID = 0x48554200; // "HUB\0"
 
 // ---- Raw row types (mirrors client argus.db resolved_* column shapes) -------------------
@@ -289,6 +289,37 @@ const RESOLVED_SESSION_LABELS_DDL = `
   CREATE INDEX resolved_session_labels_name  ON resolved_session_labels(org_id, name);
 `;
 
+const ORGANIZATION_LLM_SETTINGS_DDL = `
+  CREATE TABLE organization_task_llm (
+    org_id     TEXT PRIMARY KEY REFERENCES organizations(org_id) ON DELETE CASCADE,
+    provider   TEXT,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE organization_llm_provider_configs (
+    org_id     TEXT NOT NULL REFERENCES organizations(org_id) ON DELETE CASCADE,
+    provider   TEXT NOT NULL,
+    model      TEXT,
+    base_url   TEXT,
+    effort     TEXT,
+    command    TEXT,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (org_id, provider)
+  );
+
+  CREATE TABLE organization_llm_secrets (
+    org_id      TEXT NOT NULL REFERENCES organizations(org_id) ON DELETE CASCADE,
+    provider    TEXT NOT NULL,
+    ciphertext BLOB NOT NULL,
+    nonce       BLOB NOT NULL,
+    auth_tag    BLOB NOT NULL,
+    hint        TEXT NOT NULL,
+    key_version INTEGER NOT NULL DEFAULT 1,
+    updated_at  INTEGER NOT NULL,
+    PRIMARY KEY (org_id, provider)
+  );
+`;
+
 const CREATE_HUB_SCHEMA_SQL = `
   CREATE TABLE organizations (
     org_id     TEXT PRIMARY KEY,
@@ -473,6 +504,7 @@ const CREATE_HUB_SCHEMA_SQL = `
   CREATE INDEX resolved_invocations_mcp_server ON resolved_invocations(mcp_server) WHERE mcp_server IS NOT NULL;
   CREATE INDEX resolved_invocations_skill      ON resolved_invocations(skill) WHERE skill IS NOT NULL;
   ${RESOLVED_SESSION_LABELS_DDL}
+  ${ORGANIZATION_LLM_SETTINGS_DDL}
 `;
 
 // Forward-only, in-place migrations keyed by the version they upgrade FROM. Each step is purely
@@ -498,6 +530,8 @@ const HUB_MIGRATIONS: Record<number, string> = {
     ALTER TABLE users ADD COLUMN group_id TEXT REFERENCES groups(group_id);
     CREATE INDEX users_group ON users(org_id, group_id);
   `,
+  // v3 → v4: organization-scoped task LLM settings and encrypted secrets.
+  3: ORGANIZATION_LLM_SETTINGS_DDL,
 };
 
 // ---- DB open / init ---------------------------------------------------------------------
