@@ -1,6 +1,6 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { Activity, Download, ListTodo, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Sun, Users, Wrench, type LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../lib/theme";
 import { useUserInfo } from "../lib/users";
 import { Modal } from "./Modal";
@@ -40,6 +40,12 @@ const ROUTE_TITLES: Record<string, string> = {
   "/export": "Export · Argus Hub",
 };
 
+const SettingsBackContext = createContext("/");
+
+export function useSettingsBackHref(): string {
+  return useContext(SettingsBackContext);
+}
+
 /** Route-aware document.title: per-route labels, plus the loaded display name for a user's
  *  activity page (read from the react-query cache rather than re-fetching here). */
 function useDocumentTitle() {
@@ -48,6 +54,10 @@ function useDocumentTitle() {
   const userId = params?.userId;
   const userInfo = useUserInfo(userId ?? "", !!userId);
   useEffect(() => {
+    if (pathname.startsWith("/settings")) {
+      document.title = "Tasks Settings · Argus Hub";
+      return;
+    }
     if (userId) {
       document.title = `${userInfo.data?.displayName ?? userId} · Argus Hub`;
       return;
@@ -92,7 +102,11 @@ function LogoutDialog({ onClose }: { onClose: () => void }) {
 
 export function Layout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const href = useRouterState({ select: (s) => s.location.href });
   useDocumentTitle();
+  const lastAppHref = useRef("/");
+  const inSettings = pathname === "/settings" || pathname.startsWith("/settings/");
+  if (!inSettings) lastAppHref.current = href;
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [confirmingLogout, setConfirmingLogout] = useState(false);
   const toggleRail = useCallback(() => {
@@ -102,6 +116,14 @@ export function Layout() {
       return next;
     });
   }, []);
+
+  if (inSettings) {
+    return (
+      <SettingsBackContext.Provider value={lastAppHref.current}>
+        <Outlet />
+      </SettingsBackContext.Provider>
+    );
+  }
 
   return (
     <div className={`app-shell${collapsed ? " rail-collapsed" : ""}`}>
