@@ -90,13 +90,16 @@ export const SNOWFLAKE_EXPORT_TABLES: readonly ExportTable[] = [
   },
   {
     name: "hub_labels",
-    columns: [text("label_id"), text("org_id"), text("name"), number("created_at")],
+    columns: [
+      text("label_id"), text("org_id"), text("name"), text("description"), text("kind"),
+      number("created_at"),
+    ],
   },
   {
     name: "hub_task_labels",
     columns: [
       text("org_id"), text("client_id"), text("session_id"), number("task_seq"), text("label_id"),
-      number("applied_at_ms"),
+      text("applied_by"), number("removed"), number("applied_at_ms"),
     ],
   },
 ] as const;

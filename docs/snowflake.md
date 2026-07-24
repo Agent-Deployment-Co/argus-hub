@@ -25,7 +25,7 @@ place.
 | Activity | `RESOLVED_USAGE` | Token usage, model attribution, dates, and raw usage records |
 | Work | `RESOLVED_TASKS`, `RESOLVED_INTERACTIONS` | Extracted tasks, outcomes, and raw task/interaction records |
 | Tools | `RESOLVED_INVOCATIONS` | Tool, MCP, skill, file-path, argument, and result-size observations |
-| Hub labels | `HUB_LABELS`, `HUB_TASK_LABELS` | Hub-defined task labels and their per-task applications — distinct from the client-synced `RESOLVED_SESSION_LABELS` |
+| Hub labels | `HUB_LABELS`, `HUB_TASK_LABELS` | Hub-defined manual or automatic task labels and their per-task applications — distinct from the client-synced `RESOLVED_SESSION_LABELS` |
 
 The `api_keys` table is deliberately excluded, including its key hashes. JSON payload columns
 such as `META_JSON`, `RECORD_JSON`, and `TASK_JSON` are loaded as Snowflake `VARIANT`; epoch

@@ -286,8 +286,11 @@ Deleting a group **ungroups** its members rather than deleting them — `groupId
 each affected user, the users themselves are untouched.
 
 The **Labels** tab manages hub-level task labels — distinct from any labels an Argus client
-applies itself. Create a label there, then apply or remove it on individual tasks from the
-Tasks tab.
+applies itself. Manual labels can always be created and applied from the Tasks tab. When
+automatic task tagging is enabled in **Settings → Tasks**, an administrator can describe an
+automatic label, review provider-selected candidates, and backfill the accepted tasks. New and
+materially changed tasks are then classified asynchronously through the same saved provider.
+Manual removals are sticky and are not reapplied by later automatic classification.
 
 ---
 

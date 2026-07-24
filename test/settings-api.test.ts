@@ -19,6 +19,38 @@ async function env(): Promise<{ store: HubStore; app: ReturnType<typeof createHu
 }
 
 describe("settings API", () => {
+  const put = (app: ReturnType<typeof createHubApp>, path: string, value: unknown) =>
+    app.request(`/api/settings/${path}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value }),
+    });
+
+  test("automatic tagging requires saved usable provider state and turns off if it becomes incomplete", async () => {
+    const { store, app } = await env();
+    expect((await put(app, "automaticTaggingEnabled", true)).status).toBe(400);
+
+    await put(app, "llm.provider", "command");
+    expect((await put(app, "automaticTaggingEnabled", true)).status).toBe(400);
+    await put(app, "llm.providerConfigs.command.command", "fake-classifier");
+    expect((await put(app, "automaticTaggingEnabled", true)).status).toBe(200);
+    expect((await store.readTaskLlmSettings((await store.getDefaultOrgId())!)).automaticTaggingEnabled).toBe(true);
+    await put(app, "llm.providerConfigs.command.command", "");
+    expect((await store.readTaskLlmSettings((await store.getDefaultOrgId())!)).automaticTaggingEnabled).toBe(false);
+
+    await put(app, "llm.provider", "openai");
+    expect((await put(app, "automaticTaggingEnabled", true)).status).toBe(400);
+    await app.request("/api/settings/secrets/openai", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value: "sk-test" }),
+    });
+    expect((await put(app, "automaticTaggingEnabled", true)).status).toBe(200);
+    await app.request("/api/settings/secrets/openai", { method: "DELETE" });
+    expect((await store.readTaskLlmSettings((await store.getDefaultOrgId())!)).automaticTaggingEnabled).toBe(false);
+    await store.close();
+  });
+
   test("all settings routes use the existing administrator session middleware", async () => {
     const { store } = await env();
     const auth = createAdminAuth("secret");
