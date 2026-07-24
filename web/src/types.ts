@@ -368,6 +368,8 @@ export interface TaskReport {
 export interface TaskListItemLabel {
   labelId: string;
   name: string;
+  kind: "manual" | "auto";
+  appliedBy: "manual" | "auto";
 }
 
 /** Mirrors hub/src/api/task-list.ts's TaskListItem, served at GET /api/tasks. */

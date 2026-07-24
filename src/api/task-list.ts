@@ -4,6 +4,8 @@ import type { AgentSource, TaskFact } from "../types.ts";
 export interface TaskListItemLabel {
   labelId: string;
   name: string;
+  kind: "manual" | "auto";
+  appliedBy: "manual" | "auto";
 }
 
 export interface TaskListItem {
@@ -49,7 +51,8 @@ export interface TaskListParams {
 
 // Labels aren't populated here: buildTaskList works over the full (unpaged) filtered set, but
 // labels only need to be fetched for the page actually returned. The caller (serve.ts) fills
-// `labels` in after slicing, via the task-labels.ts helper `attachLabels`.
+// `labels` in after slicing, keyed by `${clientId}:${sessionId}:${taskSeq}` (see task-labels.ts
+// helper `taskLabelKey`).
 function listItem(row: HubTaskRow): TaskListItem {
   const t: TaskFact = row.task;
   return {

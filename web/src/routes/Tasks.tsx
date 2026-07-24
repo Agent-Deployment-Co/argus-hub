@@ -235,7 +235,7 @@ export function Tasks() {
                   <span className="task-item-desc">{t.description}</span>
                   <span className="pill">{compactProject(t.project)}</span>
                   {t.labels.map((l) => (
-                    <span key={l.labelId} className="pill label-pill">{l.name}</span>
+                    <span key={l.labelId} className={`pill label-kind-pill label-kind-${l.kind}`}>{l.name}</span>
                   ))}
                   {frust && <span className={`pill ${frust.cls}`}>{frust.label}</span>}
                   <span className={`pill ${outcome.cls}`}>{outcome.label}</span>

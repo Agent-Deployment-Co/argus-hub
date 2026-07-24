@@ -1273,13 +1273,13 @@ describe("hub labels", () => {
     const store = await openHubStore(dataDir, 1_000_000);
     const orgId = (await store.getDefaultOrgId())!;
 
-    await store.createLabel(orgId, "Bug fix");
-    await expect(store.createLabel(orgId, "bug fix")).rejects.toBeInstanceOf(DuplicateLabelNameError);
+    await store.createLabel(orgId, "Bug fix", "manual", null);
+    await expect(store.createLabel(orgId, "bug fix", "manual", null)).rejects.toBeInstanceOf(DuplicateLabelNameError);
 
     await store.close();
   });
 
-  test("listLabels reports applied task counts", async () => {
+  test("listLabels reports non-removed task counts", async () => {
     const dataDir = tempDataDir();
     const store = await openHubStore(dataDir, 1_000_000);
     const orgId = (await store.getDefaultOrgId())!;
@@ -1290,14 +1290,15 @@ describe("hub labels", () => {
     addTask(rows, "sess-labels", 1, "Write docs");
     await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
 
-    const label = await store.createLabel(orgId, "Bug fix");
-    await store.setTaskLabel(orgId, { clientId, sessionId: "sess-labels", taskSeq: 0 }, label.labelId, true);
-    await store.setTaskLabel(orgId, { clientId, sessionId: "sess-labels", taskSeq: 1 }, label.labelId, true);
+    const label = await store.createLabel(orgId, "Bug fix", "manual", null);
+    await store.setTaskLabel(orgId, { clientId, sessionId: "sess-labels", taskSeq: 0 }, label.labelId, true, "manual");
+    await store.setTaskLabel(orgId, { clientId, sessionId: "sess-labels", taskSeq: 1 }, label.labelId, true, "manual");
 
     let listed = await store.listLabels(orgId);
     expect(listed.find((l) => l.labelId === label.labelId)?.taskCount).toBe(2);
 
-    await store.setTaskLabel(orgId, { clientId, sessionId: "sess-labels", taskSeq: 1 }, label.labelId, false);
+    // Removing on one task is sticky and drops the count.
+    await store.setTaskLabel(orgId, { clientId, sessionId: "sess-labels", taskSeq: 1 }, label.labelId, false, "manual");
     listed = await store.listLabels(orgId);
     expect(listed.find((l) => l.labelId === label.labelId)?.taskCount).toBe(1);
 
@@ -1312,8 +1313,43 @@ describe("hub labels", () => {
     await syncAs(store, orgId, clientId, "alice@example.com", minimalUploadRows("sess-x"), 1_000_000);
 
     await expect(
-      store.setTaskLabel(orgId, { clientId, sessionId: "sess-x", taskSeq: 0 }, "label-nope", true),
+      store.setTaskLabel(orgId, { clientId, sessionId: "sess-x", taskSeq: 0 }, "label-nope", true, "manual"),
     ).rejects.toBeInstanceOf(LabelNotFoundError);
+
+    await store.close();
+  });
+
+  test("applyLabelToTasks (bulk/backfill) skips a task with a sticky removed override", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+
+    const rows = minimalUploadRows("sess-bulk");
+    addTask(rows, "sess-bulk", 0, "Fix the login bug");
+    addTask(rows, "sess-bulk", 1, "Refactor the login bug fix");
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+
+    const label = await store.createLabel(orgId, "Bug fix", "auto", "Tasks about fixing bugs");
+    // Admin rejects task 1 as a non-match up front.
+    await store.setTaskLabel(orgId, { clientId, sessionId: "sess-bulk", taskSeq: 1 }, label.labelId, false, "manual");
+
+    await store.applyLabelToTasks(
+      orgId,
+      label.labelId,
+      [
+        { clientId, sessionId: "sess-bulk", taskSeq: 0 },
+        { clientId, sessionId: "sess-bulk", taskSeq: 1 },
+      ],
+      "auto",
+    );
+
+    const byTasks = await store.listLabelsForTasks(orgId, [
+      { clientId, sessionId: "sess-bulk", taskSeq: 0 },
+      { clientId, sessionId: "sess-bulk", taskSeq: 1 },
+    ]);
+    expect(byTasks.get(`${clientId}:sess-bulk:0`)?.map((l) => l.labelId)).toEqual([label.labelId]);
+    expect(byTasks.get(`${clientId}:sess-bulk:1`)).toBeUndefined();
 
     await store.close();
   });
@@ -1328,8 +1364,8 @@ describe("hub labels", () => {
     addTask(rows, "sess-del", 0, "Fix the login bug");
     await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
 
-    const label = await store.createLabel(orgId, "Bug fix");
-    await store.setTaskLabel(orgId, { clientId, sessionId: "sess-del", taskSeq: 0 }, label.labelId, true);
+    const label = await store.createLabel(orgId, "Bug fix", "manual", null);
+    await store.setTaskLabel(orgId, { clientId, sessionId: "sess-del", taskSeq: 0 }, label.labelId, true, "manual");
     await store.deleteLabel(orgId, label.labelId);
 
     const listed = await store.listLabels(orgId);

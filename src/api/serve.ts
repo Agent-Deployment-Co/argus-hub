@@ -19,7 +19,9 @@ import { openSnowflakeZipStream } from "../export/snowflake.ts";
 import { computeRecommendations } from "./recommendations.ts";
 import { buildSessionList, buildSessionDetail, type SessionListParams } from "./session-list.ts";
 import { buildTaskList, type TaskListParams } from "./task-list.ts";
-import { attachLabels, parseTaskRef } from "./task-labels.ts";
+import { attachLabels, parseTaskRef, runCandidateSearch } from "./task-labels.ts";
+import type { ClassifyBatch } from "../classify/task-labeler.ts";
+import { createProviderClassifier } from "../classify/task-labeler.ts";
 import type { SessionSort } from "./session-list.ts";
 import {
   parseResolvedQuery as parseResolvedQueryFrom,
@@ -74,6 +76,7 @@ export interface HubAppOptions {
   fetch?: typeof fetch;
   executeCommand?: ExecuteCommand;
   connectionTimeoutMs?: number;
+  classifyBatch?: ClassifyBatch;
 }
 
 export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppOptions = {}): Hono {
@@ -402,8 +405,11 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
 
   // ---- Hub labels -------------------------------------------------------------------
   //
-  // Distinct from the client-synced resolved_session_labels: these are created and applied
-  // directly by a hub admin.
+  // Distinct from the client-synced resolved_session_labels: these are defined and applied by
+  // the Hub itself. Manual labels are created and applied directly; auto labels are seeded by
+  // an LLM candidate search (POST /api/labels/candidates) that the admin reviews before
+  // creating the label with the accepted refs — that single create-with-refs call both commits
+  // the label and backfills it onto the reviewed tasks (see ARGUS_HUB_LABELS_PLAN.md).
 
   app.get("/api/labels", async (c) => {
     const orgId = await store.getDefaultOrgId();
@@ -412,17 +418,68 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     return c.json({ labels });
   });
 
+  // Preview which existing tasks match a prospective auto-label's description, without creating
+  // anything yet. The admin reviews this list (removing non-matches) before POSTing /api/labels
+  // with the accepted refs.
+  app.post("/api/labels/candidates", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+
+    const body = await c.req.json().catch(() => null) as { name?: unknown; description?: unknown } | null;
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    const description = typeof body?.description === "string" ? body.description.trim() : "";
+    if (!name) return c.json({ error: 'Missing required "name".' }, 400);
+    if (!description) return c.json({ error: 'Missing required "description".' }, 400);
+
+    try {
+      const taskSettings = await store.readTaskLlmSettings(orgId);
+      if (!taskSettings.automaticTaggingEnabled) {
+        return c.json({ error: "Enable automatic task tagging in Tasks settings first." }, 400);
+      }
+      const classifier = options.classifyBatch ?? createProviderClassifier(
+        await resolveTaskLlmConfig(store, orgId, options.secretCipher),
+        { fetch: options.fetch, executeCommand: options.executeCommand },
+        options.connectionTimeoutMs,
+      );
+      const result = await runCandidateSearch(store, orgId, name, description, classifier);
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Candidate search failed." }, 502);
+    }
+  });
+
+  // Create a label. Manual labels are created bare; auto labels are created with the reviewed
+  // set of task refs from /api/labels/candidates and applied to them in the same call.
   app.post("/api/labels", async (c) => {
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
 
-    const body = await c.req.json().catch(() => null) as { name?: unknown } | null;
+    const body = await c.req.json().catch(() => null) as {
+      name?: unknown; kind?: unknown; description?: unknown; taskRefs?: unknown;
+    } | null;
     const name = typeof body?.name === "string" ? body.name.trim() : "";
     if (!name) return c.json({ error: 'Missing required "name".' }, 400);
+    const kind = body?.kind === "auto" ? "auto" : "manual";
+    const description = typeof body?.description === "string" && body.description.trim()
+      ? body.description.trim()
+      : null;
+    if (kind === "auto" && !description) {
+      return c.json({ error: 'Auto labels require a "description".' }, 400);
+    }
+    if (kind === "auto" && !(await store.readTaskLlmSettings(orgId)).automaticTaggingEnabled) {
+      return c.json({ error: "Enable automatic task tagging in Tasks settings first." }, 400);
+    }
+
+    const refs = Array.isArray(body?.taskRefs)
+      ? body.taskRefs.map((r) => parseTaskRef(r as Record<string, unknown>)).filter((r) => r !== null)
+      : [];
 
     try {
-      const label = await store.createLabel(orgId, name);
-      return c.json({ label }, 201);
+      const label = await store.createLabel(orgId, name, kind, description);
+      if (kind === "auto" && refs.length) {
+        await store.applyLabelToTasks(orgId, label.labelId, refs, "auto");
+      }
+      return c.json({ label: { ...label, taskCount: refs.length } }, 201);
     } catch (err) {
       if (err instanceof DuplicateLabelNameError) return c.json({ error: err.message }, 409);
       throw err;
@@ -439,7 +496,8 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     return c.json({ ok: true });
   });
 
-  // Apply or remove one label on one task.
+  // Apply or remove one label on one task. `applied: false` is a sticky override (survives
+  // future candidate-search runs for the same label), not a hard delete.
   app.post("/api/task-labels", async (c) => {
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
@@ -454,7 +512,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     if (!ref) return c.json({ error: 'Missing or invalid "clientId"/"sessionId"/"taskSeq".' }, 400);
 
     try {
-      await store.setTaskLabel(orgId, ref, labelId, applied);
+      await store.setTaskLabel(orgId, ref, labelId, applied, "manual");
     } catch (err) {
       if (err instanceof LabelNotFoundError) return c.json({ error: err.message }, 404);
       throw err;

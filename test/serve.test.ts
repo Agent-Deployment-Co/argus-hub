@@ -878,18 +878,18 @@ describe("GET /api/tasks", () => {
 // ---- Hub labels -------------------------------------------------------------------------
 
 describe("Hub labels", () => {
-  test("POST /api/labels creates a label, GET lists it, DELETE removes it", async () => {
+  test("POST /api/labels creates a manual label, GET lists it, DELETE removes it", async () => {
     const { store } = await openTestEnv();
     const app = createHubApp(store);
     try {
       const create = await app.request("/api/labels", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Needs review" }),
+        body: JSON.stringify({ name: "Needs review", kind: "manual" }),
       });
       expect(create.status).toBe(201);
-      const created = (await create.json()) as { label: { labelId: string; name: string } };
-      expect(created.label.name).toBe("Needs review");
+      const created = (await create.json()) as { label: { labelId: string; kind: string } };
+      expect(created.label.kind).toBe("manual");
 
       const list = await app.request("/api/labels");
       const listed = (await list.json()) as { labels: Array<{ labelId: string; name: string }> };
@@ -908,7 +908,7 @@ describe("Hub labels", () => {
     const { store } = await openTestEnv();
     const app = createHubApp(store);
     try {
-      const body = JSON.stringify({ name: "Bug fix" });
+      const body = JSON.stringify({ name: "Bug fix", kind: "manual" });
       const first = await app.request("/api/labels", { method: "POST", headers: { "Content-Type": "application/json" }, body });
       expect(first.status).toBe(201);
       const second = await app.request("/api/labels", { method: "POST", headers: { "Content-Type": "application/json" }, body });
@@ -918,7 +918,7 @@ describe("Hub labels", () => {
     }
   });
 
-  test("POST /api/task-labels applies a label, which then shows up on GET /api/tasks", async () => {
+  test("POST /api/task-labels applies a manual label, which then shows up on GET /api/tasks", async () => {
     const env = await openTestEnv();
     const app = createHubApp(env.store);
     try {
@@ -928,7 +928,7 @@ describe("Hub labels", () => {
       const create = await app.request("/api/labels", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Bug fix" }),
+        body: JSON.stringify({ name: "Bug fix", kind: "manual" }),
       });
       const { label } = (await create.json()) as { label: { labelId: string } };
 
@@ -940,10 +940,11 @@ describe("Hub labels", () => {
       expect(apply.status).toBe(200);
 
       const tasks = (await (await app.request("/api/tasks")).json()) as {
-        rows: Array<{ labels: Array<{ labelId: string; name: string }> }>;
+        rows: Array<{ labels: Array<{ labelId: string; name: string; kind: string; appliedBy: string }> }>;
       };
-      expect(tasks.rows[0]!.labels).toEqual([{ labelId: label.labelId, name: "Bug fix" }]);
+      expect(tasks.rows[0]!.labels).toEqual([{ labelId: label.labelId, name: "Bug fix", kind: "manual", appliedBy: "manual" }]);
 
+      // Removing is sticky: it survives being re-applied via the bulk/backfill path.
       const remove = await app.request("/api/task-labels", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -969,6 +970,80 @@ describe("Hub labels", () => {
         body: JSON.stringify({ labelId: "label-nope", clientId, sessionId: "label-404-sess", taskSeq: 0, applied: true }),
       });
       expect(res.status).toBe(404);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("POST /api/labels/candidates previews matches via the injected classifier, without creating a label", async () => {
+    const env = await openTestEnv();
+    const orgId = (await env.store.getDefaultOrgId())!;
+    await env.store.setTaskLlmProviderField(orgId, "command", "command", "fake", 1);
+    await env.store.setTaskLlmProvider(orgId, "command", 2);
+    await env.store.setAutomaticTaggingEnabled(orgId, true, 3);
+    const app = createHubApp(env.store, undefined, {
+      classifyBatch: async (_name, _description, tasks) =>
+        tasks.map((t) => ({ ref: t.ref, match: t.description.includes("bug"), reason: "stub" })),
+    });
+    try {
+      await syncWithTask(env, "alice@example.com", "cand-sess-1", { description: "Fix the login bug" });
+      await syncWithTask(env, "alice@example.com", "cand-sess-2", { description: "Write onboarding docs" });
+
+      const res = await app.request("/api/labels/candidates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Bug fix", description: "Tasks about fixing bugs" }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { candidates: Array<{ sessionId: string }>; consideredCount: number };
+      expect(body.candidates.map((c) => c.sessionId)).toEqual(["cand-sess-1"]);
+      expect(body.consideredCount).toBe(2);
+
+      const labels = (await (await app.request("/api/labels")).json()) as { labels: unknown[] };
+      expect(labels.labels).toEqual([]);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("creating an auto label with reviewed taskRefs commits + backfills in one call", async () => {
+    const env = await openTestEnv();
+    const orgId = (await env.store.getDefaultOrgId())!;
+    await env.store.setTaskLlmProviderField(orgId, "command", "command", "fake", 1);
+    await env.store.setTaskLlmProvider(orgId, "command", 2);
+    await env.store.setAutomaticTaggingEnabled(orgId, true, 3);
+    const app = createHubApp(env.store, undefined, {
+      classifyBatch: async (_name, _description, tasks) =>
+        tasks.map((t) => ({ ref: t.ref, match: t.description.includes("bug"), reason: "stub" })),
+    });
+    try {
+      await syncWithTask(env, "alice@example.com", "auto-sess-1", { description: "Fix the login bug" });
+      await syncWithTask(env, "alice@example.com", "auto-sess-2", { description: "Write onboarding docs" });
+
+      const candidatesRes = await app.request("/api/labels/candidates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Bug fix", description: "Tasks about fixing bugs" }),
+      });
+      const { candidates } = (await candidatesRes.json()) as {
+        candidates: Array<{ clientId: string; sessionId: string; taskSeq: number }>;
+      };
+      expect(candidates).toHaveLength(1);
+
+      const create = await app.request("/api/labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Bug fix", kind: "auto", description: "Tasks about fixing bugs", taskRefs: candidates }),
+      });
+      expect(create.status).toBe(201);
+
+      const tasks = (await (await app.request("/api/tasks")).json()) as {
+        rows: Array<{ sessionId: string; labels: Array<{ labelId: string; name: string; kind: string; appliedBy: string }> }>;
+      };
+      const labeled = tasks.rows.find((r) => r.sessionId === "auto-sess-1");
+      const unlabeled = tasks.rows.find((r) => r.sessionId === "auto-sess-2");
+      expect(labeled?.labels).toEqual([{ labelId: expect.any(String), name: "Bug fix", kind: "auto", appliedBy: "auto" }]);
+      expect(unlabeled?.labels).toEqual([]);
     } finally {
       await env.store.close();
     }

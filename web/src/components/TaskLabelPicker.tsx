@@ -10,7 +10,7 @@ const VIEWPORT_MARGIN = 8;
  *  GroupPicker (fixed-coordinate portal, clamped to the viewport) since this trigger also lives
  *  inside a scrolling container. Unlike GroupPicker this is multi-select — labels aren't
  *  mutually exclusive — and it doesn't offer inline label creation (that's a bigger flow, on
- *  the /labels page). */
+ *  the /labels page, since auto labels need a candidate-search review step first). */
 export function TaskLabelPicker({ taskRef, applied }: { taskRef: TaskRef; applied: TaskListItemLabel[] }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -118,6 +118,7 @@ export function TaskLabelPicker({ taskRef, applied }: { taskRef: TaskRef; applie
                       {isApplied && <Check size={13} strokeWidth={2.25} aria-hidden />}
                     </span>
                     <span className="group-popover-name">{label.name}</span>
+                    <span className={`pill label-kind-pill label-kind-${label.kind}`}>{label.kind}</span>
                   </button>
                 );
               })
