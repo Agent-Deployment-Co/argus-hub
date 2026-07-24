@@ -190,9 +190,11 @@ function TasksSettingsPane() {
   const section = settings.data?.categories[0].sections[0];
   const provider = (values["llm.provider"] || null) as LlmProvider | null;
   const providerDescriptor = section?.settings.find((setting) => setting.path === "llm.provider");
+  const providerSaved = !!provider && providerDescriptor?.value === provider;
   const visibleFields = useMemo(() => section?.settings.filter((setting) =>
-    setting.providerScoped && provider && setting.visibleWhen?.in.includes(provider)) ?? [], [section, provider]);
-  const needsKey = !!provider && section?.secretField.providers.includes(provider);
+    setting.providerScoped && providerSaved && setting.visibleWhen?.in.includes(provider!)) ?? [],
+  [section, provider, providerSaved]);
+  const needsKey = !!provider && providerSaved && section?.secretField.providers.includes(provider);
 
   const setLocal = (path: string, value: string) => {
     setValues((current) => ({ ...current, [path]: value }));
@@ -245,7 +247,7 @@ function TasksSettingsPane() {
             {providerDescriptor.options.find((option) => option.value === provider)!.description}
           </p>
         )}
-        {provider && visibleFields.map((descriptor) => {
+        {provider && providerSaved && visibleFields.map((descriptor) => {
           const path = writePath(provider, descriptor.field!);
           return (
             <PlainField
@@ -258,14 +260,16 @@ function TasksSettingsPane() {
             />
           );
         })}
-        {provider && needsKey && (
+        {provider && providerSaved && needsKey && (
           <SecretField key={provider} provider={provider} onChanged={() => connection.reset()} />
         )}
         <div className="settings-test-row">
           <div className="settings-row-copy">
             <span className="settings-row-label">Test connection</span>
             <span className="settings-row-description">
-              {provider ? "Send a tiny completion using the saved provider settings." : "Choose and save a provider to enable connection testing."}
+              {providerSaved
+                ? "Send a tiny completion using the saved provider settings."
+                : "Choose and save a provider to enable connection testing."}
             </span>
             {connection.data && (
               <span className={connection.data.ok ? "settings-test-success" : "settings-inline-error"} role="status">
@@ -279,7 +283,7 @@ function TasksSettingsPane() {
           <button
             className="btn-secondary"
             type="button"
-            disabled={!provider || connection.isPending || saveQueue.status.state === "saving"}
+            disabled={!providerSaved || connection.isPending || saveQueue.status.state === "saving"}
             onClick={() => connection.mutate()}
           >
             {connection.isPending ? "Testing…" : "Test connection"}
