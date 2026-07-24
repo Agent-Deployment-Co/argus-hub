@@ -1,5 +1,5 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { Activity, Download, ListTodo, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Sun, Users, Wrench, type LucideIcon } from "lucide-react";
+import { Activity, Download, ListTodo, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Settings as SettingsIcon, Sun, Users, Wrench, type LucideIcon } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../lib/theme";
 import { useUserInfo } from "../lib/users";
@@ -156,6 +156,15 @@ export function Layout() {
         </nav>
         <div className="rail-footer">
           <ThemeToggle />
+          <Link
+            to="/settings/$category"
+            params={{ category: "tasks" }}
+            className="rail-icon-btn"
+            title="Settings"
+            aria-label="Settings"
+          >
+            <SettingsIcon size={16} strokeWidth={1.75} aria-hidden />
+          </Link>
           <button
             type="button"
             className="rail-icon-btn"
