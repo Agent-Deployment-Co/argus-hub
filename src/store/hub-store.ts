@@ -352,6 +352,8 @@ const HUB_LABELS_DDL = `
     FOREIGN KEY (org_id, client_id, session_id) REFERENCES resolved_sessions(org_id, client_id, session_id) ON DELETE CASCADE
   );
   CREATE INDEX hub_task_labels_label ON hub_task_labels(org_id, label_id);
+`;
+
 const ORGANIZATION_LLM_SETTINGS_DDL = `
   CREATE TABLE organization_task_llm (
     org_id     TEXT PRIMARY KEY REFERENCES organizations(org_id) ON DELETE CASCADE,
