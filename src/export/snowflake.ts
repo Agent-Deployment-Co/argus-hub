@@ -27,8 +27,9 @@ const number = (name: string): ExportColumn => ({ name, snowflakeType: "NUMBER(3
 const variant = (name: string): ExportColumn => ({ name, snowflakeType: "VARIANT", json: true });
 
 /**
- * Public reporting data exported from Hub. api_keys is intentionally omitted: a Snowflake
- * reporting role never needs even the hashes of Hub ingestion credentials.
+ * Public reporting data exported from Hub. api_keys and organization LLM settings are
+ * intentionally omitted: a Snowflake reporting role never needs operational configuration,
+ * ingestion credential hashes, or encrypted provider secret material.
  */
 export const SNOWFLAKE_EXPORT_TABLES: readonly ExportTable[] = [
   { name: "organizations", columns: [text("org_id"), text("name"), number("created_at")] },
