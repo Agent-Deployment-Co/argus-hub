@@ -193,6 +193,7 @@ function TasksSettingsPane() {
   const automaticDescriptor = section?.settings.find((setting) => setting.path === "automaticTaggingEnabled");
   const automaticEnabled = automaticDescriptor?.value === true;
   const automaticEligibility = settings.data?.automaticTaggingEligibility;
+  const automaticAvailable = automaticEligibility?.eligible === true;
   const providerSaved = !!provider && providerDescriptor?.value === provider;
   const visibleFields = useMemo(() => section?.settings.filter((setting) =>
     setting.providerScoped && providerSaved && setting.visibleWhen?.in.includes(provider!)) ?? [],
@@ -237,10 +238,11 @@ function TasksSettingsPane() {
           </label>
           <input
             id="setting-automatic-tagging"
+            className="settings-toggle"
             type="checkbox"
             role="switch"
-            checked={automaticEnabled}
-            disabled={!automaticEnabled && !automaticEligibility?.eligible}
+            checked={automaticAvailable && automaticEnabled}
+            disabled={!automaticAvailable || saveQueue.status.state === "saving"}
             onChange={(event) => {
               void saveQueue.save("automaticTaggingEnabled", event.currentTarget.checked)
                 .catch(() => undefined);

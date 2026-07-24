@@ -145,7 +145,7 @@ export function describeSettings(
               }
             : {}),
           value: descriptor.path === "automaticTaggingEnabled"
-            ? settings.automaticTaggingEnabled
+            ? settings.automaticTaggingEnabled && automaticTaggingEligibility.eligible
             : descriptor.path === "llm.provider" ? settings.provider : null,
         })),
         secretField: {

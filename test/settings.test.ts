@@ -48,6 +48,16 @@ describe("Hub settings descriptors", () => {
     expect(provider?.options?.find((option) => option.value === "command")?.disabled).toBe(false);
     expect(section.secretField.description).toContain("not configured");
   });
+
+  test("reports automatic tagging as off whenever it is ineligible", () => {
+    const section = describeSettings(
+      { provider: "openai", automaticTaggingEnabled: true, providerConfigs: {} },
+      { eligible: false, reason: "Provider unavailable." },
+      false,
+    ).categories[0].sections[0];
+    expect(section.settings.find((setting) => setting.path === "automaticTaggingEnabled")?.value)
+      .toBe(false);
+  });
 });
 
 describe("settings write validation", () => {
