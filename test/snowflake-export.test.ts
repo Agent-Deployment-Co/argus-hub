@@ -102,6 +102,14 @@ describe("Snowflake snapshot export", () => {
       expect(existsSync(join(bundle.outputDir, `${table.name}.jsonl`))).toBe(true);
     }
     expect(existsSync(join(bundle.outputDir, "api_keys.jsonl"))).toBe(false);
+    for (const table of [
+      "organization_task_llm",
+      "organization_llm_provider_configs",
+      "organization_llm_secrets",
+    ]) {
+      expect(SNOWFLAKE_EXPORT_TABLES.some((entry) => entry.name === table)).toBe(false);
+      expect(existsSync(join(bundle.outputDir, `${table}.jsonl`))).toBe(false);
+    }
 
     const row = JSON.parse(readFileSync(join(bundle.outputDir, "resolved_sessions.jsonl"), "utf8")) as Record<string, unknown>;
     expect(row.meta_json).toEqual({ source: "claude", nested: { ok: true } });
