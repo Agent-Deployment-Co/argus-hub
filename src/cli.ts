@@ -4,6 +4,7 @@ import { openHubStore } from "./store/hub-store.ts";
 import { startHubServer } from "./api/serve.ts";
 import { createAdminAuth } from "./admin-auth.ts";
 import { randomUUID } from "node:crypto";
+import { createSecretCipher, parseHubSecretKey } from "./secrets.ts";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -28,6 +29,10 @@ const serve = defineCommand({
     },
   },
   async run({ args }) {
+    // Parse once, before opening the database or listening. The cipher is wired into
+    // the settings API in the corresponding API checkpoint.
+    const secretCipher = createSecretCipher(parseHubSecretKey(process.env.HUB_SECRET_KEY));
+    void secretCipher;
     const port = Number(args.port);
     const insecureCookieHosts = process.env.HUB_INSECURE_COOKIE_HOSTS
       ?.split(",")
