@@ -19,6 +19,13 @@ async function env(): Promise<{ store: HubStore; app: ReturnType<typeof createHu
 }
 
 describe("settings API", () => {
+  const put = (app: ReturnType<typeof createHubApp>, path: string, value: unknown) =>
+    app.request(`/api/settings/${path}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value }),
+    });
+
   test("all settings routes use the existing administrator session middleware", async () => {
     const { store } = await env();
     const auth = createAdminAuth("secret");
@@ -63,6 +70,27 @@ describe("settings API", () => {
       });
       expect(response.status).toBeGreaterThanOrEqual(400);
     }
+    await store.close();
+  });
+
+  test("disables and rejects API-key providers without HUB_SECRET_KEY", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hub-settings-api-no-secret-"));
+    dirs.push(dir);
+    const store = await openHubStore(dir, 1);
+    const app = createHubApp(store);
+    const settings = await (await app.request("/api/settings")).json();
+    const provider = settings.categories[0].sections[0].settings[0];
+    expect(provider.options.find((option: { value: string }) => option.value === "openai").disabled)
+      .toBe(true);
+    expect(provider.options.find((option: { value: string }) => option.value === "command").disabled)
+      .toBe(false);
+    expect((await put(app, "llm.provider", "openai")).status).toBe(503);
+    expect((await put(app, "llm.provider", "command")).status).toBe(200);
+    expect((await app.request("/api/settings/secrets/openai", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value: "sk-test" }),
+    })).status).toBe(503);
     await store.close();
   });
 

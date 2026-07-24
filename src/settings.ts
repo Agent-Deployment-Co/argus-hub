@@ -11,6 +11,7 @@ export interface SelectOption {
   value: string;
   label: string;
   description?: string;
+  disabled?: boolean;
 }
 
 export interface SettingDescriptor {
@@ -106,7 +107,10 @@ const BASE_DESCRIPTORS: Omit<SettingDescriptor, "value">[] = [
   },
 ];
 
-export function describeSettings(settings: TaskLlmSettings): SettingsResponse {
+export function describeSettings(
+  settings: TaskLlmSettings,
+  secretEncryptionAvailable = true,
+): SettingsResponse {
   const providerConfigs = Object.fromEntries(
     Object.entries(settings.providerConfigs).map(([provider, config]) => [
       provider,
@@ -121,12 +125,22 @@ export function describeSettings(settings: TaskLlmSettings): SettingsResponse {
       sections: [{
         settings: BASE_DESCRIPTORS.map((descriptor) => ({
           ...descriptor,
+          ...(descriptor.path === "llm.provider" && descriptor.options
+            ? {
+                options: descriptor.options.map((option) => ({
+                  ...option,
+                  disabled: !secretEncryptionAvailable && !!getProvider(option.value)?.requiresApiKey,
+                })),
+              }
+            : {}),
           value: descriptor.path === "llm.provider" ? settings.provider : null,
         })),
         secretField: {
           key: "llm.apiKey",
           label: "API key",
-          description: "Encrypted in the Hub database with the deployment's HUB_SECRET_KEY.",
+          description: secretEncryptionAvailable
+            ? "Encrypted in the Hub database with the deployment's HUB_SECRET_KEY."
+            : "Unavailable because HUB_SECRET_KEY is not configured for this deployment.",
           providerPath: "llm.provider",
           providers: PROVIDERS.filter((provider) => provider.requiresApiKey).map((provider) => provider.name),
         },

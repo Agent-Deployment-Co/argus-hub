@@ -21,10 +21,8 @@ function additionalData(orgId: string, provider: LlmProvider): Buffer {
   return Buffer.from(JSON.stringify([AAD_VERSION, orgId, provider]), "utf8");
 }
 
-export function parseHubSecretKey(value: string | undefined): Buffer {
-  if (!value) {
-    throw new Error("HUB_SECRET_KEY is required and must be base64 for exactly 32 bytes.");
-  }
+export function parseHubSecretKey(value: string | undefined): Buffer | undefined {
+  if (!value) return undefined;
   const decoded = Buffer.from(value, "base64");
   if (decoded.length !== KEY_BYTES || decoded.toString("base64") !== value) {
     throw new Error("HUB_SECRET_KEY must be canonical base64 for exactly 32 bytes.");

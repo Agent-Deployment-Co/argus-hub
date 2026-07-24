@@ -142,11 +142,15 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     const orgId = await store.getDefaultOrgId();
     return orgId ?? null;
   };
+  const taskSettingsResponse = async (orgId: string) => {
+    const settings = await store.readTaskLlmSettings(orgId);
+    return describeSettings(settings, !!options.secretCipher);
+  };
 
   app.get("/api/settings", async (c) => {
     const orgId = await currentOrgId();
     if (!orgId) return c.json({ error: "No organization configured." }, 503);
-    return c.json(describeSettings(await store.readTaskLlmSettings(orgId)));
+    return c.json(await taskSettingsResponse(orgId));
   });
 
   app.put("/api/settings/:path", async (c) => {
@@ -156,12 +160,22 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     if (!body || !Object.hasOwn(body, "value")) return c.json({ error: 'Missing required "value".' }, 400);
     try {
       const write = validateSettingWrite(c.req.param("path"), body.value);
+      if (
+        (write.kind === "provider" && write.provider && getProvider(write.provider)?.requiresApiKey) ||
+        (write.kind === "field" && getProvider(write.provider)?.requiresApiKey)
+      ) {
+        if (!options.secretCipher) {
+          return c.json({
+            error: "HUB_SECRET_KEY is not configured; API-key-based LLM providers are disabled.",
+          }, 503);
+        }
+      }
       if (write.kind === "provider") {
         await store.setTaskLlmProvider(orgId, write.provider, Date.now());
       } else {
         await store.setTaskLlmProviderField(orgId, write.provider, write.field, write.value, Date.now());
       }
-      return c.json(describeSettings(await store.readTaskLlmSettings(orgId)));
+      return c.json(await taskSettingsResponse(orgId));
     } catch (error) {
       if (error instanceof SettingsValidationError) return c.json({ error: error.message }, error.status);
       throw error;
@@ -720,7 +734,7 @@ export interface HubServeOptions {
   port: number;
   store: HubStore;
   auth: AdminAuth;
-  secretCipher: SecretCipher;
+  secretCipher?: SecretCipher;
   /** Aborting this signal stops the server gracefully. */
   signal?: AbortSignal;
 }
