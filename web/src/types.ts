@@ -311,11 +311,18 @@ export interface TaskReport {
   minCohortGuard: boolean;
 }
 
+export interface TaskListItemLabel {
+  labelId: string;
+  name: string;
+}
+
 /** Mirrors hub/src/api/task-list.ts's TaskListItem, served at GET /api/tasks. */
 export interface TaskListItem {
   id: string;
   source: AgentSource;
+  clientId: string;
   sessionId: string;
+  taskSeq: number;
   project: string;
   timestampMs: number | null;
   description: string;
@@ -323,6 +330,7 @@ export interface TaskListItem {
   outcomeReason?: string;
   frustration?: string;
   signals?: string[];
+  labels: TaskListItemLabel[];
 }
 
 export interface TaskListCounts {
