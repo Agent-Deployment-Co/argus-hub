@@ -240,7 +240,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
       orgId,
       provider.name,
       options.secretCipher.encrypt(orgId, provider.name, value),
-      value.slice(-4),
+      value.slice(0, 4),
       Date.now(),
     );
     return c.json(await store.readLlmSecretStatus(orgId, provider.name));

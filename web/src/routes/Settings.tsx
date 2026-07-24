@@ -1,8 +1,7 @@
 import { Link, useParams, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, Check, KeyRound, ListTodo, LoaderCircle, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, ListTodo, LoaderCircle, Lock, Pencil, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useSettingsBackHref } from "../components/Layout";
-import { Modal } from "../components/Modal";
 import {
   useDeleteSecretMutation,
   useSaveSecretMutation,
@@ -83,8 +82,8 @@ function SecretField({ provider, onChanged }: { provider: LlmProvider; onChanged
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const error = save.error ?? remove.error ?? status.error;
 
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
     if (!value.trim()) return;
     save.mutate(value, {
       onSuccess: () => {
@@ -94,86 +93,127 @@ function SecretField({ provider, onChanged }: { provider: LlmProvider; onChanged
       },
     });
   };
+  const cancel = () => {
+    setEditing(false);
+    setValue("");
+    save.reset();
+  };
   const escape = (event: KeyboardEvent) => {
     if (event.key === "Escape") {
-      setEditing(false);
-      setValue("");
+      cancel();
     }
   };
+  const showInput = !status.data?.configured || editing;
 
   return (
-    <>
-      <div className="settings-row settings-secret-row">
-        <div className="settings-row-copy">
-          <span className="settings-row-label">API key</span>
-          <span className="settings-row-description">
-            {status.isLoading
-              ? "Checking encrypted key status…"
-              : status.data?.configured
-                ? `Configured · ••••${status.data.hint}`
-                : "No API key configured."}
+    <div className="settings-row settings-secret-row">
+      <div className="settings-row-copy">
+        <span className="settings-row-label">
+          API key <Lock size={12} strokeWidth={2} aria-hidden className="settings-secret-lock" />
+        </span>
+        <span className="settings-row-description">
+          Stored encrypted by Argus Hub and never returned to the browser.
+        </span>
+      </div>
+      <div className="settings-secret-control">
+        {status.isLoading ? (
+          <span className="settings-secret-status">
+            <LoaderCircle size={13} className="spin" aria-hidden /> Checking…
           </span>
-          {error && <span className="settings-inline-error" role="alert">{error.message}</span>}
-        </div>
-        {editing ? (
+        ) : showInput ? (
           <form className="settings-secret-form" onSubmit={submit}>
             <input
-              autoFocus
-              className="settings-control"
+              autoFocus={editing}
+              className="settings-control settings-secret-input"
               type="password"
+              data-1p-ignore
               aria-label={status.data?.configured ? "Replacement API key" : "API key"}
-              autoComplete="off"
+              autoComplete="new-password"
+              placeholder={status.data?.configured ? "New API key" : "Paste API key"}
               value={value}
+              disabled={save.isPending}
               onChange={(event) => setValue(event.currentTarget.value)}
               onKeyDown={escape}
             />
-            <button className="btn-primary" type="submit" disabled={!value.trim() || save.isPending}>
-              {save.isPending ? "Saving…" : "Save key"}
-            </button>
             <button
-              className="btn-secondary"
-              type="button"
-              onClick={() => { setEditing(false); setValue(""); }}
+              className="settings-secret-icon-btn"
+              type="submit"
+              title="Save key"
+              aria-label="Save key"
+              disabled={!value.trim() || save.isPending}
             >
-              Cancel
-            </button>
-          </form>
-        ) : (
-          <div className="settings-row-actions">
-            <button className="btn-secondary" type="button" onClick={() => setEditing(true)}>
-              <KeyRound size={14} aria-hidden />
-              {status.data?.configured ? "Replace" : "Add key"}
+              {save.isPending
+                ? <LoaderCircle size={15} className="spin" aria-hidden />
+                : <Check size={15} aria-hidden />}
             </button>
             {status.data?.configured && (
-              <button className="btn-danger" type="button" onClick={() => setConfirmingRemove(true)}>
-                <Trash2 size={14} aria-hidden /> Remove
+              <button
+                className="settings-secret-icon-btn"
+                type="button"
+                title="Cancel"
+                aria-label="Cancel"
+                disabled={save.isPending}
+                onClick={cancel}
+              >
+                <X size={15} aria-hidden />
               </button>
             )}
-          </div>
-        )}
-      </div>
-      {confirmingRemove && (
-        <Modal title="Remove API key?" onClose={() => setConfirmingRemove(false)}>
-          <p className="modal-copy">Connection tests for {provider} will fail until a new key is added.</p>
-          <div className="modal-actions">
-            <button className="btn-secondary" type="button" onClick={() => setConfirmingRemove(false)}>
-              Cancel
-            </button>
+          </form>
+        ) : confirmingRemove ? (
+          <div className="settings-secret-line">
+            <span className="settings-secret-confirm">Remove key?</span>
             <button
-              className="btn-danger"
+              className="settings-secret-icon-btn is-danger"
               type="button"
+              title="Confirm remove"
+              aria-label="Confirm remove"
               disabled={remove.isPending}
               onClick={() => remove.mutate(undefined, { onSuccess: () => {
                 setConfirmingRemove(false);
                 onChanged();
               } })}
             >
-              {remove.isPending ? "Removing…" : "Remove key"}
+              {remove.isPending
+                ? <LoaderCircle size={15} className="spin" aria-hidden />
+                : <Check size={15} aria-hidden />}
+            </button>
+            <button
+              className="settings-secret-icon-btn"
+              type="button"
+              title="Cancel"
+              aria-label="Cancel"
+              disabled={remove.isPending}
+              onClick={() => setConfirmingRemove(false)}
+            >
+              <X size={15} aria-hidden />
             </button>
           </div>
-        </Modal>
-      )}
-    </>
+        ) : (
+          <div className="settings-secret-line">
+            <code className="settings-secret-mask">••••••••••••••••</code>
+            <button
+              className="settings-secret-icon-btn"
+              type="button"
+              title="Replace key"
+              aria-label="Replace key"
+              onClick={() => setEditing(true)}
+            >
+              <Pencil size={15} aria-hidden />
+            </button>
+            <button
+              className="settings-secret-icon-btn"
+              type="button"
+              title="Remove key"
+              aria-label="Remove key"
+              onClick={() => setConfirmingRemove(true)}
+            >
+              <Trash2 size={15} aria-hidden />
+            </button>
+          </div>
+        )}
+        {error && <span className="settings-inline-error" role="alert">{error.message}</span>}
+      </div>
+    </div>
   );
 }
 
