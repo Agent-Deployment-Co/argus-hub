@@ -12,6 +12,7 @@ export interface SettingsOption {
   value: string;
   label: string;
   description?: string;
+  disabled?: boolean;
 }
 
 export interface SettingDescriptor {

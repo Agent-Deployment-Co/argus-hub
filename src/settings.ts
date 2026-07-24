@@ -11,6 +11,7 @@ export interface SelectOption {
   value: string;
   label: string;
   description?: string;
+  disabled?: boolean;
 }
 
 export interface SettingDescriptor {
@@ -119,6 +120,7 @@ export function describeSettings(
     eligible: false,
     reason: "Select and save an LLM provider first.",
   },
+  secretEncryptionAvailable = true,
 ): SettingsResponse {
   const providerConfigs = Object.fromEntries(
     Object.entries(settings.providerConfigs).map(([provider, config]) => [
@@ -134,6 +136,14 @@ export function describeSettings(
       sections: [{
         settings: BASE_DESCRIPTORS.map((descriptor) => ({
           ...descriptor,
+          ...(descriptor.path === "llm.provider" && descriptor.options
+            ? {
+                options: descriptor.options.map((option) => ({
+                  ...option,
+                  disabled: !secretEncryptionAvailable && !!getProvider(option.value)?.requiresApiKey,
+                })),
+              }
+            : {}),
           value: descriptor.path === "automaticTaggingEnabled"
             ? settings.automaticTaggingEnabled
             : descriptor.path === "llm.provider" ? settings.provider : null,
@@ -141,7 +151,9 @@ export function describeSettings(
         secretField: {
           key: "llm.apiKey",
           label: "API key",
-          description: "Encrypted in the Hub database with the deployment's HUB_SECRET_KEY.",
+          description: secretEncryptionAvailable
+            ? "Encrypted in the Hub database with the deployment's HUB_SECRET_KEY."
+            : "Unavailable because HUB_SECRET_KEY is not configured for this deployment.",
           providerPath: "llm.provider",
           providers: PROVIDERS.filter((provider) => provider.requiresApiKey).map((provider) => provider.name),
         },

@@ -147,10 +147,22 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     const orgId = await store.getDefaultOrgId();
     return orgId ?? null;
   };
-  const taskSettingsResponse = async (orgId: string) => describeSettings(
-    await store.readTaskLlmSettings(orgId),
-    await store.automaticTaggingEligibility(orgId),
-  );
+  const taskSettingsResponse = async (orgId: string) => {
+    const settings = await store.readTaskLlmSettings(orgId);
+    const unavailableSecretProvider = !options.secretCipher &&
+      !!settings.provider &&
+      !!getProvider(settings.provider)?.requiresApiKey;
+    return describeSettings(
+      settings,
+      unavailableSecretProvider
+        ? {
+            eligible: false,
+            reason: "HUB_SECRET_KEY is not configured; the saved LLM provider is disabled.",
+          }
+        : await store.automaticTaggingEligibility(orgId),
+      !!options.secretCipher,
+    );
+  };
 
   app.get("/api/settings", async (c) => {
     const orgId = await currentOrgId();
@@ -165,7 +177,25 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     if (!body || !Object.hasOwn(body, "value")) return c.json({ error: 'Missing required "value".' }, 400);
     try {
       const write = validateSettingWrite(c.req.param("path"), body.value);
+      if (
+        (write.kind === "provider" && write.provider && getProvider(write.provider)?.requiresApiKey) ||
+        (write.kind === "field" && getProvider(write.provider)?.requiresApiKey)
+      ) {
+        if (!options.secretCipher) {
+          return c.json({
+            error: "HUB_SECRET_KEY is not configured; API-key-based LLM providers are disabled.",
+          }, 503);
+        }
+      }
       if (write.kind === "automaticTagging") {
+        if (write.enabled && !options.secretCipher) {
+          const current = await store.readTaskLlmSettings(orgId);
+          if (current.provider && getProvider(current.provider)?.requiresApiKey) {
+            return c.json({
+              error: "HUB_SECRET_KEY is not configured; the saved LLM provider is disabled.",
+            }, 503);
+          }
+        }
         try {
           await store.setAutomaticTaggingEnabled(orgId, write.enabled, Date.now());
         } catch (error) {
@@ -792,7 +822,7 @@ export interface HubServeOptions {
   port: number;
   store: HubStore;
   auth: AdminAuth;
-  secretCipher: SecretCipher;
+  secretCipher?: SecretCipher;
   /** Aborting this signal stops the server gracefully. */
   signal?: AbortSignal;
 }

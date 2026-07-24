@@ -30,7 +30,13 @@ const serve = defineCommand({
     },
   },
   async run({ args }) {
-    const secretCipher = createSecretCipher(parseHubSecretKey(process.env.HUB_SECRET_KEY));
+    const secretKey = parseHubSecretKey(process.env.HUB_SECRET_KEY);
+    const secretCipher = secretKey ? createSecretCipher(secretKey) : undefined;
+    if (!secretCipher) {
+      process.stderr.write(
+        "Warning: HUB_SECRET_KEY is not set. API-key-based LLM providers are disabled.\n",
+      );
+    }
     const port = Number(args.port);
     const insecureCookieHosts = process.env.HUB_INSECURE_COOKIE_HOSTS
       ?.split(",")

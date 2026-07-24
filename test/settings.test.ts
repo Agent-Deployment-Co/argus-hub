@@ -35,6 +35,19 @@ describe("Hub settings descriptors", () => {
     expect(model?.placeholderByProvider?.openai).toBe("gpt-5.4-nano");
     expect(section.secretField.providers).toEqual(["claude-api", "gemini", "openai", "openrouter"]);
   });
+
+  test("disables API-key providers when secret encryption is unavailable", () => {
+    const section = describeSettings(
+      { provider: null, automaticTaggingEnabled: false, providerConfigs: {} },
+      undefined,
+      false,
+    ).categories[0].sections[0];
+    const provider = section.settings.find((setting) => setting.path === "llm.provider");
+    expect(provider?.options?.filter((option) => option.disabled).map((option) => option.value))
+      .toEqual(["claude-api", "gemini", "openai", "openrouter"]);
+    expect(provider?.options?.find((option) => option.value === "command")?.disabled).toBe(false);
+    expect(section.secretField.description).toContain("not configured");
+  });
 });
 
 describe("settings write validation", () => {

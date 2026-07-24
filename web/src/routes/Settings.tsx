@@ -264,7 +264,9 @@ function TasksSettingsPane() {
           >
             <option value="" disabled>Choose a provider…</option>
             {providerDescriptor.options?.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
+              <option key={option.value} value={option.value} disabled={option.disabled}>
+                {option.label}{option.disabled ? " (requires HUB_SECRET_KEY)" : ""}
+              </option>
             ))}
           </select>
         </div>

@@ -99,6 +99,27 @@ describe("settings API", () => {
     await store.close();
   });
 
+  test("disables and rejects API-key providers without HUB_SECRET_KEY", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "hub-settings-api-no-secret-"));
+    dirs.push(dir);
+    const store = await openHubStore(dir, 1);
+    const app = createHubApp(store);
+    const settings = await (await app.request("/api/settings")).json();
+    const provider = settings.categories[0].sections[0].settings[1];
+    expect(provider.options.find((option: { value: string }) => option.value === "openai").disabled)
+      .toBe(true);
+    expect(provider.options.find((option: { value: string }) => option.value === "command").disabled)
+      .toBe(false);
+    expect((await put(app, "llm.provider", "openai")).status).toBe(503);
+    expect((await put(app, "llm.provider", "command")).status).toBe(200);
+    expect((await app.request("/api/settings/secrets/openai", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value: "sk-test" }),
+    })).status).toBe(503);
+    await store.close();
+  });
+
   test("creates, masks, replaces, and deletes a secret without echoing protected material", async () => {
     const { store, app } = await env();
     const firstKey = "  sk-first-1234  ";

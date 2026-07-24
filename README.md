@@ -29,8 +29,9 @@ export HUB_SECRET_KEY="$(openssl rand -base64 32)"
 npx @agentdeploymentco/argus-hub serve --port 4343
 ```
 
-`HUB_SECRET_KEY` is required. Store this generated value in your deployment's secret manager
-before continuing; it encrypts task-provider API keys and must remain stable across restarts.
+`HUB_SECRET_KEY` is optional. Without it, Hub starts with a warning and disables API-key-based
+LLM providers. Set it in your deployment's secret manager to enable those providers; it encrypts
+task-provider API keys and must remain stable across restarts.
 
 On first startup, Hub creates `data/hub.db`, generates a sync API key and a random admin password, and prints them once:
 
@@ -90,7 +91,7 @@ CLI flags — highest precedence last.
 |----------|---------|-----------|---------|-------------|
 | `--port` | `HUB_PORT` | `port` | `4343` | Port to listen on |
 | `--data-dir` | `HUB_DATA_DIR` | `dataDir` | `./data` | Directory for `hub.db` |
-| —        | `HUB_SECRET_KEY` | — | _(required)_ | Canonical base64 encoding of exactly 32 random bytes, used to encrypt task-provider API keys |
+| —        | `HUB_SECRET_KEY` | — | _(optional)_ | Canonical base64 encoding of exactly 32 random bytes; enables and encrypts API-key-based task providers |
 | —        | `ADMIN_PASSWORD` | —     | _(random)_ | Dashboard login password (pinned across restarts when set) |
 | —        | `HUB_INSECURE_COOKIE_HOSTS` | — | _(none)_ | Comma-separated hostnames (no port) that get a non-`Secure` session cookie, for plain-HTTP-only deployments (e.g. a cluster-internal address reachable only via a private network). **Never** list a host reachable from the public internet. |
 

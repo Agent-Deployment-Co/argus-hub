@@ -10,8 +10,12 @@ describe("Hub secret key parsing", () => {
     expect(parseHubSecretKey(KEY.toString("base64"))).toEqual(KEY);
   });
 
-  test.each([undefined, "", "not base64", Buffer.alloc(31).toString("base64"), `${KEY.toString("base64")}\n`])(
-    "rejects missing or malformed input without echoing it",
+  test.each([undefined, ""])("allows missing input", (value) => {
+    expect(parseHubSecretKey(value)).toBeUndefined();
+  });
+
+  test.each(["not base64", Buffer.alloc(31).toString("base64"), `${KEY.toString("base64")}\n`])(
+    "rejects malformed input without echoing it",
     (value) => {
       expect(() => parseHubSecretKey(value)).toThrow("HUB_SECRET_KEY");
       try {
