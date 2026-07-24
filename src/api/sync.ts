@@ -30,7 +30,7 @@ const CLIENT_ID_HEADER = "X-Argus-Client";
 // ---- Hono handler factory ---------------------------------------------------------------
 
 /** Returns a Hono handler for `POST /api/sync`. Auth is checked before the body is buffered. */
-export function syncHandler(store: HubStore) {
+export function syncHandler(store: HubStore, onCommitted?: () => void) {
   return async (c: Context): Promise<Response> => {
     // Auth before body — avoid processing the upload on a bad key.
     const token = parseBearerToken(c.req.header("Authorization"));
@@ -62,6 +62,7 @@ export function syncHandler(store: HubStore) {
     const userId = await store.resolveUserForClient(key.orgId, clientId);
     const { sessionsUpserted } = await store.upsertClientSessions(key.orgId, clientId, parsed.rows);
     const usersKnown = await store.countUsers(key.orgId);
+    onCommitted?.();
 
     return c.json({ sessionsUpserted, usersKnown, userId });
   };

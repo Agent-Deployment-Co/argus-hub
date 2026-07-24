@@ -16,6 +16,7 @@ import {
 } from "../src/store/hub-store.ts";
 import sqlite3 from "sqlite3";
 import { createSecretCipher } from "../src/secrets.ts";
+import { AutomaticTaggingWorker } from "../src/classify/automatic-tagging-worker.ts";
 
 const tempDirs: string[] = [];
 
@@ -318,6 +319,7 @@ describe("schema", () => {
        DROP TABLE organization_llm_secrets;
        DROP TABLE organization_llm_provider_configs;
        DROP TABLE organization_task_llm;
+       DROP TABLE automatic_tagging_queue;
        PRAGMA user_version = 1;`);
     await closeRaw(raw);
 
@@ -372,7 +374,7 @@ describe("schema", () => {
     }
   });
 
-  test("upgrades v4 through the LLM and automatic-label migrations to a fresh v6 store", async () => {
+  test("upgrades v4 through LLM, automatic-label, and queue migrations to a fresh v7 store", async () => {
     const freshDir = tempDataDir();
     const migratedDir = tempDataDir();
     const freshStore = await openHubStore(freshDir, 1_000_000);
@@ -387,6 +389,7 @@ describe("schema", () => {
       DROP TABLE organization_llm_secrets;
       DROP TABLE organization_llm_provider_configs;
       DROP TABLE organization_task_llm;
+      DROP TABLE automatic_tagging_queue;
       ALTER TABLE hub_labels DROP COLUMN description;
       ALTER TABLE hub_labels DROP COLUMN kind;
       ALTER TABLE hub_task_labels DROP COLUMN applied_by;
@@ -1264,6 +1267,64 @@ describe("readWindowFrictionRollup", () => {
     expect(friction.rejections).toBe(1);
     expect(friction.compactions).toBe(2);
     expect(friction.turns).toBe(9);
+  });
+});
+
+describe("automatic tagging queue", () => {
+  test("queues new and changed task revisions but not identical re-syncs", async () => {
+    const store = await openHubStore(tempDataDir(), 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+    const rows = minimalUploadRows("queue-sess");
+    addTask(rows, "queue-sess", 0, "Fix the login bug");
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+    expect(await store.automaticTaggingQueueCounts(orgId)).toEqual({ pending: 1 });
+
+    await store.upsertClientSessions(orgId, clientId, rows, 2_000_000);
+    expect(await store.automaticTaggingQueueCounts(orgId)).toEqual({ pending: 1 });
+
+    const changed = minimalUploadRows("queue-sess");
+    addTask(changed, "queue-sess", 0, "Fix the login and logout bugs");
+    await store.upsertClientSessions(orgId, clientId, changed, 3_000_000);
+    expect(await store.automaticTaggingQueueCounts(orgId)).toEqual({ pending: 2 });
+    await store.close();
+  });
+
+  test("worker applies every auto label and respects a sticky removal after changed sync", async () => {
+    const store = await openHubStore(tempDataDir(), 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const clientId = newClientId();
+    const rows = minimalUploadRows("worker-sess");
+    addTask(rows, "worker-sess", 0, "Fix the login bug");
+    await syncAs(store, orgId, clientId, "alice@example.com", rows, 1_000_000);
+    await store.setTaskLlmProviderField(orgId, "command", "command", "fake", 2);
+    await store.setTaskLlmProvider(orgId, "command", 3);
+    await store.setAutomaticTaggingEnabled(orgId, true, 4);
+    const first = await store.createLabel(orgId, "Bugs", "auto", "Bug work");
+    const second = await store.createLabel(orgId, "Engineering", "auto", "Engineering work");
+    const worker = new AutomaticTaggingWorker(store, {
+      executeCommand: async (_command, input) => {
+        const request = JSON.parse(input) as { tasks: Array<{ ref: string }> };
+        return {
+          ok: true,
+          text: JSON.stringify({
+            matches: request.tasks.map((task) => ({ ref: task.ref, match: true, reason: "match" })),
+          }),
+        };
+      },
+    });
+    expect(await worker.runOneCycle(2_000_000)).toBe(1);
+    const ref = { clientId, sessionId: "worker-sess", taskSeq: 0 };
+    expect((await store.listLabelsForTasks(orgId, [ref])).get(`${clientId}:worker-sess:0`)?.length).toBe(2);
+
+    await store.setTaskLabel(orgId, ref, first.labelId, false, "manual", 2_000_001);
+    const changed = minimalUploadRows("worker-sess");
+    addTask(changed, "worker-sess", 0, "Fix a different login bug");
+    await store.upsertClientSessions(orgId, clientId, changed, 3_000_000);
+    expect(await worker.runOneCycle(3_000_000)).toBe(1);
+    const labels = (await store.listLabelsForTasks(orgId, [ref])).get(`${clientId}:worker-sess:0`) ?? [];
+    expect(labels.map((label) => label.labelId)).toEqual([second.labelId]);
+    await store.close();
   });
 });
 

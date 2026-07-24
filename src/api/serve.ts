@@ -22,6 +22,7 @@ import { buildTaskList, type TaskListParams } from "./task-list.ts";
 import { attachLabels, parseTaskRef, runCandidateSearch } from "./task-labels.ts";
 import type { ClassifyBatch } from "../classify/task-labeler.ts";
 import { createProviderClassifier } from "../classify/task-labeler.ts";
+import { AutomaticTaggingWorker } from "../classify/automatic-tagging-worker.ts";
 import type { SessionSort } from "./session-list.ts";
 import {
   parseResolvedQuery as parseResolvedQueryFrom,
@@ -77,6 +78,7 @@ export interface HubAppOptions {
   executeCommand?: ExecuteCommand;
   connectionTimeoutMs?: number;
   classifyBatch?: ClassifyBatch;
+  automaticTaggingWorker?: Pick<AutomaticTaggingWorker, "wake">;
 }
 
 export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppOptions = {}): Hono {
@@ -132,7 +134,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
 
   // ---- Ingest (API-key auth handled inside syncHandler) -------------------------
 
-  app.post("/api/sync", syncHandler(store));
+  app.post("/api/sync", syncHandler(store, () => options.automaticTaggingWorker?.wake()));
   app.post("/api/sync/unknown-sessions", unknownSessionsHandler(store));
 
   // ---- MCP (read-only query tools for external agents) --------------------------
@@ -479,6 +481,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
       if (kind === "auto" && refs.length) {
         await store.applyLabelToTasks(orgId, label.labelId, refs, "auto");
       }
+      if (kind === "auto") options.automaticTaggingWorker?.wake();
       return c.json({ label: { ...label, taskCount: refs.length } }, 201);
     } catch (err) {
       if (err instanceof DuplicateLabelNameError) return c.json({ error: err.message }, 409);
@@ -797,7 +800,12 @@ export interface HubServeOptions {
 /** Start listening. Resolves once the server has fully shut down (after `signal` fires or
  *  the process exits). Call site is responsible for opening and closing the store. */
 export function startHubServer(opts: HubServeOptions): Promise<void> {
-  const app = createHubApp(opts.store, opts.auth, { secretCipher: opts.secretCipher });
+  const worker = new AutomaticTaggingWorker(opts.store, { secretCipher: opts.secretCipher });
+  const app = createHubApp(opts.store, opts.auth, {
+    secretCipher: opts.secretCipher,
+    automaticTaggingWorker: worker,
+  });
+  worker.start();
 
   return new Promise((resolve, reject) => {
     const server = serve(
@@ -812,7 +820,7 @@ export function startHubServer(opts: HubServeOptions): Promise<void> {
       },
     );
 
-    server.on("close", resolve);
+    server.on("close", () => { void worker.stop().then(resolve, reject); });
     server.on("error", reject);
   });
 }

@@ -20,7 +20,7 @@ import { getProvider } from "../llm/registry.ts";
 import type { LlmConfigField, LlmProvider } from "../llm/types.ts";
 import type { EncryptedSecret } from "../secrets.ts";
 
-export const HUB_SCHEMA_VERSION = 6;
+export const HUB_SCHEMA_VERSION = 7;
 export const HUB_APPLICATION_ID = 0x48554200; // "HUB\0"
 
 // ---- Raw row types (mirrors client argus.db resolved_* column shapes) -------------------
@@ -429,6 +429,29 @@ const ORGANIZATION_LLM_SETTINGS_V5_DDL = ORGANIZATION_LLM_SETTINGS_DDL.replace(
   "",
 );
 
+const AUTO_TAG_QUEUE_DDL = `
+  CREATE TABLE automatic_tagging_queue (
+    job_id       TEXT PRIMARY KEY,
+    org_id       TEXT NOT NULL REFERENCES organizations(org_id) ON DELETE CASCADE,
+    client_id    TEXT NOT NULL,
+    session_id   TEXT NOT NULL,
+    task_seq     INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    description  TEXT NOT NULL,
+    outcome      TEXT,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    available_at INTEGER NOT NULL,
+    claimed_at   INTEGER,
+    last_error   TEXT,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    UNIQUE (org_id, client_id, session_id, task_seq, content_hash)
+  );
+  CREATE INDEX automatic_tagging_queue_ready
+    ON automatic_tagging_queue(status, available_at);
+`;
+
 const CREATE_HUB_SCHEMA_SQL = `
   CREATE TABLE organizations (
     org_id     TEXT PRIMARY KEY,
@@ -615,6 +638,7 @@ const CREATE_HUB_SCHEMA_SQL = `
   ${RESOLVED_SESSION_LABELS_DDL}
   ${HUB_LABELS_DDL}
   ${ORGANIZATION_LLM_SETTINGS_DDL}
+  ${AUTO_TAG_QUEUE_DDL}
 `;
 
 // Forward-only, in-place migrations keyed by the version they upgrade FROM. Each step is purely
@@ -652,6 +676,8 @@ const HUB_MIGRATIONS: Record<number, string> = {
     ALTER TABLE hub_task_labels ADD COLUMN removed INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE organization_task_llm ADD COLUMN automatic_tagging_enabled INTEGER NOT NULL DEFAULT 0;
   `,
+  // v6 → v7: durable continuous-classification work queue.
+  6: AUTO_TAG_QUEUE_DDL,
 };
 
 // ---- DB open / init ---------------------------------------------------------------------
@@ -843,6 +869,15 @@ export interface TaskLlmSettings {
 export interface AutomaticTaggingEligibility {
   eligible: boolean;
   reason?: string;
+}
+
+export interface AutomaticTaggingJob extends TaskLabelRef {
+  jobId: string;
+  orgId: string;
+  contentHash: string;
+  description: string;
+  outcome?: string;
+  attempts: number;
 }
 
 export interface LlmSecretStatus {
@@ -1292,6 +1327,29 @@ export class HubStore {
   ): Promise<{ sessionsUpserted: number }> {
     return this.schedule(async () => {
       await transaction(this.db, async () => {
+        const incomingTasks = rows.tasks.filter((task) =>
+          rows.sessions.some((session) => session.session_id === task.session_id));
+        const previousTaskContent = new Map<string, string>();
+        for (const task of incomingTasks) {
+          const previous = await get<{ task_json: string }>(
+            this.db,
+            `SELECT task_json FROM resolved_tasks
+             WHERE org_id = ? AND client_id = ? AND session_id = ? AND seq = ?`,
+            [orgId, clientId, task.session_id, task.seq],
+          );
+          if (previous) previousTaskContent.set(`${task.session_id}:${task.seq}`, previous.task_json);
+        }
+        const preservedTaskLabels = await all<{
+          session_id: string; task_seq: number; label_id: string;
+          applied_by: string; removed: number; applied_at_ms: number;
+        }>(
+          this.db,
+          `SELECT session_id, task_seq, label_id, applied_by, removed, applied_at_ms
+           FROM hub_task_labels
+           WHERE org_id = ? AND client_id = ?
+             AND session_id IN (${rows.sessions.map(() => "?").join(",") || "NULL"})`,
+          [orgId, clientId, ...rows.sessions.map((session) => session.session_id)],
+        );
         for (const session of rows.sessions) {
           const sid = session.session_id;
           await run(
@@ -1388,6 +1446,52 @@ export class HubStore {
             l.applied_by, l.target_kind, l.task_seq, l.applied_at_ms,
           ]),
         );
+
+        await insertRows(
+          this.db,
+          "hub_task_labels",
+          [
+            "org_id", "client_id", "session_id", "task_seq", "label_id",
+            "applied_by", "removed", "applied_at_ms",
+          ],
+          preservedTaskLabels.map((label) => [
+            orgId, clientId, label.session_id, label.task_seq, label.label_id,
+            label.applied_by, label.removed, label.applied_at_ms,
+          ]),
+        );
+
+        for (const task of incomingTasks) {
+          let fact: TaskFact;
+          try { fact = JSON.parse(task.task_json) as TaskFact; } catch { continue; }
+          const revision = JSON.stringify({
+            description: fact.description ?? "",
+            outcome: fact.outcome ?? null,
+          });
+          const previousRaw = previousTaskContent.get(`${task.session_id}:${task.seq}`);
+          let previousRevision: string | undefined;
+          if (previousRaw) {
+            try {
+              const previous = JSON.parse(previousRaw) as TaskFact;
+              previousRevision = JSON.stringify({
+                description: previous.description ?? "",
+                outcome: previous.outcome ?? null,
+              });
+            } catch {}
+          }
+          if (previousRevision === revision) continue;
+          const contentHash = createHash("sha256").update(revision).digest("hex");
+          await run(
+            this.db,
+            `INSERT OR IGNORE INTO automatic_tagging_queue(
+               job_id, org_id, client_id, session_id, task_seq, content_hash,
+               description, outcome, status, attempts, available_at, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)`,
+            [
+              `tagjob-${randomUUID()}`, orgId, clientId, task.session_id, task.seq, contentHash,
+              fact.description ?? "", fact.outcome ?? null, now, now, now,
+            ],
+          );
+        }
 
         await run(
           this.db,
@@ -2833,6 +2937,115 @@ export class HubStore {
     if (this.closed) return Promise.resolve();
     this.closed = true;
     return this.queue.then(() => closeDatabase(this.db), () => closeDatabase(this.db));
+  }
+
+  claimAutomaticTaggingJobs(
+    now = Date.now(),
+    limit = 20,
+    staleAfterMs = 60_000,
+  ): Promise<AutomaticTaggingJob[]> {
+    return this.schedule(async () => transaction(this.db, async () => {
+      await run(
+        this.db,
+        `UPDATE automatic_tagging_queue
+         SET status = 'pending', claimed_at = NULL, updated_at = ?
+         WHERE status = 'processing' AND claimed_at <= ?`,
+        [now, now - staleAfterMs],
+      );
+      const rows = await all<{
+        job_id: string; org_id: string; client_id: string; session_id: string; task_seq: number;
+        content_hash: string; description: string; outcome: string | null; attempts: number;
+      }>(
+        this.db,
+        `SELECT job_id, org_id, client_id, session_id, task_seq, content_hash,
+                description, outcome, attempts
+         FROM automatic_tagging_queue
+         WHERE status IN ('pending', 'failed') AND available_at <= ? AND attempts < 5
+         ORDER BY created_at, job_id
+         LIMIT ?`,
+        [now, Math.max(1, Math.min(limit, 100))],
+      );
+      for (const row of rows) {
+        await run(
+          this.db,
+          `UPDATE automatic_tagging_queue
+           SET status = 'processing', attempts = attempts + 1, claimed_at = ?, updated_at = ?
+           WHERE job_id = ? AND status IN ('pending', 'failed')`,
+          [now, now, row.job_id],
+        );
+      }
+      return rows.map((row) => ({
+        jobId: row.job_id,
+        orgId: row.org_id,
+        clientId: row.client_id,
+        sessionId: row.session_id,
+        taskSeq: row.task_seq,
+        contentHash: row.content_hash,
+        description: row.description,
+        ...(row.outcome !== null ? { outcome: row.outcome } : {}),
+        attempts: row.attempts + 1,
+      }));
+    }));
+  }
+
+  completeAutomaticTaggingJobs(jobIds: string[], now = Date.now()): Promise<void> {
+    return this.schedule(async () => {
+      for (const jobId of jobIds) {
+        await run(
+          this.db,
+          `UPDATE automatic_tagging_queue
+           SET status = 'completed', claimed_at = NULL, last_error = NULL, updated_at = ?
+           WHERE job_id = ? AND status = 'processing'`,
+          [now, jobId],
+        );
+      }
+    });
+  }
+
+  failAutomaticTaggingJobs(
+    jobs: AutomaticTaggingJob[],
+    safeError: string,
+    now = Date.now(),
+  ): Promise<void> {
+    return this.schedule(async () => {
+      for (const job of jobs) {
+        const capped = job.attempts >= 5;
+        const backoffMs = Math.min(60_000, 1_000 * 2 ** Math.max(0, job.attempts - 1));
+        await run(
+          this.db,
+          `UPDATE automatic_tagging_queue
+           SET status = ?, available_at = ?, claimed_at = NULL, last_error = ?, updated_at = ?
+           WHERE job_id = ? AND status = 'processing'`,
+          [capped ? "dead" : "failed", now + backoffMs, safeError.slice(0, 300), now, job.jobId],
+        );
+      }
+    });
+  }
+
+  releaseAutomaticTaggingJobs(jobs: AutomaticTaggingJob[], now = Date.now()): Promise<void> {
+    return this.schedule(async () => {
+      for (const job of jobs) {
+        await run(
+          this.db,
+          `UPDATE automatic_tagging_queue
+           SET status = 'pending', attempts = MAX(0, attempts - 1),
+               available_at = ?, claimed_at = NULL, updated_at = ?
+           WHERE job_id = ? AND status = 'processing'`,
+          [now, now, job.jobId],
+        );
+      }
+    });
+  }
+
+  automaticTaggingQueueCounts(orgId: string): Promise<Record<string, number>> {
+    return this.schedule(async () => {
+      const rows = await all<{ status: string; count: number }>(
+        this.db,
+        "SELECT status, COUNT(*) AS count FROM automatic_tagging_queue WHERE org_id = ? GROUP BY status",
+        [orgId],
+      );
+      return Object.fromEntries(rows.map((row) => [row.status, row.count]));
+    });
   }
 }
 
