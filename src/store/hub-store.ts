@@ -19,7 +19,7 @@ import { emptyFrictionTotals, foldFriction, HIGH_TOKEN_GROWTH_RATIO } from "../h
 import type { LlmConfigField, LlmProvider } from "../llm/types.ts";
 import type { EncryptedSecret } from "../secrets.ts";
 
-export const HUB_SCHEMA_VERSION = 5;
+export const HUB_SCHEMA_VERSION = 6;
 export const HUB_APPLICATION_ID = 0x48554200; // "HUB\0"
 
 // ---- Raw row types (mirrors client argus.db resolved_* column shapes) -------------------
@@ -196,16 +196,22 @@ export class LabelNotFoundError extends Error {
   }
 }
 
-/** Hub-level task label: a hub admin creates it, then applies it directly to individual tasks.
- *  Distinct from client-synced `resolved_session_labels` — see ARGUS_HUB_LABELS_PLAN.md. */
+/** Hub-level task label — distinct from client-synced `resolved_session_labels`. Manual labels
+ *  are created and applied directly by a hub admin; auto labels are seeded by an LLM candidate
+ *  search over existing tasks (see classify/task-labeler.ts) and reviewed before being applied. */
 export interface LabelInfo {
   labelId: string;
   orgId: string;
   name: string;
+  description: string | null;
+  kind: "manual" | "auto";
   createdAt: number;
   taskCount: number;
 }
 
+/** One task a label is (or was) applied to. `appliedBy` distinguishes a human click from the
+ *  classifier; `removed` is a sticky per-task override — once set it survives future candidate
+ *  searches for the same label so a rejected/undone match doesn't silently reappear. */
 export interface TaskLabelRef {
   clientId: string;
   sessionId: string;
@@ -215,6 +221,8 @@ export interface TaskLabelRef {
 export interface TaskLabelRow extends TaskLabelRef {
   labelId: string;
   name: string;
+  kind: "manual" | "auto";
+  appliedBy: "manual" | "auto";
 }
 
 // ---- SQL helpers (same patterns as store.ts) --------------------------------------------
@@ -330,23 +338,30 @@ const RESOLVED_SESSION_LABELS_DDL = `
 
 // Hub-computed task labels (added in schema v4, #26). Kept separate from
 // resolved_session_labels: that table is client-synced data ("client sends applied labels
-// only"), while these are created and applied by a hub admin directly.
+// only"), while these are defined and applied by the Hub itself (manually by an admin, or by
+// the LLM candidate search), so mixing the two would blur who authored a label.
 const HUB_LABELS_DDL = `
   CREATE TABLE hub_labels (
     label_id    TEXT PRIMARY KEY,
     org_id      TEXT NOT NULL REFERENCES organizations(org_id),
     name        TEXT NOT NULL,
+    description TEXT,
+    kind        TEXT NOT NULL,
     created_at  INTEGER NOT NULL,
     UNIQUE (org_id, name)
   );
   CREATE INDEX hub_labels_org ON hub_labels(org_id);
 
+  -- One row per (label, task). removed=1 is a sticky override: an admin removed this label from
+  -- this specific task, and future candidate-search runs for the same label must not re-add it.
   CREATE TABLE hub_task_labels (
     org_id        TEXT NOT NULL,
     client_id     TEXT NOT NULL,
     session_id    TEXT NOT NULL,
     task_seq      INTEGER NOT NULL,
     label_id      TEXT NOT NULL REFERENCES hub_labels(label_id) ON DELETE CASCADE,
+    applied_by    TEXT NOT NULL,
+    removed       INTEGER NOT NULL DEFAULT 0,
     applied_at_ms INTEGER NOT NULL,
     PRIMARY KEY (org_id, client_id, session_id, task_seq, label_id),
     FOREIGN KEY (org_id, client_id, session_id) REFERENCES resolved_sessions(org_id, client_id, session_id) ON DELETE CASCADE
@@ -600,6 +615,13 @@ const HUB_MIGRATIONS: Record<number, string> = {
   3: HUB_LABELS_DDL,
   // v4 → v5: organization-scoped task LLM settings and encrypted secrets.
   4: ORGANIZATION_LLM_SETTINGS_DDL,
+  // v5 → v6: automatic label metadata and sticky removal provenance.
+  5: `
+    ALTER TABLE hub_labels ADD COLUMN description TEXT;
+    ALTER TABLE hub_labels ADD COLUMN kind TEXT NOT NULL DEFAULT 'manual';
+    ALTER TABLE hub_task_labels ADD COLUMN applied_by TEXT NOT NULL DEFAULT 'manual';
+    ALTER TABLE hub_task_labels ADD COLUMN removed INTEGER NOT NULL DEFAULT 0;
+  `,
 };
 
 // ---- DB open / init ---------------------------------------------------------------------
@@ -2232,12 +2254,19 @@ export class HubStore {
 
   // ---- Hub labels (GET/POST/DELETE /api/labels, POST /api/task-labels) -------------------
   //
-  // Distinct from resolved_session_labels (client-synced). These are created and applied
-  // directly by a hub admin — no auto-classification (see ARGUS_HUB_LABELS_PLAN.md for why
-  // that's scoped out of this pass).
+  // Distinct from resolved_session_labels (client-synced). These are hub-authored: created by
+  // an admin (manual) or seeded by an LLM candidate search (auto, see classify/task-labeler.ts),
+  // then applied per-task via setTaskLabel. A removed=1 row is a sticky override so a rejected
+  // or manually-undone match doesn't reappear the next time candidate search runs.
 
   /** Create a label. Throws DuplicateLabelNameError if the name is already taken in this org. */
-  createLabel(orgId: string, name: string, now = Date.now()): Promise<LabelInfo> {
+  createLabel(
+    orgId: string,
+    name: string,
+    kind: "manual" | "auto" = "manual",
+    description: string | null = null,
+    now = Date.now(),
+  ): Promise<LabelInfo> {
     return this.schedule(async () => {
       const existing = await get<{ label_id: string }>(
         this.db,
@@ -2249,19 +2278,23 @@ export class HubStore {
       const labelId = `label-${randomUUID()}`;
       await run(
         this.db,
-        "INSERT INTO hub_labels(label_id, org_id, name, created_at) VALUES (?, ?, ?, ?)",
-        [labelId, orgId, name, now],
+        "INSERT INTO hub_labels(label_id, org_id, name, description, kind, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [labelId, orgId, name, description, kind, now],
       );
-      return { labelId, orgId, name, createdAt: now, taskCount: 0 };
+      return { labelId, orgId, name, description, kind, createdAt: now, taskCount: 0 };
     });
   }
 
-  /** Every label in an org with its current applied-task count, ordered by name. */
+  /** Every label in an org with its current (non-removed) applied-task count, ordered by name. */
   listLabels(orgId: string): Promise<LabelInfo[]> {
     return this.schedule(async () => {
-      const rows = await all<{ label_id: string; name: string; created_at: number; task_count: number }>(
+      const rows = await all<{
+        label_id: string; name: string; description: string | null; kind: string;
+        created_at: number; task_count: number;
+      }>(
         this.db,
-        `SELECT l.label_id, l.name, l.created_at, COUNT(tl.label_id) AS task_count
+        `SELECT l.label_id, l.name, l.description, l.kind, l.created_at,
+                COUNT(CASE WHEN tl.removed = 0 THEN 1 END) AS task_count
          FROM hub_labels l
          LEFT JOIN hub_task_labels tl ON tl.org_id = l.org_id AND tl.label_id = l.label_id
          WHERE l.org_id = ?
@@ -2270,7 +2303,13 @@ export class HubStore {
         [orgId],
       );
       return rows.map((r) => ({
-        labelId: r.label_id, orgId, name: r.name, createdAt: r.created_at, taskCount: r.task_count,
+        labelId: r.label_id,
+        orgId,
+        name: r.name,
+        description: r.description,
+        kind: r.kind as "manual" | "auto",
+        createdAt: r.created_at,
+        taskCount: r.task_count,
       }));
     });
   }
@@ -2294,13 +2333,15 @@ export class HubStore {
     });
   }
 
-  /** Apply or remove a label on a single task. Throws LabelNotFoundError if `labelId` doesn't
-   *  exist in the org. */
+  /** Apply or remove a label on a single task. Removing sets removed=1 rather than deleting the
+   *  row, so the override is sticky against future candidate-search runs for this label. Throws
+   *  LabelNotFoundError if `labelId` doesn't exist in the org. */
   setTaskLabel(
     orgId: string,
     ref: TaskLabelRef,
     labelId: string,
     applied: boolean,
+    appliedBy: "manual" | "auto" = "manual",
     now = Date.now(),
   ): Promise<void> {
     return this.schedule(async () => {
@@ -2311,27 +2352,47 @@ export class HubStore {
       );
       if (!exists) throw new LabelNotFoundError(labelId);
 
-      if (applied) {
-        await run(
-          this.db,
-          `INSERT INTO hub_task_labels(org_id, client_id, session_id, task_seq, label_id, applied_at_ms)
-           VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(org_id, client_id, session_id, task_seq, label_id) DO UPDATE SET applied_at_ms = excluded.applied_at_ms`,
-          [orgId, ref.clientId, ref.sessionId, ref.taskSeq, labelId, now],
-        );
-      } else {
-        await run(
-          this.db,
-          `DELETE FROM hub_task_labels
-           WHERE org_id = ? AND client_id = ? AND session_id = ? AND task_seq = ? AND label_id = ?`,
-          [orgId, ref.clientId, ref.sessionId, ref.taskSeq, labelId],
-        );
-      }
+      await run(
+        this.db,
+        `INSERT INTO hub_task_labels(org_id, client_id, session_id, task_seq, label_id, applied_by, removed, applied_at_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(org_id, client_id, session_id, task_seq, label_id)
+         DO UPDATE SET applied_by = excluded.applied_by, removed = excluded.removed, applied_at_ms = excluded.applied_at_ms`,
+        [orgId, ref.clientId, ref.sessionId, ref.taskSeq, labelId, appliedBy, applied ? 0 : 1, now],
+      );
     });
   }
 
-  /** Labels applied to a set of tasks, keyed by "clientId:sessionId:taskSeq". Used to annotate
-   *  the task list (GET /api/tasks) without a per-row query. */
+  /** Apply the same label to many tasks at once (the auto-label commit/backfill step). Skips
+   *  tasks that already carry a sticky removed=1 override for this label, so a prior manual
+   *  rejection survives being re-offered as a fresh candidate. */
+  applyLabelToTasks(
+    orgId: string,
+    labelId: string,
+    refs: TaskLabelRef[],
+    appliedBy: "manual" | "auto",
+    now = Date.now(),
+  ): Promise<void> {
+    return this.schedule(async () => {
+      if (!refs.length) return;
+      await transaction(this.db, async () => {
+        for (const ref of refs) {
+          await run(
+            this.db,
+            `INSERT INTO hub_task_labels(org_id, client_id, session_id, task_seq, label_id, applied_by, removed, applied_at_ms)
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+             ON CONFLICT(org_id, client_id, session_id, task_seq, label_id)
+             DO UPDATE SET applied_at_ms = excluded.applied_at_ms
+             WHERE hub_task_labels.removed = 0`,
+            [orgId, ref.clientId, ref.sessionId, ref.taskSeq, labelId, appliedBy, now],
+          );
+        }
+      });
+    });
+  }
+
+  /** Non-removed labels applied to a set of tasks, keyed by "clientId:sessionId:taskSeq". Used
+   *  to annotate the task list (GET /api/tasks) without a per-row query. */
   listLabelsForTasks(orgId: string, refs: TaskLabelRef[]): Promise<Map<string, TaskLabelRow[]>> {
     return this.schedule(async () => {
       const out = new Map<string, TaskLabelRow[]>();
@@ -2339,12 +2400,15 @@ export class HubStore {
       for (const part of chunk(refs, 200)) {
         const placeholders = part.map(() => "(?, ?, ?)").join(", ");
         const params = part.flatMap((r) => [r.clientId, r.sessionId, r.taskSeq]);
-        const rows = await all<{ client_id: string; session_id: string; task_seq: number; label_id: string; name: string }>(
+        const rows = await all<{
+          client_id: string; session_id: string; task_seq: number;
+          label_id: string; name: string; kind: string; applied_by: string;
+        }>(
           this.db,
-          `SELECT tl.client_id, tl.session_id, tl.task_seq, tl.label_id, l.name
+          `SELECT tl.client_id, tl.session_id, tl.task_seq, tl.label_id, l.name, l.kind, tl.applied_by
            FROM hub_task_labels tl
            JOIN hub_labels l ON l.org_id = tl.org_id AND l.label_id = tl.label_id
-           WHERE tl.org_id = ?
+           WHERE tl.org_id = ? AND tl.removed = 0
              AND (tl.client_id, tl.session_id, tl.task_seq) IN (${placeholders})`,
           [orgId, ...params],
         );
@@ -2352,7 +2416,8 @@ export class HubStore {
           const key = `${r.client_id}:${r.session_id}:${r.task_seq}`;
           const row: TaskLabelRow = {
             clientId: r.client_id, sessionId: r.session_id, taskSeq: r.task_seq,
-            labelId: r.label_id, name: r.name,
+            labelId: r.label_id, name: r.name, kind: r.kind as "manual" | "auto",
+            appliedBy: r.applied_by as "manual" | "auto",
           };
           const list = out.get(key);
           if (list) list.push(row); else out.set(key, [row]);
