@@ -35,6 +35,13 @@ import {
 import type { AdminAuth } from "../admin-auth.ts";
 import { verifySession, makeSessionCookie, clearSessionCookie } from "../admin-auth.ts";
 import { LOGIN_PAGE } from "./pages.ts";
+import { complete, getProvider, isLlmProvider, type ExecuteCommand } from "../llm/index.ts";
+import type { SecretCipher } from "../secrets.ts";
+import {
+  describeSettings,
+  SettingsValidationError,
+  validateSettingWrite,
+} from "../settings.ts";
 
 // ---- Query param parsing ----------------------------------------------------------------
 //
@@ -57,7 +64,14 @@ function requestHost(c: Context): string | undefined {
  *  `app.request(...)` directly without starting a real server.
  *  `auth` is required in production (passed by cli.ts); omit in tests that don't
  *  exercise the login flow — routes are open when auth is undefined. */
-export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
+export interface HubAppOptions {
+  secretCipher?: SecretCipher;
+  fetch?: typeof fetch;
+  executeCommand?: ExecuteCommand;
+  connectionTimeoutMs?: number;
+}
+
+export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppOptions = {}): Hono {
   const app = new Hono();
 
   // ---- Health check (no auth) ---------------------------------------------------
@@ -116,6 +130,130 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
   // ---- MCP (read-only query tools for external agents) --------------------------
 
   mountMcp(app, store, auth);
+
+  // ---- Task LLM settings -------------------------------------------------------
+
+  const currentOrgId = async () => {
+    const orgId = await store.getDefaultOrgId();
+    return orgId ?? null;
+  };
+
+  app.get("/api/settings", async (c) => {
+    const orgId = await currentOrgId();
+    if (!orgId) return c.json({ error: "No organization configured." }, 503);
+    return c.json(describeSettings(await store.readTaskLlmSettings(orgId)));
+  });
+
+  app.put("/api/settings/:path", async (c) => {
+    const orgId = await currentOrgId();
+    if (!orgId) return c.json({ error: "No organization configured." }, 503);
+    const body = await c.req.json().catch(() => null) as { value?: unknown } | null;
+    if (!body || !Object.hasOwn(body, "value")) return c.json({ error: 'Missing required "value".' }, 400);
+    try {
+      const write = validateSettingWrite(c.req.param("path"), body.value);
+      if (write.kind === "provider") {
+        await store.setTaskLlmProvider(orgId, write.provider, Date.now());
+      } else {
+        await store.setTaskLlmProviderField(orgId, write.provider, write.field, write.value, Date.now());
+      }
+      return c.json(describeSettings(await store.readTaskLlmSettings(orgId)));
+    } catch (error) {
+      if (error instanceof SettingsValidationError) return c.json({ error: error.message }, error.status);
+      throw error;
+    }
+  });
+
+  app.get("/api/settings/secrets/:provider", async (c) => {
+    const providerName = c.req.param("provider");
+    const provider = getProvider(providerName);
+    if (!provider || !provider.requiresApiKey) return c.json({ error: "Unknown API-key provider." }, 404);
+    const orgId = await currentOrgId();
+    if (!orgId) return c.json({ error: "No organization configured." }, 503);
+    return c.json(await store.readLlmSecretStatus(orgId, provider.name));
+  });
+
+  app.post("/api/settings/secrets/:provider", async (c) => {
+    const providerName = c.req.param("provider");
+    const provider = getProvider(providerName);
+    if (!provider || !provider.requiresApiKey) return c.json({ error: "Unknown API-key provider." }, 404);
+    if (!options.secretCipher) return c.json({ error: "Secret encryption is unavailable." }, 503);
+    const body = await c.req.json().catch(() => null) as { value?: unknown } | null;
+    if (!body || typeof body.value !== "string") return c.json({ error: 'The "value" must be a string.' }, 400);
+    const value = body.value.trim();
+    if (!value) return c.json({ error: "API key cannot be blank." }, 400);
+    if (value.length > 16_384) return c.json({ error: "API key is too long." }, 400);
+    const orgId = await currentOrgId();
+    if (!orgId) return c.json({ error: "No organization configured." }, 503);
+    await store.setLlmSecret(
+      orgId,
+      provider.name,
+      options.secretCipher.encrypt(orgId, provider.name, value),
+      value.slice(-4),
+      Date.now(),
+    );
+    return c.json(await store.readLlmSecretStatus(orgId, provider.name));
+  });
+
+  app.delete("/api/settings/secrets/:provider", async (c) => {
+    const providerName = c.req.param("provider");
+    if (!isLlmProvider(providerName) || !getProvider(providerName)?.requiresApiKey) {
+      return c.json({ error: "Unknown API-key provider." }, 404);
+    }
+    const orgId = await currentOrgId();
+    if (!orgId) return c.json({ error: "No organization configured." }, 503);
+    await store.deleteLlmSecret(orgId, providerName);
+    return c.json({ configured: false });
+  });
+
+  app.post("/api/settings/test-connection", async (c) => {
+    const orgId = await currentOrgId();
+    if (!orgId) return c.json({ error: "No organization configured." }, 503);
+    const settings = await store.readTaskLlmSettings(orgId);
+    const providerName = settings.provider;
+    if (!providerName) {
+      return c.json({ ok: false, error: "Choose and save an LLM provider before testing." }, 400);
+    }
+    const provider = getProvider(providerName);
+    if (!provider) return c.json({ ok: false, error: "The configured LLM provider is invalid." }, 400);
+    const config = settings.providerConfigs[providerName] ?? {};
+    let apiKey: string | undefined;
+    if (provider.requiresApiKey) {
+      if (!options.secretCipher) return c.json({ ok: false, error: "Secret encryption is unavailable." }, 503);
+      const encrypted = await store.readEncryptedLlmSecret(orgId, providerName);
+      if (!encrypted) {
+        return c.json({ ok: false, provider: providerName, error: "Add an API key before testing." }, 400);
+      }
+      try {
+        apiKey = options.secretCipher.decrypt(orgId, providerName, encrypted);
+      } catch {
+        return c.json({
+          ok: false,
+          provider: providerName,
+          error: "The stored API key cannot be decrypted. Check HUB_SECRET_KEY and replace the API key.",
+        }, 500);
+      }
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), options.connectionTimeoutMs ?? 15_000);
+    try {
+      const result = await complete(
+        { prompt: "Reply with OK.", maxTokens: 8, signal: controller.signal },
+        { provider: providerName, ...config, apiKey },
+        { fetch: options.fetch, executeCommand: options.executeCommand },
+      );
+      const model = config.model || provider.defaultModel || undefined;
+      if (result.ok) return c.json({ ok: true, provider: providerName, ...(model ? { model } : {}) });
+      return c.json({
+        ok: false,
+        provider: providerName,
+        ...(model ? { model } : {}),
+        error: sanitizeConnectionError(result.error, result.status, providerName, apiKey),
+      }, 502);
+    } finally {
+      clearTimeout(timeout);
+      apiKey = undefined;
+    }
+  });
 
   // ---- Users --------------------------------------------------------------------
 
@@ -558,6 +696,23 @@ const MIME: Record<string, string> = {
   ".map": "application/json; charset=utf-8",
 };
 
+function sanitizeConnectionError(
+  error: string | undefined,
+  status: number | null | undefined,
+  provider: string,
+  apiKey?: string,
+): string {
+  if (status === 401 || status === 403) return "Authentication failed. Check the configured API key.";
+  if (/abort|timeout/i.test(error ?? "")) return "The connection test timed out.";
+  if (/no model|invalid config/i.test(error ?? "")) return "The provider configuration is incomplete or invalid.";
+  if (provider === "command") return "The configured command failed. Check the command on the Hub host.";
+  let safe = (error ?? "Provider request failed.").replaceAll(apiKey ?? "\0", "[redacted]");
+  safe = safe.replace(/(https?:\/\/)[^/\s:@]+:[^/\s@]+@/gi, "$1");
+  safe = safe.replace(/([?&#][^\s]*)/g, "");
+  safe = safe.replace(/(authorization|x-api-key)\s*[:=]\s*[^\s,;]+/gi, "$1: [redacted]");
+  return safe.slice(0, 300) || "Provider request failed.";
+}
+
 /** Locate the compiled hub web SPA: hub/dist/web next to the compiled CLI, or relative to source. */
 function findWebRoot(): string | null {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -591,6 +746,7 @@ export interface HubServeOptions {
   port: number;
   store: HubStore;
   auth: AdminAuth;
+  secretCipher: SecretCipher;
   /** Aborting this signal stops the server gracefully. */
   signal?: AbortSignal;
 }
@@ -598,7 +754,7 @@ export interface HubServeOptions {
 /** Start listening. Resolves once the server has fully shut down (after `signal` fires or
  *  the process exits). Call site is responsible for opening and closing the store. */
 export function startHubServer(opts: HubServeOptions): Promise<void> {
-  const app = createHubApp(opts.store, opts.auth);
+  const app = createHubApp(opts.store, opts.auth, { secretCipher: opts.secretCipher });
 
   return new Promise((resolve, reject) => {
     const server = serve(
