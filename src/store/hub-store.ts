@@ -1014,7 +1014,7 @@ export class HubStore {
   }
 
   setTaskLlmProvider(orgId: string, provider: LlmProvider | null, now: number): Promise<void> {
-    return this.schedule(async () => {
+    return this.schedule(async () => transaction(this.db, async () => {
       await run(
         this.db,
         `INSERT INTO organization_task_llm(org_id, provider, updated_at) VALUES (?, ?, ?)
@@ -1022,7 +1022,7 @@ export class HubStore {
         [orgId, provider, now],
       );
       await this.disableAutomaticTaggingIfIneligible(orgId, now);
-    });
+    }));
   }
 
   setTaskLlmProviderField(
@@ -1034,7 +1034,7 @@ export class HubStore {
   ): Promise<void> {
     const column = ({ model: "model", baseUrl: "base_url", effort: "effort", command: "command" } as const)[field];
     if (!column) return Promise.reject(new Error(`Unsupported LLM provider field: ${field}`));
-    return this.schedule(async () => {
+    return this.schedule(async () => transaction(this.db, async () => {
       await run(
         this.db,
         `INSERT INTO organization_llm_provider_configs(org_id, provider, ${column}, updated_at)
@@ -1044,7 +1044,7 @@ export class HubStore {
         [orgId, provider, value, now],
       );
       await this.disableAutomaticTaggingIfIneligible(orgId, now);
-    });
+    }));
   }
 
   readLlmSecretStatus(orgId: string, provider: LlmProvider): Promise<LlmSecretStatus> {
@@ -1115,14 +1115,14 @@ export class HubStore {
   }
 
   deleteLlmSecret(orgId: string, provider: LlmProvider): Promise<void> {
-    return this.schedule(async () => {
+    return this.schedule(async () => transaction(this.db, async () => {
       await run(
         this.db,
         "DELETE FROM organization_llm_secrets WHERE org_id = ? AND provider = ?",
         [orgId, provider],
       );
       await this.disableAutomaticTaggingIfIneligible(orgId, Date.now());
-    });
+    }));
   }
 
   // ---- Clients --------------------------------------------------------------------------
