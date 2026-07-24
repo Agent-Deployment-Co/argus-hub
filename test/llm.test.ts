@@ -39,6 +39,15 @@ describe("LLM provider registry", () => {
     expect(seen).toBe("helper --flag|system\n\nping");
   });
 
+  test("maps an unexpected provider rejection to a result", async () => {
+    const result = await complete(
+      { prompt: "ping" },
+      { provider: "command", command: "helper" },
+      { executeCommand: async () => { throw new Error("command rejected"); } },
+    );
+    expect(result).toEqual({ ok: false, text: "", error: "command rejected" });
+  });
+
   test("shapes an OpenAI request", async () => {
     let request: RequestInit | undefined;
     const result = await complete(

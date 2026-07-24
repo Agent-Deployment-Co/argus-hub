@@ -25,17 +25,25 @@ export async function complete(
   if (provider.configFields.includes("model") && !model) {
     return { ok: false, text: "", error: `No model is configured for the ${config.provider} provider.` };
   }
-  return provider.complete({
-    system: request.system,
-    prompt: request.prompt,
-    model,
-    maxTokens: request.maxTokens || DEFAULT_MAX_TOKENS,
-    effort: request.effort || config.effort || undefined,
-    baseUrl: config.baseUrl,
-    apiKey: config.apiKey,
-    command: config.command,
-    fetch: deps.fetch ?? fetch,
-    executeCommand: deps.executeCommand,
-    signal: request.signal,
-  });
+  try {
+    return await provider.complete({
+      system: request.system,
+      prompt: request.prompt,
+      model,
+      maxTokens: request.maxTokens || DEFAULT_MAX_TOKENS,
+      effort: request.effort || config.effort || undefined,
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      command: config.command,
+      fetch: deps.fetch ?? fetch,
+      executeCommand: deps.executeCommand,
+      signal: request.signal,
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      text: "",
+      error: error instanceof Error ? error.message : "provider execution failed",
+    };
+  }
 }
