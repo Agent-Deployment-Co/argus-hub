@@ -36,6 +36,11 @@ import type { AdminAuth } from "../admin-auth.ts";
 import { verifySession, makeSessionCookie, clearSessionCookie } from "../admin-auth.ts";
 import { LOGIN_PAGE } from "./pages.ts";
 import { complete, getProvider, isLlmProvider, type ExecuteCommand } from "../llm/index.ts";
+import {
+  LlmConfigurationError,
+  resolveTaskLlmConfig,
+  sanitizeLlmError,
+} from "../llm/resolve.ts";
 import type { SecretCipher } from "../secrets.ts";
 import {
   describeSettings,
@@ -208,37 +213,23 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
   app.post("/api/settings/test-connection", async (c) => {
     const orgId = await currentOrgId();
     if (!orgId) return c.json({ error: "No organization configured." }, 503);
-    const settings = await store.readTaskLlmSettings(orgId);
-    const providerName = settings.provider;
-    if (!providerName) {
-      return c.json({ ok: false, error: "Choose and save an LLM provider before testing." }, 400);
-    }
-    const provider = getProvider(providerName);
-    if (!provider) return c.json({ ok: false, error: "The configured LLM provider is invalid." }, 400);
-    const config = settings.providerConfigs[providerName] ?? {};
-    let apiKey: string | undefined;
-    if (provider.requiresApiKey) {
-      if (!options.secretCipher) return c.json({ ok: false, error: "Secret encryption is unavailable." }, 503);
-      const encrypted = await store.readEncryptedLlmSecret(orgId, providerName);
-      if (!encrypted) {
-        return c.json({ ok: false, provider: providerName, error: "Add an API key before testing." }, 400);
+    let config;
+    try {
+      config = await resolveTaskLlmConfig(store, orgId, options.secretCipher);
+    } catch (error) {
+      if (error instanceof LlmConfigurationError) {
+        return c.json({ ok: false, error: error.message }, error.status);
       }
-      try {
-        apiKey = options.secretCipher.decrypt(orgId, providerName, encrypted);
-      } catch {
-        return c.json({
-          ok: false,
-          provider: providerName,
-          error: "The stored API key cannot be decrypted. Check HUB_SECRET_KEY and replace the API key.",
-        }, 500);
-      }
+      throw error;
     }
+    const providerName = config.provider;
+    const provider = getProvider(providerName)!;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), options.connectionTimeoutMs ?? 15_000);
     try {
       const result = await complete(
         { prompt: "Reply with OK.", maxTokens: 8, signal: controller.signal },
-        { provider: providerName, ...config, apiKey },
+        config,
         { fetch: options.fetch, executeCommand: options.executeCommand },
       );
       const model = config.model || provider.defaultModel || undefined;
@@ -247,11 +238,11 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
         ok: false,
         provider: providerName,
         ...(model ? { model } : {}),
-        error: sanitizeConnectionError(result.error, result.status, providerName, apiKey),
+        error: sanitizeLlmError(result.error, result.status, providerName, config.apiKey),
       }, 502);
     } finally {
       clearTimeout(timeout);
-      apiKey = undefined;
+      config.apiKey = undefined;
     }
   });
 
@@ -695,23 +686,6 @@ const MIME: Record<string, string> = {
   ".ico": "image/x-icon",
   ".map": "application/json; charset=utf-8",
 };
-
-function sanitizeConnectionError(
-  error: string | undefined,
-  status: number | null | undefined,
-  provider: string,
-  apiKey?: string,
-): string {
-  if (status === 401 || status === 403) return "Authentication failed. Check the configured API key.";
-  if (/abort|timeout/i.test(error ?? "")) return "The connection test timed out.";
-  if (/no model|invalid config/i.test(error ?? "")) return "The provider configuration is incomplete or invalid.";
-  if (provider === "command") return "The configured command failed. Check the command on the Hub host.";
-  let safe = (error ?? "Provider request failed.").replaceAll(apiKey ?? "\0", "[redacted]");
-  safe = safe.replace(/(https?:\/\/)[^/\s:@]+:[^/\s@]+@/gi, "$1");
-  safe = safe.replace(/([?&#][^\s]*)/g, "");
-  safe = safe.replace(/(authorization|x-api-key)\s*[:=]\s*[^\s,;]+/gi, "$1: [redacted]");
-  return safe.slice(0, 300) || "Provider request failed.";
-}
 
 /** Locate the compiled hub web SPA: hub/dist/web next to the compiled CLI, or relative to source. */
 function findWebRoot(): string | null {
