@@ -16,6 +16,7 @@ import type {
   Usage,
 } from "../types.ts";
 import { emptyFrictionTotals, foldFriction, HIGH_TOKEN_GROWTH_RATIO } from "../health.ts";
+import { getProvider } from "../llm/registry.ts";
 import type { LlmConfigField, LlmProvider } from "../llm/types.ts";
 import type { EncryptedSecret } from "../secrets.ts";
 
@@ -369,11 +370,35 @@ const HUB_LABELS_DDL = `
   CREATE INDEX hub_task_labels_label ON hub_task_labels(org_id, label_id);
 `;
 
+const HUB_LABELS_V4_DDL = `
+  CREATE TABLE hub_labels (
+    label_id   TEXT PRIMARY KEY,
+    org_id     TEXT NOT NULL REFERENCES organizations(org_id),
+    name       TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (org_id, name)
+  );
+  CREATE INDEX hub_labels_org ON hub_labels(org_id);
+  CREATE TABLE hub_task_labels (
+    org_id        TEXT NOT NULL,
+    client_id     TEXT NOT NULL,
+    session_id    TEXT NOT NULL,
+    task_seq      INTEGER NOT NULL,
+    label_id      TEXT NOT NULL REFERENCES hub_labels(label_id) ON DELETE CASCADE,
+    applied_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (org_id, client_id, session_id, task_seq, label_id),
+    FOREIGN KEY (org_id, client_id, session_id)
+      REFERENCES resolved_sessions(org_id, client_id, session_id) ON DELETE CASCADE
+  );
+  CREATE INDEX hub_task_labels_label ON hub_task_labels(org_id, label_id);
+`;
+
 const ORGANIZATION_LLM_SETTINGS_DDL = `
   CREATE TABLE organization_task_llm (
-    org_id     TEXT PRIMARY KEY REFERENCES organizations(org_id) ON DELETE CASCADE,
-    provider   TEXT,
-    updated_at INTEGER NOT NULL
+    org_id                    TEXT PRIMARY KEY REFERENCES organizations(org_id) ON DELETE CASCADE,
+    provider                  TEXT,
+    updated_at                INTEGER NOT NULL,
+    automatic_tagging_enabled INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE organization_llm_provider_configs (
@@ -399,6 +424,10 @@ const ORGANIZATION_LLM_SETTINGS_DDL = `
     PRIMARY KEY (org_id, provider)
   );
 `;
+const ORGANIZATION_LLM_SETTINGS_V5_DDL = ORGANIZATION_LLM_SETTINGS_DDL.replace(
+  ",\n    automatic_tagging_enabled INTEGER NOT NULL DEFAULT 0\n",
+  "",
+);
 
 const CREATE_HUB_SCHEMA_SQL = `
   CREATE TABLE organizations (
@@ -612,15 +641,16 @@ const HUB_MIGRATIONS: Record<number, string> = {
     CREATE INDEX users_group ON users(org_id, group_id);
   `,
   // v3 → v4: hub-level task labels (#26).
-  3: HUB_LABELS_DDL,
+  3: HUB_LABELS_V4_DDL,
   // v4 → v5: organization-scoped task LLM settings and encrypted secrets.
-  4: ORGANIZATION_LLM_SETTINGS_DDL,
+  4: ORGANIZATION_LLM_SETTINGS_V5_DDL,
   // v5 → v6: automatic label metadata and sticky removal provenance.
   5: `
     ALTER TABLE hub_labels ADD COLUMN description TEXT;
     ALTER TABLE hub_labels ADD COLUMN kind TEXT NOT NULL DEFAULT 'manual';
     ALTER TABLE hub_task_labels ADD COLUMN applied_by TEXT NOT NULL DEFAULT 'manual';
     ALTER TABLE hub_task_labels ADD COLUMN removed INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE organization_task_llm ADD COLUMN automatic_tagging_enabled INTEGER NOT NULL DEFAULT 0;
   `,
 };
 
@@ -806,7 +836,13 @@ export interface TaskLlmProviderConfig {
 
 export interface TaskLlmSettings {
   provider: LlmProvider | null;
+  automaticTaggingEnabled: boolean;
   providerConfigs: Partial<Record<LlmProvider, TaskLlmProviderConfig>>;
+}
+
+export interface AutomaticTaggingEligibility {
+  eligible: boolean;
+  reason?: string;
 }
 
 export interface LlmSecretStatus {
@@ -851,9 +887,9 @@ export class HubStore {
 
   readTaskLlmSettings(orgId: string): Promise<TaskLlmSettings> {
     return this.schedule(async () => {
-      const active = await get<{ provider: LlmProvider | null }>(
+      const active = await get<{ provider: LlmProvider | null; automatic_tagging_enabled: number }>(
         this.db,
-        "SELECT provider FROM organization_task_llm WHERE org_id = ?",
+        "SELECT provider, automatic_tagging_enabled FROM organization_task_llm WHERE org_id = ?",
         [orgId],
       );
       const rows = await all<{
@@ -877,8 +913,69 @@ export class HubStore {
           ...(row.command !== null ? { command: row.command } : {}),
         };
       }
-      return { provider: active?.provider ?? null, providerConfigs };
+      return {
+        provider: active?.provider ?? null,
+        automaticTaggingEnabled: active?.automatic_tagging_enabled === 1,
+        providerConfigs,
+      };
     });
+  }
+
+  private async automaticTaggingEligibilityNow(orgId: string): Promise<AutomaticTaggingEligibility> {
+    const active = await get<{ provider: LlmProvider | null; command: string | null; has_secret: number }>(
+      this.db,
+      `SELECT s.provider, c.command,
+              EXISTS(SELECT 1 FROM organization_llm_secrets k
+                     WHERE k.org_id = s.org_id AND k.provider = s.provider) AS has_secret
+       FROM organization_task_llm s
+       LEFT JOIN organization_llm_provider_configs c
+         ON c.org_id = s.org_id AND c.provider = s.provider
+       WHERE s.org_id = ?`,
+      [orgId],
+    );
+    if (!active?.provider) return { eligible: false, reason: "Select and save an LLM provider first." };
+    const provider = getProvider(active.provider);
+    if (!provider) return { eligible: false, reason: "The saved LLM provider is invalid." };
+    if (provider.requiresApiKey && active.has_secret !== 1) {
+      return { eligible: false, reason: "Add an API key for the saved provider first." };
+    }
+    if (active.provider === "command" && !active.command?.trim()) {
+      return { eligible: false, reason: "Save a non-empty custom command first." };
+    }
+    return { eligible: true };
+  }
+
+  automaticTaggingEligibility(orgId: string): Promise<AutomaticTaggingEligibility> {
+    return this.schedule(() => this.automaticTaggingEligibilityNow(orgId));
+  }
+
+  setAutomaticTaggingEnabled(orgId: string, enabled: boolean, now: number): Promise<void> {
+    return this.schedule(async () => {
+      if (enabled) {
+        const eligibility = await this.automaticTaggingEligibilityNow(orgId);
+        if (!eligibility.eligible) throw new Error(eligibility.reason);
+      }
+      await run(
+        this.db,
+        `INSERT INTO organization_task_llm(org_id, provider, automatic_tagging_enabled, updated_at)
+         VALUES (?, NULL, ?, ?)
+         ON CONFLICT(org_id) DO UPDATE SET
+           automatic_tagging_enabled = excluded.automatic_tagging_enabled,
+           updated_at = excluded.updated_at`,
+        [orgId, enabled ? 1 : 0, now],
+      );
+    });
+  }
+
+  private async disableAutomaticTaggingIfIneligible(orgId: string, now: number): Promise<void> {
+    const eligibility = await this.automaticTaggingEligibilityNow(orgId);
+    if (!eligibility.eligible) {
+      await run(
+        this.db,
+        "UPDATE organization_task_llm SET automatic_tagging_enabled = 0, updated_at = ? WHERE org_id = ?",
+        [now, orgId],
+      );
+    }
   }
 
   setTaskLlmProvider(orgId: string, provider: LlmProvider | null, now: number): Promise<void> {
@@ -889,6 +986,7 @@ export class HubStore {
          ON CONFLICT(org_id) DO UPDATE SET provider = excluded.provider, updated_at = excluded.updated_at`,
         [orgId, provider, now],
       );
+      await this.disableAutomaticTaggingIfIneligible(orgId, now);
     });
   }
 
@@ -910,6 +1008,7 @@ export class HubStore {
            ${column} = excluded.${column}, updated_at = excluded.updated_at`,
         [orgId, provider, value, now],
       );
+      await this.disableAutomaticTaggingIfIneligible(orgId, now);
     });
   }
 
@@ -987,6 +1086,7 @@ export class HubStore {
         "DELETE FROM organization_llm_secrets WHERE org_id = ? AND provider = ?",
         [orgId, provider],
       );
+      await this.disableAutomaticTaggingIfIneligible(orgId, Date.now());
     });
   }
 

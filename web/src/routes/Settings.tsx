@@ -23,7 +23,7 @@ function initialValueMap(
   const values: Record<string, string> = {};
   const providerSetting = response.categories[0].sections[0].settings
     .find((setting) => setting.path === "llm.provider");
-  values["llm.provider"] = providerSetting?.value ?? "";
+  values["llm.provider"] = typeof providerSetting?.value === "string" ? providerSetting.value : "";
   for (const [provider, config] of Object.entries(response.providerConfigs)) {
     for (const [field, value] of Object.entries(config ?? {})) {
       if (typeof value === "string") values[writePath(provider as LlmProvider, field as LlmConfigField)] = value;
@@ -190,6 +190,9 @@ function TasksSettingsPane() {
   const section = settings.data?.categories[0].sections[0];
   const provider = (values["llm.provider"] || null) as LlmProvider | null;
   const providerDescriptor = section?.settings.find((setting) => setting.path === "llm.provider");
+  const automaticDescriptor = section?.settings.find((setting) => setting.path === "automaticTaggingEnabled");
+  const automaticEnabled = automaticDescriptor?.value === true;
+  const automaticEligibility = settings.data?.automaticTaggingEligibility;
   const providerSaved = !!provider && providerDescriptor?.value === provider;
   const visibleFields = useMemo(() => section?.settings.filter((setting) =>
     setting.providerScoped && providerSaved && setting.visibleWhen?.in.includes(provider!)) ?? [],
@@ -221,6 +224,29 @@ function TasksSettingsPane() {
         <SaveIndicator status={saveQueue.status} />
       </div>
       <section className="settings-section">
+        <div className="settings-row">
+          <label htmlFor="setting-automatic-tagging" className="settings-row-copy">
+            <span className="settings-row-label">{automaticDescriptor?.label ?? "Automatic task tagging"}</span>
+            <span className="settings-row-description">
+              {automaticEnabled
+                ? "New and changed tasks are classified against automatic labels."
+                : automaticEligibility?.eligible
+                  ? automaticDescriptor?.description
+                  : automaticEligibility?.reason}
+            </span>
+          </label>
+          <input
+            id="setting-automatic-tagging"
+            type="checkbox"
+            role="switch"
+            checked={automaticEnabled}
+            disabled={!automaticEnabled && !automaticEligibility?.eligible}
+            onChange={(event) => {
+              void saveQueue.save("automaticTaggingEnabled", event.currentTarget.checked)
+                .catch(() => undefined);
+            }}
+          />
+        </div>
         <div className="settings-row">
           <label htmlFor="setting-provider" className="settings-row-copy">
             <span className="settings-row-label">{providerDescriptor.label}</span>
@@ -261,7 +287,10 @@ function TasksSettingsPane() {
           );
         })}
         {provider && providerSaved && needsKey && (
-          <SecretField key={provider} provider={provider} onChanged={() => connection.reset()} />
+          <SecretField key={provider} provider={provider} onChanged={() => {
+            connection.reset();
+            void settings.refetch();
+          }} />
         )}
         <div className="settings-test-row">
           <div className="settings-row-copy">

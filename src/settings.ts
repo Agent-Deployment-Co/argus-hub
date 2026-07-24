@@ -5,7 +5,7 @@ import {
   PROVIDERS,
 } from "./llm/index.ts";
 import type { LlmConfigField, LlmProvider } from "./llm/types.ts";
-import type { TaskLlmSettings } from "./store/hub-store.ts";
+import type { AutomaticTaggingEligibility, TaskLlmSettings } from "./store/hub-store.ts";
 
 export interface SelectOption {
   value: string;
@@ -18,9 +18,9 @@ export interface SettingDescriptor {
   field?: LlmConfigField;
   label: string;
   description?: string;
-  control: "select" | "text" | "textarea";
+  control: "toggle" | "select" | "text" | "textarea";
   options?: SelectOption[];
-  value: string | null;
+  value: string | boolean | null;
   providerScoped?: boolean;
   visibleWhen?: { path: "llm.provider"; in: LlmProvider[] };
   placeholderByProvider?: Record<string, string>;
@@ -48,6 +48,7 @@ export interface SettingsResponse {
     sections: [SettingsSection];
   }];
   providerConfigs: Partial<Record<LlmProvider, Record<string, string>>>;
+  automaticTaggingEligibility: AutomaticTaggingEligibility;
 }
 
 const providersFor = (field: LlmConfigField): LlmProvider[] =>
@@ -60,6 +61,12 @@ const providerOptions: SelectOption[] = PROVIDERS.map((provider) => ({
 }));
 
 const BASE_DESCRIPTORS: Omit<SettingDescriptor, "value">[] = [
+  {
+    path: "automaticTaggingEnabled",
+    label: "Automatic task tagging",
+    description: "Classify new and changed tasks against automatic labels.",
+    control: "toggle",
+  },
   {
     path: "llm.provider",
     label: "LLM Provider",
@@ -106,7 +113,13 @@ const BASE_DESCRIPTORS: Omit<SettingDescriptor, "value">[] = [
   },
 ];
 
-export function describeSettings(settings: TaskLlmSettings): SettingsResponse {
+export function describeSettings(
+  settings: TaskLlmSettings,
+  automaticTaggingEligibility: AutomaticTaggingEligibility = {
+    eligible: false,
+    reason: "Select and save an LLM provider first.",
+  },
+): SettingsResponse {
   const providerConfigs = Object.fromEntries(
     Object.entries(settings.providerConfigs).map(([provider, config]) => [
       provider,
@@ -121,7 +134,9 @@ export function describeSettings(settings: TaskLlmSettings): SettingsResponse {
       sections: [{
         settings: BASE_DESCRIPTORS.map((descriptor) => ({
           ...descriptor,
-          value: descriptor.path === "llm.provider" ? settings.provider : null,
+          value: descriptor.path === "automaticTaggingEnabled"
+            ? settings.automaticTaggingEnabled
+            : descriptor.path === "llm.provider" ? settings.provider : null,
         })),
         secretField: {
           key: "llm.apiKey",
@@ -134,10 +149,12 @@ export function describeSettings(settings: TaskLlmSettings): SettingsResponse {
       }],
     }],
     providerConfigs,
+    automaticTaggingEligibility,
   };
 }
 
 export type ValidatedSettingWrite =
+  | { kind: "automaticTagging"; enabled: boolean }
   | { kind: "provider"; provider: LlmProvider | null }
   | { kind: "field"; provider: LlmProvider; field: LlmConfigField; value: string | null };
 
@@ -151,6 +168,12 @@ export class SettingsValidationError extends Error {
 const PROVIDER_CONFIG_PATH = /^llm\.providerConfigs\.([^.]+)\.([^.]+)$/;
 
 export function validateSettingWrite(path: string, raw: unknown): ValidatedSettingWrite {
+  if (path === "automaticTaggingEnabled") {
+    if (typeof raw !== "boolean") {
+      throw new SettingsValidationError("Automatic tagging must be true or false.");
+    }
+    return { kind: "automaticTagging", enabled: raw };
+  }
   if (path === "llm.provider") {
     if (raw === null || raw === "") return { kind: "provider", provider: null };
     if (typeof raw !== "string" || !isLlmProvider(raw)) {

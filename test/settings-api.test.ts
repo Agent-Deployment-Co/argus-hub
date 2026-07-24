@@ -41,7 +41,8 @@ describe("settings API", () => {
   test("starts blank and validates plain setting writes", async () => {
     const { store, app } = await env();
     const initial = await (await app.request("/api/settings")).json();
-    expect(initial.categories[0].sections[0].settings[0].value).toBeNull();
+    expect(initial.categories[0].sections[0].settings[0].value).toBe(false);
+    expect(initial.categories[0].sections[0].settings[1].value).toBeNull();
 
     const saved = await app.request("/api/settings/llm.provider", {
       method: "PUT",
@@ -49,7 +50,7 @@ describe("settings API", () => {
       body: JSON.stringify({ value: "openai" }),
     });
     expect(saved.status).toBe(200);
-    expect((await saved.json()).categories[0].sections[0].settings[0].value).toBe("openai");
+    expect((await saved.json()).categories[0].sections[0].settings[1].value).toBe("openai");
 
     for (const [path, value] of [
       ["llm.provider", "claude-cli"],

@@ -7,10 +7,15 @@ import {
 
 describe("Hub settings descriptors", () => {
   test("has one Tasks category, no implicit provider, and registry-derived choices", () => {
-    const response = describeSettings({ provider: null, providerConfigs: {} });
+    const response = describeSettings({
+      provider: null, automaticTaggingEnabled: false, providerConfigs: {},
+    });
     expect(response.categories).toHaveLength(1);
     expect(response.categories[0].id).toBe("tasks");
-    const provider = response.categories[0].sections[0].settings[0];
+    const automatic = response.categories[0].sections[0].settings[0];
+    expect(automatic?.path).toBe("automaticTaggingEnabled");
+    expect(automatic?.value).toBe(false);
+    const provider = response.categories[0].sections[0].settings[1];
     expect(provider).toBeDefined();
     expect(provider!.value).toBeNull();
     expect(provider!.options?.map((option) => option.value))
@@ -19,7 +24,9 @@ describe("Hub settings descriptors", () => {
   });
 
   test("describes provider fields, defaults, API-key requirements, and command risk", () => {
-    const section = describeSettings({ provider: "command", providerConfigs: {} })
+    const section = describeSettings({
+      provider: "command", automaticTaggingEnabled: false, providerConfigs: {},
+    })
       .categories[0].sections[0];
     const command = section.settings.find((setting) => setting.field === "command");
     const model = section.settings.find((setting) => setting.field === "model");

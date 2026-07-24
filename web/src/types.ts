@@ -19,9 +19,9 @@ export interface SettingDescriptor {
   field?: LlmConfigField;
   label: string;
   description?: string;
-  control: "select" | "text" | "textarea";
+  control: "toggle" | "select" | "text" | "textarea";
   options?: SettingsOption[];
-  value: string | null;
+  value: string | boolean | null;
   providerScoped?: boolean;
   visibleWhen?: { path: "llm.provider"; in: LlmProvider[] };
   placeholderByProvider?: Record<string, string>;
@@ -44,6 +44,7 @@ export interface SettingsResponse {
     }];
   }];
   providerConfigs: Partial<Record<LlmProvider, Partial<Record<LlmConfigField, string>>>>;
+  automaticTaggingEligibility: { eligible: boolean; reason?: string };
 }
 
 export interface SecretStatus {

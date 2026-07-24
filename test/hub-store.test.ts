@@ -372,7 +372,7 @@ describe("schema", () => {
     }
   });
 
-  test("upgrades v4 with the same LLM table layouts as a fresh v5 store", async () => {
+  test("upgrades v4 through the LLM and automatic-label migrations to a fresh v6 store", async () => {
     const freshDir = tempDataDir();
     const migratedDir = tempDataDir();
     const freshStore = await openHubStore(freshDir, 1_000_000);
@@ -387,6 +387,10 @@ describe("schema", () => {
       DROP TABLE organization_llm_secrets;
       DROP TABLE organization_llm_provider_configs;
       DROP TABLE organization_task_llm;
+      ALTER TABLE hub_labels DROP COLUMN description;
+      ALTER TABLE hub_labels DROP COLUMN kind;
+      ALTER TABLE hub_task_labels DROP COLUMN applied_by;
+      ALTER TABLE hub_task_labels DROP COLUMN removed;
       PRAGMA user_version = 4;
     `);
     await closeRaw(before);
@@ -495,7 +499,9 @@ describe("organization task LLM settings", () => {
   test("starts unconfigured and preserves provider-specific fields across switching and clearing", async () => {
     const store = await openHubStore(tempDataDir(), 1_000_000);
     const orgId = (await store.getDefaultOrgId())!;
-    expect(await store.readTaskLlmSettings(orgId)).toEqual({ provider: null, providerConfigs: {} });
+    expect(await store.readTaskLlmSettings(orgId)).toEqual({
+      provider: null, automaticTaggingEnabled: false, providerConfigs: {},
+    });
 
     await store.setTaskLlmProviderField(orgId, "openai", "model", "gpt-test", 10);
     await store.setTaskLlmProviderField(orgId, "gemini", "model", "gemini-test", 11);
@@ -505,6 +511,7 @@ describe("organization task LLM settings", () => {
 
     expect(await store.readTaskLlmSettings(orgId)).toEqual({
       provider: null,
+      automaticTaggingEnabled: false,
       providerConfigs: {
         openai: { model: "gpt-test" },
         gemini: { model: "gemini-test" },
