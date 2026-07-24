@@ -256,6 +256,10 @@ Users can be organized into groups for reporting:
 Deleting a group **ungroups** its members rather than deleting them — `groupId` is nulled on
 each affected user, the users themselves are untouched.
 
+The **Labels** tab manages hub-level task labels — distinct from any labels an Argus client
+applies itself. Create a label there, then apply or remove it on individual tasks from the
+Tasks tab.
+
 ---
 
 ## Query the Hub from an agent (MCP)

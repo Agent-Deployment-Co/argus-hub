@@ -3,7 +3,7 @@ import { Download } from "lucide-react";
 const EXPORT_TABLES = [
   "organizations", "groups", "users", "clients", "client_fingerprint", "client_syncs",
   "resolved_sessions", "resolved_usage", "resolved_tasks", "resolved_interactions",
-  "resolved_invocations", "resolved_session_labels",
+  "resolved_invocations", "resolved_session_labels", "hub_labels", "hub_task_labels",
 ];
 
 /** Data export page: download the whole Hub dataset as a .zip of Snowflake-ready JSONL. */

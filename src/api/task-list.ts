@@ -1,10 +1,17 @@
 import type { HubTaskRow } from "../store/hub-store.ts";
 import type { AgentSource, TaskFact } from "../types.ts";
 
+export interface TaskListItemLabel {
+  labelId: string;
+  name: string;
+}
+
 export interface TaskListItem {
   id: string;
   source: AgentSource;
+  clientId: string;
   sessionId: string;
+  taskSeq: number;
   project: string;
   timestampMs: number | null;
   description: string;
@@ -12,6 +19,7 @@ export interface TaskListItem {
   outcomeReason?: string;
   frustration?: string;
   signals?: string[];
+  labels: TaskListItemLabel[];
 }
 
 export interface TaskListCounts {
@@ -39,12 +47,17 @@ export interface TaskListParams {
   outcomes?: TaskOutcomeFilter[];
 }
 
+// Labels aren't populated here: buildTaskList works over the full (unpaged) filtered set, but
+// labels only need to be fetched for the page actually returned. The caller (serve.ts) fills
+// `labels` in after slicing, via the task-labels.ts helper `attachLabels`.
 function listItem(row: HubTaskRow): TaskListItem {
   const t: TaskFact = row.task;
   return {
     id: t.id,
     source: t.source,
+    clientId: row.clientId,
     sessionId: row.sessionId,
+    taskSeq: row.taskSeq,
     project: row.project,
     timestampMs: t.timestampMs ?? null,
     description: t.description,
@@ -52,6 +65,7 @@ function listItem(row: HubTaskRow): TaskListItem {
     outcomeReason: t.outcomeReason,
     frustration: t.frustration,
     signals: t.signals,
+    labels: [],
   };
 }
 

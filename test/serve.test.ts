@@ -875,6 +875,106 @@ describe("GET /api/tasks", () => {
   });
 });
 
+// ---- Hub labels -------------------------------------------------------------------------
+
+describe("Hub labels", () => {
+  test("POST /api/labels creates a label, GET lists it, DELETE removes it", async () => {
+    const { store } = await openTestEnv();
+    const app = createHubApp(store);
+    try {
+      const create = await app.request("/api/labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Needs review" }),
+      });
+      expect(create.status).toBe(201);
+      const created = (await create.json()) as { label: { labelId: string; name: string } };
+      expect(created.label.name).toBe("Needs review");
+
+      const list = await app.request("/api/labels");
+      const listed = (await list.json()) as { labels: Array<{ labelId: string; name: string }> };
+      expect(listed.labels.map((l) => l.name)).toEqual(["Needs review"]);
+
+      const del = await app.request(`/api/labels/${created.label.labelId}`, { method: "DELETE" });
+      expect(del.status).toBe(200);
+      const listAfter = (await (await app.request("/api/labels")).json()) as { labels: unknown[] };
+      expect(listAfter.labels).toEqual([]);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("POST /api/labels rejects a duplicate name with 409", async () => {
+    const { store } = await openTestEnv();
+    const app = createHubApp(store);
+    try {
+      const body = JSON.stringify({ name: "Bug fix" });
+      const first = await app.request("/api/labels", { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      expect(first.status).toBe(201);
+      const second = await app.request("/api/labels", { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      expect(second.status).toBe(409);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("POST /api/task-labels applies a label, which then shows up on GET /api/tasks", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncWithTask(env, "alice@example.com", "label-sess", { description: "Fix the login bug" });
+      const clientId = env.clientFor("alice@example.com");
+
+      const create = await app.request("/api/labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Bug fix" }),
+      });
+      const { label } = (await create.json()) as { label: { labelId: string } };
+
+      const apply = await app.request("/api/task-labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ labelId: label.labelId, clientId, sessionId: "label-sess", taskSeq: 0, applied: true }),
+      });
+      expect(apply.status).toBe(200);
+
+      const tasks = (await (await app.request("/api/tasks")).json()) as {
+        rows: Array<{ labels: Array<{ labelId: string; name: string }> }>;
+      };
+      expect(tasks.rows[0]!.labels).toEqual([{ labelId: label.labelId, name: "Bug fix" }]);
+
+      const remove = await app.request("/api/task-labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ labelId: label.labelId, clientId, sessionId: "label-sess", taskSeq: 0, applied: false }),
+      });
+      expect(remove.status).toBe(200);
+      const tasksAfter = (await (await app.request("/api/tasks")).json()) as { rows: Array<{ labels: unknown[] }> };
+      expect(tasksAfter.rows[0]!.labels).toEqual([]);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("POST /api/task-labels returns 404 for an unknown labelId", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncWithTask(env, "alice@example.com", "label-404-sess", {});
+      const clientId = env.clientFor("alice@example.com");
+      const res = await app.request("/api/task-labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ labelId: "label-nope", clientId, sessionId: "label-404-sess", taskSeq: 0, applied: true }),
+      });
+      expect(res.status).toBe(404);
+    } finally {
+      await env.store.close();
+    }
+  });
+});
+
 // ---- GET /api/activity ------------------------------------------------------------------
 
 const WIDE_RANGE = "since=2020-01-01&until=2030-01-01";

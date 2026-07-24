@@ -1,5 +1,5 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
-import { Activity, Download, ListTodo, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Sun, Users, Wrench, type LucideIcon } from "lucide-react";
+import { Activity, Download, ListTodo, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Sun, Tag, Users, Wrench, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTheme } from "../lib/theme";
 import { useUserInfo } from "../lib/users";
@@ -29,6 +29,7 @@ const NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "/tasks", label: "Tasks", icon: ListTodo },
   { to: "/tools", label: "Tools", icon: Wrench },
   { to: "/users", label: "Team", icon: Users },
+  { to: "/labels", label: "Labels", icon: Tag },
   { to: "/export", label: "Export", icon: Download },
 ];
 
@@ -37,6 +38,7 @@ const ROUTE_TITLES: Record<string, string> = {
   "/tasks": "Tasks · Argus Hub",
   "/tools": "Tools · Argus Hub",
   "/users": "Team · Argus Hub",
+  "/labels": "Labels · Argus Hub",
   "/export": "Export · Argus Hub",
 };
 
