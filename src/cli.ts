@@ -29,10 +29,7 @@ const serve = defineCommand({
     },
   },
   async run({ args }) {
-    // Parse once, before opening the database or listening. The cipher is wired into
-    // the settings API in the corresponding API checkpoint.
     const secretCipher = createSecretCipher(parseHubSecretKey(process.env.HUB_SECRET_KEY));
-    void secretCipher;
     const port = Number(args.port);
     const insecureCookieHosts = process.env.HUB_INSECURE_COOKIE_HOSTS
       ?.split(",")
@@ -50,7 +47,7 @@ const serve = defineCommand({
       process.once(sig, () => ac.abort());
     }
 
-    await startHubServer({ port, store, auth, signal: ac.signal });
+    await startHubServer({ port, store, auth, secretCipher, signal: ac.signal });
     store.close();
   },
 });
