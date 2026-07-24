@@ -537,17 +537,13 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 .settings-save-status.is-error { max-width: 320px; color: var(--racing-red); border-radius: 7px; }
 .settings-save-status .spin { animation: spin .8s linear infinite; }
 .settings-section {
-  margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 13px;
-  background: var(--surface);
+  margin: 0;
 }
 .settings-row, .settings-test-row {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, 380px);
-  align-items: center; gap: 28px; padding: 20px 22px;
+  align-items: center; gap: 28px; padding: 20px 0; border-bottom: 1px solid var(--line);
 }
-.settings-row + .settings-row, .settings-row + .settings-test-row,
-.settings-provider-note + .settings-row, .settings-provider-note + .settings-test-row {
-  border-top: 1px solid var(--line);
-}
+.settings-section > :last-child { border-bottom: 0; }
 .settings-row-copy { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .settings-row-label {
   color: var(--heading); font: 600 13px "Poppins", "Avenir Next", Arial, sans-serif;
@@ -564,7 +560,7 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 .settings-select { cursor: pointer; }
 .settings-textarea { min-height: 82px; height: auto; padding-top: 8px; padding-bottom: 8px; resize: vertical; }
 .settings-provider-note {
-  margin: 0; padding: 12px 22px; border-top: 1px solid var(--line);
+  margin: 0; padding: 12px; border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--sky-surge) 6%, transparent);
   color: var(--muted); font-size: 12.5px;
 }
@@ -602,7 +598,6 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
   margin-top: 3px; color: var(--racing-red); font-size: 12.5px; line-height: 1.4;
 }
 .settings-test-success { color: var(--sky-surge); }
-.settings-test-row { border-top: 1px solid var(--line); }
 .settings-test-row > button { justify-self: end; }
 .settings-not-found p { color: var(--muted); }
 .settings-load-error { color: var(--racing-red); }
@@ -630,7 +625,7 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
   .settings-pane h2, .settings-not-found h2 { font-size: 21px; }
   .settings-save-status.is-error { max-width: 180px; white-space: normal; text-align: right; }
   .settings-row, .settings-test-row {
-    grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 17px 16px;
+    grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 17px 0;
   }
   .settings-row-actions, .settings-test-row > button { justify-self: start; }
 }
