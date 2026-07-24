@@ -16,6 +16,8 @@ import type {
   Usage,
 } from "../types.ts";
 import { emptyFrictionTotals, foldFriction, HIGH_TOKEN_GROWTH_RATIO } from "../health.ts";
+import type { LlmConfigField, LlmProvider } from "../llm/types.ts";
+import type { EncryptedSecret } from "../secrets.ts";
 
 export const HUB_SCHEMA_VERSION = 4;
 export const HUB_APPLICATION_ID = 0x48554200; // "HUB\0"
@@ -705,6 +707,23 @@ export interface HubTaskRow {
   disposition: string | null;
 }
 
+export interface TaskLlmProviderConfig {
+  model?: string;
+  baseUrl?: string;
+  effort?: string;
+  command?: string;
+}
+
+export interface TaskLlmSettings {
+  provider: LlmProvider | null;
+  providerConfigs: Partial<Record<LlmProvider, TaskLlmProviderConfig>>;
+}
+
+export interface LlmSecretStatus {
+  configured: boolean;
+  hint?: string;
+}
+
 export class HubStore {
   private queue: Promise<void> = Promise.resolve();
   private closed = false;
@@ -735,6 +754,149 @@ export class HubStore {
       );
       if (!row) return undefined;
       return { orgId: row.org_id, isEnabled: row.is_enabled === 1 };
+    });
+  }
+
+  // ---- Organization task LLM settings ------------------------------------------
+
+  readTaskLlmSettings(orgId: string): Promise<TaskLlmSettings> {
+    return this.schedule(async () => {
+      const active = await get<{ provider: LlmProvider | null }>(
+        this.db,
+        "SELECT provider FROM organization_task_llm WHERE org_id = ?",
+        [orgId],
+      );
+      const rows = await all<{
+        provider: LlmProvider;
+        model: string | null;
+        base_url: string | null;
+        effort: string | null;
+        command: string | null;
+      }>(
+        this.db,
+        `SELECT provider, model, base_url, effort, command
+         FROM organization_llm_provider_configs WHERE org_id = ?`,
+        [orgId],
+      );
+      const providerConfigs: TaskLlmSettings["providerConfigs"] = {};
+      for (const row of rows) {
+        providerConfigs[row.provider] = {
+          ...(row.model !== null ? { model: row.model } : {}),
+          ...(row.base_url !== null ? { baseUrl: row.base_url } : {}),
+          ...(row.effort !== null ? { effort: row.effort } : {}),
+          ...(row.command !== null ? { command: row.command } : {}),
+        };
+      }
+      return { provider: active?.provider ?? null, providerConfigs };
+    });
+  }
+
+  setTaskLlmProvider(orgId: string, provider: LlmProvider | null, now: number): Promise<void> {
+    return this.schedule(async () => {
+      await run(
+        this.db,
+        `INSERT INTO organization_task_llm(org_id, provider, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(org_id) DO UPDATE SET provider = excluded.provider, updated_at = excluded.updated_at`,
+        [orgId, provider, now],
+      );
+    });
+  }
+
+  setTaskLlmProviderField(
+    orgId: string,
+    provider: LlmProvider,
+    field: LlmConfigField,
+    value: string | null,
+    now: number,
+  ): Promise<void> {
+    const column = ({ model: "model", baseUrl: "base_url", effort: "effort", command: "command" } as const)[field];
+    if (!column) return Promise.reject(new Error(`Unsupported LLM provider field: ${field}`));
+    return this.schedule(async () => {
+      await run(
+        this.db,
+        `INSERT INTO organization_llm_provider_configs(org_id, provider, ${column}, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(org_id, provider) DO UPDATE SET
+           ${column} = excluded.${column}, updated_at = excluded.updated_at`,
+        [orgId, provider, value, now],
+      );
+    });
+  }
+
+  readLlmSecretStatus(orgId: string, provider: LlmProvider): Promise<LlmSecretStatus> {
+    return this.schedule(async () => {
+      const row = await get<{ hint: string }>(
+        this.db,
+        "SELECT hint FROM organization_llm_secrets WHERE org_id = ? AND provider = ?",
+        [orgId, provider],
+      );
+      return row ? { configured: true, hint: row.hint } : { configured: false };
+    });
+  }
+
+  setLlmSecret(
+    orgId: string,
+    provider: LlmProvider,
+    encrypted: EncryptedSecret,
+    hint: string,
+    now: number,
+  ): Promise<void> {
+    return this.schedule(async () => {
+      await run(
+        this.db,
+        `INSERT INTO organization_llm_secrets(
+           org_id, provider, ciphertext, nonce, auth_tag, hint, key_version, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(org_id, provider) DO UPDATE SET
+           ciphertext = excluded.ciphertext,
+           nonce = excluded.nonce,
+           auth_tag = excluded.auth_tag,
+           hint = excluded.hint,
+           key_version = excluded.key_version,
+           updated_at = excluded.updated_at`,
+        [
+          orgId,
+          provider,
+          encrypted.ciphertext,
+          encrypted.nonce,
+          encrypted.authTag,
+          hint,
+          encrypted.keyVersion,
+          now,
+        ],
+      );
+    });
+  }
+
+  readEncryptedLlmSecret(orgId: string, provider: LlmProvider): Promise<EncryptedSecret | undefined> {
+    return this.schedule(async () => {
+      const row = await get<{
+        ciphertext: Buffer;
+        nonce: Buffer;
+        auth_tag: Buffer;
+        key_version: 1;
+      }>(
+        this.db,
+        `SELECT ciphertext, nonce, auth_tag, key_version
+         FROM organization_llm_secrets WHERE org_id = ? AND provider = ?`,
+        [orgId, provider],
+      );
+      return row ? {
+        ciphertext: row.ciphertext,
+        nonce: row.nonce,
+        authTag: row.auth_tag,
+        keyVersion: row.key_version,
+      } : undefined;
+    });
+  }
+
+  deleteLlmSecret(orgId: string, provider: LlmProvider): Promise<void> {
+    return this.schedule(async () => {
+      await run(
+        this.db,
+        "DELETE FROM organization_llm_secrets WHERE org_id = ? AND provider = ?",
+        [orgId, provider],
+      );
     });
   }
 
