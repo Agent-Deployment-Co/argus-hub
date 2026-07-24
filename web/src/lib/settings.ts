@@ -97,7 +97,11 @@ export function useDeleteSecretMutation(provider: LlmProvider | null) {
 }
 
 export function useTestConnectionMutation() {
-  return useMutation({ mutationFn: testConnection });
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: testConnection,
+    onError: () => client.invalidateQueries({ queryKey: SETTINGS_QUERY_KEY }),
+  });
 }
 
 export type SaveStatus =

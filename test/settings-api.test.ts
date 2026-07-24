@@ -181,12 +181,14 @@ describe("settings API", () => {
       secretCipher: cipher,
       fetch: mockFetch,
     });
+    await store.setAutomaticTaggingEnabled(orgId, true, 2);
     const response = await app.request("/api/settings/test-connection", { method: "POST" });
     const body = await response.text();
     expect(response.status).toBe(502);
     expect(body).toContain("Authentication failed");
     expect(body).not.toContain("sk-leak");
     expect(body).not.toContain("token=leak");
+    expect((await store.readTaskLlmSettings(orgId)).automaticTaggingEnabled).toBe(false);
     await store.close();
   });
 

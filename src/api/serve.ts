@@ -281,6 +281,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
       );
       const model = config.model || provider.defaultModel || undefined;
       if (result.ok) return c.json({ ok: true, provider: providerName, ...(model ? { model } : {}) });
+      await store.setAutomaticTaggingEnabled(orgId, false, Date.now());
       return c.json({
         ok: false,
         provider: providerName,
