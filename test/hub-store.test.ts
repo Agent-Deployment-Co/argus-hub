@@ -259,6 +259,9 @@ describe("schema", () => {
       expect(names).toContain("resolved_tasks");
       expect(names).toContain("resolved_interactions");
       expect(names).toContain("resolved_invocations");
+      expect(names).toContain("organization_task_llm");
+      expect(names).toContain("organization_llm_provider_configs");
+      expect(names).toContain("organization_llm_secrets");
     } finally {
       await closeRaw(db);
     }
@@ -311,6 +314,9 @@ describe("schema", () => {
        DROP INDEX users_group;
        ALTER TABLE users DROP COLUMN group_id;
        DROP TABLE groups;
+       DROP TABLE organization_llm_secrets;
+       DROP TABLE organization_llm_provider_configs;
+       DROP TABLE organization_task_llm;
        PRAGMA user_version = 1;`);
     await closeRaw(raw);
 
@@ -345,6 +351,16 @@ describe("schema", () => {
       const userCols = (await rawAll<{ name: string }>(db, "PRAGMA table_info(users)")).map((c) => c.name);
       expect(userCols).toContain("group_id");
 
+      const llmTables = await rawAll<{ name: string }>(
+        db,
+        "SELECT name FROM sqlite_schema WHERE type='table' AND name LIKE 'organization%llm%' ORDER BY name",
+      );
+      expect(llmTables.map((row) => row.name)).toEqual([
+        "organization_llm_provider_configs",
+        "organization_llm_secrets",
+        "organization_task_llm",
+      ]);
+
       // Pre-existing session data survived the upgrade.
       const sess = await rawGet<{ session_id: string; title: string | null }>(
         db, "SELECT session_id, title FROM resolved_sessions WHERE session_id = ?", ["sess-mig"]);
@@ -352,6 +368,48 @@ describe("schema", () => {
       expect(sess?.title).toBeNull();
     } finally {
       await closeRaw(db);
+    }
+  });
+
+  test("upgrades v4 with the same LLM table layouts as a fresh v5 store", async () => {
+    const freshDir = tempDataDir();
+    const migratedDir = tempDataDir();
+    const freshStore = await openHubStore(freshDir, 1_000_000);
+    const migratedStore = await openHubStore(migratedDir, 1_000_000);
+    const migratedOrgId = await migratedStore.getDefaultOrgId();
+    await freshStore.close();
+    await migratedStore.close();
+
+    const migratedPath = join(migratedDir, "hub.db");
+    const before = await openRaw(migratedPath);
+    await rawExec(before, `
+      DROP TABLE organization_llm_secrets;
+      DROP TABLE organization_llm_provider_configs;
+      DROP TABLE organization_task_llm;
+      PRAGMA user_version = 4;
+    `);
+    await closeRaw(before);
+
+    const upgraded = await openHubStore(migratedDir, 2_000_000);
+    expect(await upgraded.getDefaultOrgId()).toBe(migratedOrgId);
+    await upgraded.close();
+
+    const tableNames = [
+      "organization_task_llm",
+      "organization_llm_provider_configs",
+      "organization_llm_secrets",
+    ];
+    const freshDb = await openRaw(join(freshDir, "hub.db"));
+    const migratedDb = await openRaw(migratedPath);
+    try {
+      for (const table of tableNames) {
+        const freshColumns = await rawAll<Record<string, unknown>>(freshDb, `PRAGMA table_info(${table})`);
+        const migratedColumns = await rawAll<Record<string, unknown>>(migratedDb, `PRAGMA table_info(${table})`);
+        expect(migratedColumns).toEqual(freshColumns);
+      }
+    } finally {
+      await closeRaw(freshDb);
+      await closeRaw(migratedDb);
     }
   });
 
