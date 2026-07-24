@@ -18,10 +18,14 @@ Nothing is forwarded anywhere else. Hub runs entirely on your network.
 **Requirements:** Node.js ≥ 20.17 (or Bun ≥ 1.0).
 
 ```bash
+export HUB_SECRET_KEY="$(openssl rand -base64 32)"
 npx @agentdeploymentco/argus-hub serve --port 4343
 ```
 
-On first startup, Hub creates `data/hub.db`, generates an API key and a random admin password, and prints them once:
+`HUB_SECRET_KEY` is required. Store this generated value in your deployment's secret manager
+before continuing; it encrypts task-provider API keys and must remain stable across restarts.
+
+On first startup, Hub creates `data/hub.db`, generates a sync API key and a random admin password, and prints them once:
 
 ```
 Admin password: 4f2c8a91b7e3d6502a1c9f48de07b3a5
@@ -71,6 +75,7 @@ CLI flags — highest precedence last.
 |----------|---------|-----------|---------|-------------|
 | `--port` | `HUB_PORT` | `port` | `4343` | Port to listen on |
 | `--data-dir` | `HUB_DATA_DIR` | `dataDir` | `./data` | Directory for `hub.db` |
+| —        | `HUB_SECRET_KEY` | — | _(required)_ | Canonical base64 encoding of exactly 32 random bytes, used to encrypt task-provider API keys |
 | —        | `ADMIN_PASSWORD` | —     | _(random)_ | Dashboard login password (pinned across restarts when set) |
 | —        | `HUB_INSECURE_COOKIE_HOSTS` | — | _(none)_ | Comma-separated hostnames (no port) that get a non-`Secure` session cookie, for plain-HTTP-only deployments (e.g. a cluster-internal address reachable only via a private network). **Never** list a host reachable from the public internet. |
 
@@ -86,6 +91,25 @@ Example `hub.json`:
 There is no `HUB_KEY` setting. API keys are stored in `hub.db` and managed there. On first
 startup, if the `api_keys` table is empty, Hub generates a `hub-{UUID}` key linked to the
 Default org and prints it to stdout.
+
+### Task LLM settings
+
+Administrators can open **Settings → Tasks** to select and configure one of these providers:
+Anthropic API, a host command, Google Gemini, OpenAI, or OpenRouter. The provider begins blank;
+Hub will not make an implicit LLM call. Provider settings and encrypted API keys are scoped to
+the current organization. Provider environment variables such as `OPENAI_API_KEY` are not read.
+
+API keys entered in Settings are encrypted in SQLite with AES-256-GCM using `HUB_SECRET_KEY`.
+Back up that key separately from `hub.db`. Changing or losing it makes existing provider keys
+unreadable; restore the original key or replace every saved provider key. Generate a key with:
+
+```bash
+openssl rand -base64 32
+```
+
+The **Command** provider executes the configured command directly on the Hub host, with the
+prompt on stdin and completion on stdout. This is administrator-controlled remote code
+execution. Enable it only when Hub administrators and the configured command are fully trusted.
 
 ---
 
@@ -117,12 +141,16 @@ Type=simple
 ExecStart=npx @agentdeploymentco/argus-hub serve --port 4343
 WorkingDirectory=/srv/argus-hub
 Environment=HUB_DATA_DIR=/srv/argus-hub/data
+EnvironmentFile=/etc/argus-hub.env
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+Create `/etc/argus-hub.env` with `HUB_SECRET_KEY=<output of openssl rand -base64 32>`, restrict
+it to the service administrator, and include it in the deployment's secret backup.
 
 ```bash
 sudo systemctl enable --now argus-hub
@@ -133,11 +161,14 @@ sudo journalctl -fu argus-hub    # follow logs
 
 ```bash
 docker build -t argus-hub .
+printf 'HUB_SECRET_KEY=%s\n' "$(openssl rand -base64 32)" > hub.env
+chmod 600 hub.env
 
 docker run -d \
   --name argus-hub \
   -p 4343:4343 \
   -v argus-hub-data:/data \
+  --env-file hub.env \
   argus-hub
 ```
 
@@ -175,6 +206,7 @@ Save as `~/Library/LaunchAgents/co.agentdeployment.argus-hub.plist`:
   <key>EnvironmentVariables</key>
   <dict>
     <key>HUB_DATA_DIR</key>   <string>/Users/you/argus-hub/data</string>
+    <key>HUB_SECRET_KEY</key> <string>REPLACE_WITH_BASE64_32_BYTE_KEY</string>
   </dict>
   <key>RunAtLoad</key>         <true/>
   <key>KeepAlive</key>         <true/>
@@ -268,6 +300,10 @@ schema setup, authentication, scheduling, and limitations.
   reverse proxy with TLS — do not expose it directly to the internet.
 - **`hub.db` is sensitive.** It contains the full session data of every syncing user. Restrict
   filesystem access (Hub chmods it to `0600` on creation) and include it in backups.
+- **Back up `HUB_SECRET_KEY` separately.** It is required to decrypt task-provider API keys in
+  `hub.db`; losing or changing it requires replacing those keys.
+- **The Command provider runs code on the Hub host.** Only trusted administrators should be able
+  to configure it, and the Hub admin surface must not be exposed to untrusted users.
 - Uploaded payloads are JSON rows merged directly into `hub.db`; the client's raw `argus.db`
   never leaves the developer's machine.
 - A disabled key (`is_enabled = 0`) is rejected immediately without reading the request body.
