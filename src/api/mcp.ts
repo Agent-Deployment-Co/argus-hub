@@ -9,6 +9,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema, type Tool } from "@model
 import type { HubStore } from "../store/hub-store.ts";
 import type { AdminAuth } from "../admin-auth.ts";
 import { parseBearerToken } from "./sync.ts";
+import { VERSION } from "../version.ts";
 import {
   parseResolvedQuery, parseUserScope, parseGroupScope, parseGroupIdScope, parseOutcomeFilter,
   parseIntOr, DEFAULT_LIMIT, MAX_LIMIT, VALID_SOURCES, UNGROUPED_SENTINEL, type QueryGetter,
@@ -244,7 +245,7 @@ async function callTool(store: HubStore, name: string, args: Record<string, unkn
 // ---- Server + Hono wiring -------------------------------------------------------------------
 
 function buildMcpServer(store: HubStore): Server {
-  const server = new Server({ name: "argus-hub", version: "0.1.0" }, { capabilities: { tools: {} } });
+  const server = new Server({ name: "argus-hub", version: VERSION }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
