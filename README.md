@@ -1,7 +1,7 @@
 # Argus Hub
 
 Self-hosted server that collects usage data from multiple Argus clients and presents an
-org-wide dashboard. It is the on-premises alternative to the hosted `argus-dash` backend.
+org-wide dashboard. It is the on-premise alternative to the hosted `argus-dash` backend.
 
 Each developer runs `argus sync` as usual. Instead of uploading to `argus.agentdeployment.co`,
 they point their client at a Hub instance. The client first calls `POST /api/sync/unknown-sessions`
