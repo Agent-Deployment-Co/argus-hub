@@ -1,5 +1,5 @@
 import { Link, useParams, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, Bot, Check, LoaderCircle, Lock, Pencil, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, LoaderCircle, Lock, Pencil, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useSettingsBackHref } from "../components/Layout";
 import {
@@ -217,7 +217,7 @@ function SecretField({ provider, onChanged }: { provider: LlmProvider; onChanged
   );
 }
 
-function LlmSettingsPane() {
+function GeneralSettingsPane() {
   const settings = useSettingsQuery();
   const saveQueue = useSettingsSaveQueue();
   const connection = useTestConnectionMutation();
@@ -244,7 +244,7 @@ function LlmSettingsPane() {
     void saveQueue.save(path, value).catch(() => undefined);
   };
 
-  if (settings.isLoading) return <div className="settings-loading">Loading LLM settings…</div>;
+  if (settings.isLoading) return <div className="settings-loading">Loading General settings…</div>;
   if (settings.error || !section || !providerDescriptor) {
     return <div className="settings-load-error" role="alert">
       {settings.error?.message ?? "The settings response was incomplete."}
@@ -252,10 +252,10 @@ function LlmSettingsPane() {
   }
 
   return (
-    <div className="settings-pane" data-settings-pane="llm">
+    <div className="settings-pane" data-settings-pane="general">
       <div className="settings-pane-head">
         <div>
-          <h2>LLM</h2>
+          <h2>General</h2>
           <p className="settings-pane-intro">Configure the LLM connection for organization task features.</p>
         </div>
         <SaveIndicator status={saveQueue.status} />
@@ -353,23 +353,23 @@ export function Settings() {
         <nav aria-label="Settings categories">
           <Link
             to="/settings/$category"
-            params={{ category: "llm" }}
+            params={{ category: "general" }}
             className="settings-nav-link"
-            aria-current={category === "llm" ? "page" : undefined}
+            aria-current={category === "general" ? "page" : undefined}
           >
-            <Bot size={17} aria-hidden />
-            <span>LLM</span>
+            <SlidersHorizontal size={17} aria-hidden />
+            <span>General</span>
           </Link>
         </nav>
       </aside>
       <main className="settings-main">
-        {category === "llm" ? (
-          <LlmSettingsPane />
+        {category === "general" ? (
+          <GeneralSettingsPane />
         ) : (
           <div className="settings-not-found" role="status">
             <h2>Settings category not found</h2>
             <p>There is no settings category named “{category}”.</p>
-            <Link to="/settings/$category" params={{ category: "llm" }}>Open LLM settings</Link>
+            <Link to="/settings/$category" params={{ category: "general" }}>Open General settings</Link>
           </div>
         )}
       </main>
