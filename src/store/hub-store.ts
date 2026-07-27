@@ -216,6 +216,12 @@ export interface TaskLabelRow extends TaskLabelRef {
   name: string;
 }
 
+/** Canonical lookup key for a task's labels — shared by listLabelsForTasks (below) and
+ *  api/task-labels.ts's attachLabels, which reads this store's output back off the same key. */
+export function taskLabelKey(ref: TaskLabelRef): string {
+  return `${ref.clientId}:${ref.sessionId}:${ref.taskSeq}`;
+}
+
 // ---- SQL helpers (same patterns as store.ts) --------------------------------------------
 
 function run(db: Database, sql: string, params: unknown[] = []): Promise<RunResult> {
@@ -2155,7 +2161,7 @@ export class HubStore {
           [orgId, ...params],
         );
         for (const r of rows) {
-          const key = `${r.client_id}:${r.session_id}:${r.task_seq}`;
+          const key = taskLabelKey({ clientId: r.client_id, sessionId: r.session_id, taskSeq: r.task_seq });
           const row: TaskLabelRow = {
             clientId: r.client_id, sessionId: r.session_id, taskSeq: r.task_seq,
             labelId: r.label_id, name: r.name,
