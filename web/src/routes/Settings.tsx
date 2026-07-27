@@ -1,6 +1,6 @@
 import { Link, useParams, useRouter } from "@tanstack/react-router";
 import { ArrowLeft, Check, LoaderCircle, Lock, Pencil, SlidersHorizontal, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { useSettingsBackHref } from "../components/Layout";
 import {
   useDeleteSecretMutation,
@@ -46,13 +46,11 @@ function PlainField({
   provider,
   value,
   onChange,
-  onBlur,
 }: {
   descriptor: SettingDescriptor;
   provider: LlmProvider;
   value: string;
   onChange: (value: string) => void;
-  onBlur: () => void;
 }) {
   const Input = descriptor.control === "textarea" ? "textarea" : "input";
   return (
@@ -67,41 +65,35 @@ function PlainField({
         value={value}
         placeholder={descriptor.placeholderByProvider?.[provider]}
         onChange={(event) => onChange(event.currentTarget.value)}
-        onBlur={onBlur}
       />
     </div>
   );
 }
 
-function SecretField({ provider, onChanged }: { provider: LlmProvider; onChanged: () => void }) {
+function SecretField({
+  provider,
+  value,
+  onChange,
+  editing,
+  onStartEdit,
+  onCancelEdit,
+  onChanged,
+}: {
+  provider: LlmProvider;
+  value: string;
+  onChange: (value: string) => void;
+  editing: boolean;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onChanged: () => void;
+}) {
   const status = useSecretStatusQuery(provider);
-  const save = useSaveSecretMutation(provider);
   const remove = useDeleteSecretMutation(provider);
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState("");
   const [confirmingRemove, setConfirmingRemove] = useState(false);
-  const error = save.error ?? remove.error ?? status.error;
+  const error = remove.error ?? status.error;
 
-  const submit = (event?: FormEvent) => {
-    event?.preventDefault();
-    if (!value.trim()) return;
-    save.mutate(value, {
-      onSuccess: () => {
-        setValue("");
-        setEditing(false);
-        onChanged();
-      },
-    });
-  };
-  const cancel = () => {
-    setEditing(false);
-    setValue("");
-    save.reset();
-  };
   const escape = (event: KeyboardEvent) => {
-    if (event.key === "Escape") {
-      cancel();
-    }
+    if (event.key === "Escape") onCancelEdit();
   };
   const showInput = !status.data?.configured || editing;
 
@@ -121,7 +113,7 @@ function SecretField({ provider, onChanged }: { provider: LlmProvider; onChanged
             <LoaderCircle size={13} className="spin" aria-hidden /> Checking…
           </span>
         ) : showInput ? (
-          <form className="settings-secret-form" onSubmit={submit}>
+          <div className="settings-secret-form">
             <input
               autoFocus={editing}
               className="settings-control settings-secret-input"
@@ -131,34 +123,21 @@ function SecretField({ provider, onChanged }: { provider: LlmProvider; onChanged
               autoComplete="new-password"
               placeholder={status.data?.configured ? "New API key" : "Paste API key"}
               value={value}
-              disabled={save.isPending}
-              onChange={(event) => setValue(event.currentTarget.value)}
+              onChange={(event) => onChange(event.currentTarget.value)}
               onKeyDown={escape}
             />
-            <button
-              className="settings-secret-icon-btn"
-              type="submit"
-              title="Save key"
-              aria-label="Save key"
-              disabled={!value.trim() || save.isPending}
-            >
-              {save.isPending
-                ? <LoaderCircle size={15} className="spin" aria-hidden />
-                : <Check size={15} aria-hidden />}
-            </button>
             {status.data?.configured && (
               <button
                 className="settings-secret-icon-btn"
                 type="button"
                 title="Cancel"
                 aria-label="Cancel"
-                disabled={save.isPending}
-                onClick={cancel}
+                onClick={onCancelEdit}
               >
                 <X size={15} aria-hidden />
               </button>
             )}
-          </form>
+          </div>
         ) : confirmingRemove ? (
           <div className="settings-secret-line">
             <span className="settings-secret-confirm">Remove key?</span>
@@ -196,7 +175,7 @@ function SecretField({ provider, onChanged }: { provider: LlmProvider; onChanged
               type="button"
               title="Replace key"
               aria-label="Replace key"
-              onClick={() => setEditing(true)}
+              onClick={onStartEdit}
             >
               <Pencil size={15} aria-hidden />
             </button>
@@ -227,21 +206,65 @@ function GeneralSettingsPane() {
     if (settings.data) setValues(initialValueMap(settings.data));
   }, [settings.data]);
 
+  const savedValues = useMemo(
+    () => (settings.data ? initialValueMap(settings.data) : {}),
+    [settings.data],
+  );
+
   const section = settings.data?.categories[0].sections[0];
   const provider = (values["llm.provider"] || null) as LlmProvider | null;
+  const savedProvider = (savedValues["llm.provider"] || null) as LlmProvider | null;
   const providerDescriptor = section?.settings.find((setting) => setting.path === "llm.provider");
-  const providerSaved = !!provider && providerDescriptor?.value === provider;
+  const providerSaved = !!provider && provider === savedProvider;
   const visibleFields = useMemo(() => section?.settings.filter((setting) =>
-    setting.providerScoped && providerSaved && setting.visibleWhen?.in.includes(provider!)) ?? [],
-  [section, provider, providerSaved]);
-  const needsKey = !!provider && providerSaved && section?.secretField.providers.includes(provider);
+    setting.providerScoped && provider && setting.visibleWhen?.in.includes(provider)) ?? [],
+  [section, provider]);
+  const needsKey = !!provider && section?.secretField.providers.includes(provider);
+
+  const saveSecretMutation = useSaveSecretMutation(provider);
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [apiKeyEditing, setApiKeyEditing] = useState(false);
+
+  useEffect(() => {
+    setApiKeyDraft("");
+    setApiKeyEditing(false);
+  }, [provider]);
+
+  const apiKeyDirty = needsKey && apiKeyDraft.trim().length > 0;
+
+  const dirtyPaths = useMemo(() => {
+    const paths: string[] = [];
+    if ((values["llm.provider"] ?? "") !== (savedValues["llm.provider"] ?? "")) paths.push("llm.provider");
+    if (provider) {
+      for (const descriptor of visibleFields) {
+        const path = writePath(provider, descriptor.field!);
+        if ((values[path] ?? "") !== (savedValues[path] ?? "")) paths.push(path);
+      }
+    }
+    return paths;
+  }, [values, savedValues, provider, visibleFields]);
+  const dirty = dirtyPaths.length > 0 || apiKeyDirty;
+  const saving = saveQueue.status.state === "saving" || saveSecretMutation.isPending;
 
   const setLocal = (path: string, value: string) => {
     setValues((current) => ({ ...current, [path]: value }));
     connection.reset();
   };
-  const persist = (path: string, value: string) => {
-    void saveQueue.save(path, value).catch(() => undefined);
+  const save = () => {
+    const writes: Promise<unknown>[] = dirtyPaths.map((path) => saveQueue.save(path, values[path] ?? ""));
+    if (apiKeyDirty) {
+      writes.push(saveSecretMutation.mutateAsync(apiKeyDraft.trim()).then(() => {
+        setApiKeyDraft("");
+        setApiKeyEditing(false);
+      }));
+    }
+    void Promise.all(writes).catch(() => undefined);
+  };
+  const cancel = () => {
+    setValues(savedValues);
+    setApiKeyDraft("");
+    setApiKeyEditing(false);
+    connection.reset();
   };
 
   if (settings.isLoading) return <div className="settings-loading">Loading General settings…</div>;
@@ -270,11 +293,7 @@ function GeneralSettingsPane() {
             id="setting-provider"
             className="settings-control settings-select"
             value={provider ?? ""}
-            onChange={(event) => {
-              const value = event.currentTarget.value;
-              setLocal("llm.provider", value);
-              persist("llm.provider", value);
-            }}
+            onChange={(event) => setLocal("llm.provider", event.currentTarget.value)}
           >
             <option value="">None</option>
             {providerDescriptor.options?.map((option) => (
@@ -289,7 +308,7 @@ function GeneralSettingsPane() {
             {providerDescriptor.options.find((option) => option.value === provider)!.description}
           </p>
         )}
-        {provider && providerSaved && visibleFields.map((descriptor) => {
+        {provider && visibleFields.map((descriptor) => {
           const path = writePath(provider, descriptor.field!);
           return (
             <PlainField
@@ -298,21 +317,37 @@ function GeneralSettingsPane() {
               provider={provider}
               value={values[path] ?? ""}
               onChange={(value) => setLocal(path, value)}
-              onBlur={() => persist(path, values[path] ?? "")}
             />
           );
         })}
-        {provider && providerSaved && needsKey && (
-          <SecretField key={provider} provider={provider} onChanged={() => connection.reset()} />
+        {provider && needsKey && (
+          <SecretField
+            key={provider}
+            provider={provider}
+            value={apiKeyDraft}
+            onChange={setApiKeyDraft}
+            editing={apiKeyEditing}
+            onStartEdit={() => setApiKeyEditing(true)}
+            onCancelEdit={() => {
+              setApiKeyEditing(false);
+              setApiKeyDraft("");
+            }}
+            onChanged={() => {
+              connection.reset();
+              void settings.refetch();
+            }}
+          />
         )}
         {provider && (
           <div className="settings-test-row">
             <div className="settings-row-copy">
               <span className="settings-row-label">Test connection</span>
               <span className="settings-row-description">
-                {providerSaved
-                  ? "Send a tiny completion using the saved provider settings."
-                  : "Choose and save a provider to enable connection testing."}
+                {!providerSaved
+                  ? "Choose and save a provider to enable connection testing."
+                  : dirty
+                    ? "Save your changes to enable connection testing."
+                    : "Send a tiny completion using the saved provider settings."}
               </span>
               {connection.data && (
                 <span className={connection.data.ok ? "settings-test-success" : "settings-inline-error"} role="status">
@@ -326,7 +361,7 @@ function GeneralSettingsPane() {
             <button
               className="btn-secondary"
               type="button"
-              disabled={!providerSaved || connection.isPending || saveQueue.status.state === "saving"}
+              disabled={!providerSaved || dirty || connection.isPending || saving}
               onClick={() => connection.mutate()}
             >
               {connection.isPending ? "Testing…" : "Test connection"}
@@ -334,6 +369,24 @@ function GeneralSettingsPane() {
           </div>
         )}
       </section>
+      <div className="settings-footer">
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={!dirty || saving}
+          onClick={cancel}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn-primary"
+          disabled={!dirty || saving}
+          onClick={save}
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
     </div>
   );
 }
