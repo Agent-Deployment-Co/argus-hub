@@ -490,11 +490,13 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
   background: var(--bg);
 }
 .settings-rail {
-  position: sticky; top: 0; height: 100vh; padding: 18px 14px; overflow-y: auto;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 4px; padding: 18px 14px;
   border-right: 1px solid var(--line); background: var(--surface);
 }
 .settings-back {
-  display: inline-flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px;
+  display: inline-flex; align-items: center; gap: 8px; align-self: flex-start;
+  padding: 6px 8px; margin-bottom: 8px;
   border: 0; border-radius: 8px; background: transparent; color: var(--muted);
   font: 600 13px "Poppins", "Avenir Next", Arial, sans-serif; cursor: pointer;
 }
@@ -502,7 +504,8 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 .settings-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .settings-rail h1 {
   margin: 4px 8px 14px; color: var(--heading);
-  font: 700 22px "Poppins", "Avenir Next", Arial, sans-serif; letter-spacing: -0.04em;
+  font-family: "Poppins", "Avenir Next", Arial, sans-serif; font-size: 22px; font-weight: 700;
+  letter-spacing: -0.04em;
 }
 .settings-rail nav { display: flex; flex-direction: column; gap: 2px; }
 .settings-nav-link {
@@ -516,10 +519,13 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 }
 .settings-nav-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .settings-main { min-width: 0; padding: 0; }
-.settings-pane, .settings-not-found, .settings-loading, .settings-load-error {
+.settings-pane { overflow-y: auto; padding: 40px 48px 80px; }
+.settings-not-found, .settings-loading, .settings-load-error {
   max-width: 760px; width: 100%; margin: 0 auto; padding: 40px 48px 80px;
-  --setting-control-w: 300px;
 }
+/* --setting-control-w: the fixed width of the right-hand control column (inputs, select, secret
+   widget) so they all line up; widen here to give longer values more room. */
+.settings-content { max-width: 760px; margin: 0 auto; --setting-control-w: 300px; }
 .settings-pane-head {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 20px;
 }
@@ -527,7 +533,6 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
   margin: 0; color: var(--heading);
   font-size: 22px; font-weight: 700; line-height: 1.25;
 }
-.settings-pane-intro { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
 .settings-save-status {
   min-height: 24px; display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
   padding: 3px 8px; border-radius: 999px; color: var(--muted);

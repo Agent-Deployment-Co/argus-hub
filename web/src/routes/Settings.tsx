@@ -279,127 +279,126 @@ function GeneralSettingsPane() {
 
   return (
     <div className="settings-pane" data-settings-pane="general">
-      <div className="settings-pane-head">
-        <div>
+      <div className="settings-content">
+        <div className="settings-pane-head">
           <h2>General</h2>
-          <p className="settings-pane-intro">Configure the LLM connection for organization task features.</p>
+          <SaveIndicator status={saveQueue.status} />
         </div>
-        <SaveIndicator status={saveQueue.status} />
-      </div>
-      <section className="settings-section">
-        <div className="settings-row">
-          <label htmlFor="setting-provider" className="settings-row-copy">
-            <span className="settings-row-label">{providerDescriptor.label}</span>
-            <span className="settings-row-description">{providerDescriptor.description}</span>
-          </label>
-          <select
-            id="setting-provider"
-            className="settings-control settings-select"
-            value={provider ?? ""}
-            onChange={(event) => setLocal("llm.provider", event.currentTarget.value)}
-          >
-            <option value="">None</option>
-            {providerDescriptor.options?.map((option) => (
-              <option key={option.value} value={option.value} disabled={option.disabled}>
-                {option.label}{option.disabled ? " (requires HUB_SECRET_KEY)" : ""}
-              </option>
-            ))}
-          </select>
-        </div>
-        {provider && providerDescriptor.options?.find((option) => option.value === provider)?.description && (
-          <p className={`settings-provider-note${provider === "command" ? " is-warning" : ""}`}>
-            {providerDescriptor.options.find((option) => option.value === provider)!.description}
-          </p>
-        )}
-        {provider && visibleFields.map((descriptor) => {
-          const path = writePath(provider, descriptor.field!);
-          return (
-            <PlainField
-              key={path}
-              descriptor={descriptor}
-              provider={provider}
-              value={values[path] ?? ""}
-              onChange={(value) => setLocal(path, value)}
-            />
-          );
-        })}
-        {provider && needsKey && (
-          <SecretField
-            key={provider}
-            provider={provider}
-            value={apiKeyDraft}
-            onChange={setApiKeyDraft}
-            editing={apiKeyEditing}
-            onStartEdit={() => setApiKeyEditing(true)}
-            onCancelEdit={() => {
-              setApiKeyEditing(false);
-              setApiKeyDraft("");
-            }}
-            onChanged={() => {
-              connection.reset();
-              void settings.refetch();
-            }}
-          />
-        )}
-        {provider && (
-          <div className="settings-test-row">
-            <div className="settings-row-copy">
-              <span className="settings-row-label">Test connection</span>
-              <span className="settings-row-description">
-                {!providerSaved
-                  ? "Choose and save a provider to enable connection testing."
-                  : dirty
-                    ? "Save your changes to enable connection testing."
-                    : "Send a tiny completion using the saved provider settings."}
-              </span>
-              {connection.data && (
-                <span
-                  className={`settings-test-result ${connection.data.ok ? "is-ok" : "is-error"}`}
-                  role="status"
-                >
-                  {connection.data.ok ? <Check size={14} aria-hidden /> : <TriangleAlert size={14} aria-hidden />}
-                  {connection.data.ok
-                    ? `Connected${connection.data.model ? ` with ${connection.data.model}` : ""}.`
-                    : connection.data.error}
-                </span>
-              )}
-              {connection.error && (
-                <span className="settings-test-result is-error" role="alert">
-                  <TriangleAlert size={14} aria-hidden /> {connection.error.message}
-                </span>
-              )}
-            </div>
-            <button
-              className="settings-test-btn"
-              type="button"
-              disabled={!providerSaved || dirty || connection.isPending || saving}
-              onClick={() => connection.mutate()}
+        <section className="settings-section">
+          <div className="settings-row">
+            <label htmlFor="setting-provider" className="settings-row-copy">
+              <span className="settings-row-label">{providerDescriptor.label}</span>
+              <span className="settings-row-description">{providerDescriptor.description}</span>
+            </label>
+            <select
+              id="setting-provider"
+              className="settings-control settings-select"
+              value={provider ?? ""}
+              onChange={(event) => setLocal("llm.provider", event.currentTarget.value)}
             >
-              {connection.isPending
-                ? <LoaderCircle size={14} className="spin" aria-hidden />
-                : <PlugZap size={14} aria-hidden />}
-              {connection.isPending ? "Testing…" : "Test connection"}
-            </button>
+              <option value="">None</option>
+              {providerDescriptor.options?.map((option) => (
+                <option key={option.value} value={option.value} disabled={option.disabled}>
+                  {option.label}{option.disabled ? " (requires HUB_SECRET_KEY)" : ""}
+                </option>
+              ))}
+            </select>
           </div>
-        )}
-      </section>
-      <div className="settings-footer">
-        <button
-          type="button"
-          className="btn-secondary"
-          disabled={!dirty || saving}
-          onClick={cancel}
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          className="btn-primary"
-          disabled={!dirty || saving}
-          onClick={save}
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
+          {provider && providerDescriptor.options?.find((option) => option.value === provider)?.description && (
+            <p className={`settings-provider-note${provider === "command" ? " is-warning" : ""}`}>
+              {providerDescriptor.options.find((option) => option.value === provider)!.description}
+            </p>
+          )}
+          {provider && visibleFields.map((descriptor) => {
+            const path = writePath(provider, descriptor.field!);
+            return (
+              <PlainField
+                key={path}
+                descriptor={descriptor}
+                provider={provider}
+                value={values[path] ?? ""}
+                onChange={(value) => setLocal(path, value)}
+              />
+            );
+          })}
+          {provider && needsKey && (
+            <SecretField
+              key={provider}
+              provider={provider}
+              value={apiKeyDraft}
+              onChange={setApiKeyDraft}
+              editing={apiKeyEditing}
+              onStartEdit={() => setApiKeyEditing(true)}
+              onCancelEdit={() => {
+                setApiKeyEditing(false);
+                setApiKeyDraft("");
+              }}
+              onChanged={() => {
+                connection.reset();
+                void settings.refetch();
+              }}
+            />
+          )}
+          {provider && (
+            <div className="settings-test-row">
+              <div className="settings-row-copy">
+                <span className="settings-row-label">Test connection</span>
+                <span className="settings-row-description">
+                  {!providerSaved
+                    ? "Choose and save a provider to enable connection testing."
+                    : dirty
+                      ? "Save your changes to enable connection testing."
+                      : "Send a tiny completion using the saved provider settings."}
+                </span>
+                {connection.data && (
+                  <span
+                    className={`settings-test-result ${connection.data.ok ? "is-ok" : "is-error"}`}
+                    role="status"
+                  >
+                    {connection.data.ok ? <Check size={14} aria-hidden /> : <TriangleAlert size={14} aria-hidden />}
+                    {connection.data.ok
+                      ? `Connected${connection.data.model ? ` with ${connection.data.model}` : ""}.`
+                      : connection.data.error}
+                  </span>
+                )}
+                {connection.error && (
+                  <span className="settings-test-result is-error" role="alert">
+                    <TriangleAlert size={14} aria-hidden /> {connection.error.message}
+                  </span>
+                )}
+              </div>
+              <button
+                className="settings-test-btn"
+                type="button"
+                disabled={!providerSaved || dirty || connection.isPending || saving}
+                onClick={() => connection.mutate()}
+              >
+                {connection.isPending
+                  ? <LoaderCircle size={14} className="spin" aria-hidden />
+                  : <PlugZap size={14} aria-hidden />}
+                {connection.isPending ? "Testing…" : "Test connection"}
+              </button>
+            </div>
+          )}
+        </section>
+        <div className="settings-footer">
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={!dirty || saving}
+            onClick={cancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={!dirty || saving}
+            onClick={save}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -415,7 +414,7 @@ export function Settings() {
     <div className="settings-shell">
       <aside className="settings-rail">
         <button type="button" className="settings-back" onClick={goBack}>
-          <ArrowLeft size={16} aria-hidden />
+          <ArrowLeft size={16} strokeWidth={1.75} aria-hidden />
           <span>Back to app</span>
         </button>
         <h1>Settings</h1>
@@ -426,7 +425,7 @@ export function Settings() {
             className="settings-nav-link"
             aria-current={category === "general" ? "page" : undefined}
           >
-            <SlidersHorizontal size={16} aria-hidden />
+            <SlidersHorizontal size={16} strokeWidth={1.75} aria-hidden />
             <span>General</span>
           </Link>
         </nav>
