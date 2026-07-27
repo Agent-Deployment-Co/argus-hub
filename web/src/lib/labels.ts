@@ -53,11 +53,11 @@ function invalidateLabelsAndTasks(queryClient: ReturnType<typeof useQueryClient>
 export function useCreateManualLabel() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (name: string) => {
+    mutationFn: async ({ name, description }: { name: string; description?: string }) => {
       const res = await fetch("/api/labels", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, kind: "manual" }),
+        body: JSON.stringify({ name, kind: "manual", description }),
       });
       if (!res.ok) throw await readError(res, `Failed to create label (${res.status})`);
       return (await res.json() as { label: HubLabel }).label;

@@ -1,4 +1,4 @@
-import { Plus, Sparkles, Tag, Trash2 } from "lucide-react";
+import { Plus, Tag, Trash2 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
 import { Modal } from "../components/Modal";
@@ -15,8 +15,7 @@ export function Labels() {
   const labelsQuery = useLabels();
   const settingsQuery = useSettingsQuery();
   const deleteLabel = useDeleteLabel();
-  const [creatingManual, setCreatingManual] = useState(false);
-  const [creatingAuto, setCreatingAuto] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<HubLabel | null>(null);
 
   const labels = labelsQuery.data ?? [];
@@ -28,17 +27,8 @@ export function Labels() {
       <div className="page-head">
         <h1>Labels</h1>
         <div className="page-head-actions">
-          <button type="button" className="btn-secondary" onClick={() => setCreatingManual(true)}>
-            <Plus size={14} strokeWidth={2.5} aria-hidden /> Manual label
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={!automaticEnabled}
-            title={automaticEnabled ? undefined : "Enable automatic task tagging in Tasks settings first."}
-            onClick={() => setCreatingAuto(true)}
-          >
-            <Sparkles size={14} strokeWidth={2.5} aria-hidden /> Auto label
+          <button type="button" className="btn-primary" onClick={() => setCreating(true)}>
+            <Plus size={14} strokeWidth={2.5} aria-hidden /> Add label
           </button>
         </div>
       </div>
@@ -55,7 +45,7 @@ export function Labels() {
         <div className="center-state">Couldn't load labels: {(labelsQuery.error as Error).message}</div>
       ) : labels.length === 0 ? (
         <p className="muted">
-          No labels yet. Create a manual label to apply by hand, or an auto label to have the hub
+          No labels yet. Add one to apply by hand, or turn on automatic matching to have the hub
           find matching tasks for you.
         </p>
       ) : (
@@ -64,8 +54,8 @@ export function Labels() {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Kind</th>
                 <th>Description</th>
+                <th>Automated</th>
                 <th className="num">Tasks</th>
                 <th>Actions</th>
               </tr>
@@ -78,10 +68,8 @@ export function Labels() {
                       <Tag size={13} strokeWidth={2} aria-hidden /> {label.name}
                     </span>
                   </td>
-                  <td>
-                    <span className={`pill label-kind-pill label-kind-${label.kind}`}>{label.kind}</span>
-                  </td>
                   <td className="muted">{label.description ?? "—"}</td>
+                  <td className="muted">{label.kind === "auto" ? "Yes" : "No"}</td>
                   <td className="num">{label.taskCount}</td>
                   <td>
                     <button
@@ -100,8 +88,9 @@ export function Labels() {
         </div>
       )}
 
-      {creatingManual && <CreateManualLabelDialog onClose={() => setCreatingManual(false)} />}
-      {creatingAuto && <CreateAutoLabelDialog onClose={() => setCreatingAuto(false)} />}
+      {creating && (
+        <CreateLabelDialog automaticEnabled={automaticEnabled} onClose={() => setCreating(false)} />
+      )}
       {deleting && (
         <DeleteLabelDialog
           label={deleting}
@@ -115,81 +104,58 @@ export function Labels() {
   );
 }
 
-function CreateManualLabelDialog({ onClose }: { onClose: () => void }) {
-  const [name, setName] = useState("");
-  const createLabel = useCreateManualLabel();
+type LabelDialogStep = "describe" | "review";
 
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    createLabel.mutate(name.trim(), { onSuccess: onClose });
-  };
-
-  return (
-    <Modal title="New manual label" onClose={onClose}>
-      <form className="modal-form" onSubmit={onSubmit}>
-        <label className="modal-field">
-          <span>Name</span>
-          <input
-            className="filter-input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Needs review"
-            autoFocus
-          />
-        </label>
-        <p className="modal-copy">
-          Manual labels aren't applied automatically — apply them to individual tasks from the
-          Tasks page.
-        </p>
-        {createLabel.isError && <p className="modal-error">{(createLabel.error as Error).message}</p>}
-        <div className="modal-actions">
-          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={!name.trim() || createLabel.isPending}>
-            {createLabel.isPending ? "Creating…" : "Create label"}
-          </button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-type AutoLabelStep = "describe" | "review";
-
-/** Create-auto-label flow: describe → candidate search (LLM) → review (remove non-matches) →
- *  create, which commits the label and backfills it onto the reviewed tasks in one call. */
-function CreateAutoLabelDialog({ onClose }: { onClose: () => void }) {
-  const [step, setStep] = useState<AutoLabelStep>("describe");
+/** Unified add-label flow: describe (name, optional description, automatic toggle) → if
+ *  automatic, candidate search (LLM) → review (remove non-matches) → create, which commits the
+ *  label and (for automatic labels) backfills it onto the reviewed tasks in one call. Manual
+ *  labels skip the review step and are created directly from the describe step. */
+function CreateLabelDialog({
+  automaticEnabled, onClose,
+}: {
+  automaticEnabled: boolean; onClose: () => void;
+}) {
+  const [step, setStep] = useState<LabelDialogStep>("describe");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [automatic, setAutomatic] = useState(false);
   const [candidates, setCandidates] = useState<LabelCandidate[]>([]);
   const [removed, setRemoved] = useState<Set<string>>(new Set());
   const [meta, setMeta] = useState<{ consideredCount: number; truncated: boolean } | null>(null);
 
   const search = useLabelCandidates();
-  const createLabel = useCreateAutoLabel();
+  const createManualLabel = useCreateManualLabel();
+  const createAutoLabel = useCreateAutoLabel();
 
   const candidateKey = (c: LabelCandidate) => `${c.clientId}:${c.sessionId}:${c.taskSeq}`;
   const kept = candidates.filter((c) => !removed.has(candidateKey(c)));
 
-  const onSearch = (e: FormEvent) => {
+  const onSubmitDescribe = (e: FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !description.trim()) return;
-    search.mutate(
-      { name: name.trim(), description: description.trim() },
-      {
-        onSuccess: (result) => {
-          setCandidates(result.candidates);
-          setRemoved(new Set());
-          setMeta({ consideredCount: result.consideredCount, truncated: result.truncated });
-          setStep("review");
+    if (!name.trim()) return;
+    if (automatic) {
+      if (!description.trim()) return;
+      search.mutate(
+        { name: name.trim(), description: description.trim() },
+        {
+          onSuccess: (result) => {
+            setCandidates(result.candidates);
+            setRemoved(new Set());
+            setMeta({ consideredCount: result.consideredCount, truncated: result.truncated });
+            setStep("review");
+          },
         },
-      },
-    );
+      );
+    } else {
+      createManualLabel.mutate(
+        { name: name.trim(), description: description.trim() || undefined },
+        { onSuccess: onClose },
+      );
+    }
   };
 
   const onCommit = () => {
-    createLabel.mutate(
+    createAutoLabel.mutate(
       {
         name: name.trim(),
         description: description.trim(),
@@ -200,24 +166,21 @@ function CreateAutoLabelDialog({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Modal title="New auto label" onClose={onClose} className="auto-label-modal">
+    <Modal title="Add label" onClose={onClose} className="auto-label-modal">
       {step === "describe" ? (
-        <form className="modal-form" onSubmit={onSearch}>
-          <p className="auto-label-intro">
-            Describe the label and Argus will suggest matching tasks for you to review.
-          </p>
+        <form className="modal-form" onSubmit={onSubmitDescribe}>
           <label className="modal-field">
             <span>Name</span>
             <input
               className="filter-input"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Bug fix"
+              placeholder="e.g. Needs review"
               autoFocus
             />
           </label>
           <label className="modal-field">
-            <span>Description</span>
+            <span>Description (optional)</span>
             <textarea
               className="filter-input"
               rows={3}
@@ -226,15 +189,41 @@ function CreateAutoLabelDialog({ onClose }: { onClose: () => void }) {
               placeholder="Which tasks belong under this label?"
             />
           </label>
-          {search.isError && <p className="modal-error">{(search.error as Error).message}</p>}
+          <div
+            className="modal-toggle"
+            title={automaticEnabled ? undefined : "Enable automatic task tagging in Tasks settings first."}
+          >
+            <label htmlFor="label-apply-automatically">Apply automatically</label>
+            <input
+              id="label-apply-automatically"
+              className="settings-toggle"
+              type="checkbox"
+              role="switch"
+              checked={automatic}
+              disabled={!automaticEnabled}
+              onChange={(e) => setAutomatic(e.target.checked)}
+            />
+          </div>
+          <p className="auto-label-intro">
+            {automatic
+              ? "Argus will suggest matching tasks for you to review before the label is created."
+              : "Applied by hand from the Tasks page."}
+          </p>
+          {(search.isError || createManualLabel.isError) && (
+            <p className="modal-error">
+              {((search.error ?? createManualLabel.error) as Error).message}
+            </p>
+          )}
           <div className="modal-actions">
             <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
             <button
               type="submit"
               className="btn-primary"
-              disabled={!name.trim() || !description.trim() || search.isPending}
+              disabled={!name.trim() || (automatic && !description.trim()) || search.isPending || createManualLabel.isPending}
             >
-              {search.isPending ? "Searching…" : "Find candidates"}
+              {automatic
+                ? (search.isPending ? "Searching…" : "Review")
+                : (createManualLabel.isPending ? "Creating…" : "Add label")}
             </button>
           </div>
         </form>
@@ -279,11 +268,11 @@ function CreateAutoLabelDialog({ onClose }: { onClose: () => void }) {
               </ul>
             </div>
           )}
-          {createLabel.isError && <p className="modal-error">{(createLabel.error as Error).message}</p>}
+          {createAutoLabel.isError && <p className="modal-error">{(createAutoLabel.error as Error).message}</p>}
           <div className="modal-actions">
             <button type="button" className="btn-secondary" onClick={() => setStep("describe")}>Back</button>
-            <button type="button" className="btn-primary" onClick={onCommit} disabled={createLabel.isPending}>
-              {createLabel.isPending ? "Creating…" : "Create label"}
+            <button type="button" className="btn-primary" onClick={onCommit} disabled={createAutoLabel.isPending}>
+              {createAutoLabel.isPending ? "Creating…" : "Create label"}
             </button>
           </div>
         </div>

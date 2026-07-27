@@ -474,6 +474,11 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 .modal-field .filter-input { height: 34px; width: 100%; }
 .modal-field textarea.filter-input { height: auto; min-height: 78px; resize: vertical; line-height: 1.45; padding-top: 8px; }
 .modal-copy { color: var(--text); font-size: 13.5px; line-height: 1.5; margin: 0 0 14px; }
+.modal-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  color: var(--text); font-size: 13px;
+}
+.modal-toggle label { cursor: pointer; }
 .modal-error { color: var(--racing-red); font-size: 12.5px; margin: 0; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .auto-label-modal { max-width: 520px; }

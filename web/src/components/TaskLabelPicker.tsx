@@ -94,7 +94,7 @@ export function TaskLabelPicker({ taskRef, applied }: { taskRef: TaskRef; applie
 
   const submitCreate = async () => {
     if (!canCreate) return;
-    const label = await createManualLabel.mutateAsync(trimmed);
+    const label = await createManualLabel.mutateAsync({ name: trimmed });
     setTaskLabel.mutate({ labelId: label.labelId, ref: taskRef, applied: true });
     setQuery("");
   };
