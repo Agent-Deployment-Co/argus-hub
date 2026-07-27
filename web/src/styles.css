@@ -645,6 +645,7 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 }
 .settings-test-success { color: var(--sky-surge); }
 .settings-test-row > button { justify-self: end; }
+.settings-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 28px; }
 .settings-not-found p { color: var(--muted); }
 .settings-load-error { color: var(--racing-red); }
 .settings-loading { color: var(--muted); }
