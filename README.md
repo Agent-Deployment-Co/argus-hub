@@ -227,12 +227,34 @@ launchctl load ~/Library/LaunchAgents/co.agentdeployment.argus-hub.plist
 
 ## Dashboard
 
-Open `http://hub.internal:4343` in a browser. The dashboard is the same UI as `argus serve`
-with one addition: a **user picker** appears in the filter bar once at least one client has
-synced. Use it to scope all views (Activity, Sessions, Projects, Tools, Health) to a single
-user, or leave it on "All users" for an org-wide view. The **Users** tab (rail link, visible in
-hub mode) shows a per-user summary table — sessions, total tokens, estimated cost, and last-sync
-time — sortable by any column.
+Open `http://hub.internal:4343` in a browser. The dashboard is the same UI as `argus serve` with
+a user/group dimension layered on top. The rail links to:
+
+| Tab | Path | Shows |
+|-----|------|-------|
+| Activity | `/` | Usage/cost over time, org-wide or scoped |
+| Tasks | `/tasks` | Extracted tasks — outcomes, frustration/interrupted rates, failure signals |
+| Tools | `/tools` | Tool and MCP server usage |
+| Team | `/users` | Per-user summary table — sessions, total tokens, estimated cost, last-sync time — sortable by any column |
+| Export | `/export` | Download the full dataset as a Snowflake-ready zip (see [Export to Snowflake](#export-to-snowflake)) |
+
+There's also a per-user activity view at `/users/$userId`, reached by clicking a row in Team.
+
+A combined user/group scope dropdown in the filter bar (visible once at least one client has
+synced) scopes Activity, Tasks, and Tools to a single user or group, or "All" for an org-wide
+view.
+
+### Groups
+
+Users can be organized into groups for reporting:
+
+- Full CRUD: `GET/POST /api/groups`, `PATCH/DELETE /api/groups/:groupId`
+- Bulk membership changes: `POST/DELETE /api/groups/:groupId/members`
+- Per-user assignment: `PATCH /api/users/:userId` with `{"groupId": "..."}`
+- UI: the group picker and combined user/group scope dropdown in the filter bar
+
+Deleting a group **ungroups** its members rather than deleting them — `groupId` is nulled on
+each affected user, the users themselves are untouched.
 
 ---
 
