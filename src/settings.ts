@@ -64,7 +64,7 @@ const BASE_DESCRIPTORS: Omit<SettingDescriptor, "value">[] = [
   {
     path: "llm.provider",
     label: "LLM Provider",
-    description: "Choose the LLM connection used by organization task features.",
+    description: "Choose the LLM connection to be used for future organization task features.",
     control: "select",
     options: providerOptions,
   },
