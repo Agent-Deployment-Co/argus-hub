@@ -18,6 +18,7 @@ import { buildActivityReport, buildTaskQualityReport, buildUserRoster } from "./
 import { assembleDashboard } from "../reporting/snapshot.ts";
 import { loadPlugins } from "../reporting/inventory.ts";
 import { buildTaskList, type TaskListParams } from "./task-list.ts";
+import { attachLabels } from "./task-labels.ts";
 
 // ---- Shared input schema ------------------------------------------------------------------
 
@@ -169,7 +170,13 @@ async function handleQueryTasks(store: HubStore, args: Record<string, unknown> |
     q: get("q") || undefined,
     outcomes,
   };
-  return toolJson(buildTaskList(taskRows, params));
+  const result = buildTaskList(taskRows, params);
+  const labelsByKey = await store.listLabelsForTasks(
+    orgId,
+    result.rows.map((r) => ({ clientId: r.clientId, sessionId: r.sessionId, taskSeq: r.taskSeq })),
+  );
+  attachLabels(result.rows, labelsByKey);
+  return toolJson(result);
 }
 
 async function handleQueryTaskQuality(store: HubStore, args: Record<string, unknown> | undefined) {

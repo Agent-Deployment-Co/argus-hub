@@ -283,6 +283,59 @@ describe("tools/call query_tasks", () => {
       await env.store.close();
     }
   });
+
+  test("attaches hub labels to rows, matching the equivalent /api/tasks response", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const clientId = `client-${randomUUID()}`;
+      const payload = buildUploadPayload([{ id: "label-sess" }]);
+      payload.rows.tasks.push({
+        session_id: "label-sess",
+        seq: 0,
+        source: "claude",
+        ts: 1_000_000,
+        task_json: JSON.stringify({
+          id: "label-sess-task-0",
+          source: "claude",
+          sourceSessionId: "label-sess",
+          timestampMs: 1_000_000,
+          description: "Fix the login bug",
+          evidence: "user said please fix the login bug",
+          evidenceKind: "user_message",
+          position: { originKey: "label-sess", recordIndex: 0, itemIndex: 0 },
+        }),
+      });
+      const syncRes = await app.request("/api/sync", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.apiKey}`,
+          "X-Argus-Client": clientId,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...payload,
+          fingerprint: [{ key: "claude.oauth.email", value: "alice@example.com", tsMs: 1_000_000 }],
+        }),
+      });
+      expect(syncRes.status).toBe(200);
+
+      const orgId = await env.store.getDefaultOrgId();
+      const label = await env.store.createLabel(orgId!, "Bug fix");
+      await env.store.setTaskLabel(orgId!, { clientId, sessionId: "label-sess", taskSeq: 0 }, label.labelId, true);
+
+      const restBody = (await (await app.request("/api/tasks")).json()) as {
+        rows: Array<{ labels: Array<{ labelId: string; name: string }> }>;
+      };
+      expect(restBody.rows[0]!.labels).toEqual([{ labelId: label.labelId, name: "Bug fix" }]);
+
+      const { body } = await callTool(app, "query_tasks");
+      const result = (body as { result: { content: Array<{ text: string }> } }).result;
+      expect(JSON.parse(result.content[0]!.text)).toEqual(restBody as object);
+    } finally {
+      await env.store.close();
+    }
+  });
 });
 
 describe("tools/call query_task_quality", () => {
