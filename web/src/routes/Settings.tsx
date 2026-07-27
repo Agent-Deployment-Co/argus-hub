@@ -1,5 +1,7 @@
 import { Link, useParams, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, Check, LoaderCircle, Lock, Pencil, SlidersHorizontal, Trash2, X } from "lucide-react";
+import {
+  ArrowLeft, Check, LoaderCircle, Lock, Pencil, PlugZap, SlidersHorizontal, Trash2, TriangleAlert, X,
+} from "lucide-react";
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { useSettingsBackHref } from "../components/Layout";
 import {
@@ -52,16 +54,17 @@ function PlainField({
   value: string;
   onChange: (value: string) => void;
 }) {
-  const Input = descriptor.control === "textarea" ? "textarea" : "input";
+  const stacked = descriptor.control === "textarea";
+  const Input = stacked ? "textarea" : "input";
   return (
-    <div className="settings-row">
+    <div className={`settings-row${stacked ? " settings-row-stacked" : ""}`}>
       <label htmlFor={`setting-${descriptor.field}`} className="settings-row-copy">
         <span className="settings-row-label">{descriptor.label}</span>
         {descriptor.description && <span className="settings-row-description">{descriptor.description}</span>}
       </label>
       <Input
         id={`setting-${descriptor.field}`}
-        className={`settings-control${descriptor.control === "textarea" ? " settings-textarea" : ""}`}
+        className={`settings-control${stacked ? " settings-textarea" : ""}`}
         value={value}
         placeholder={descriptor.placeholderByProvider?.[provider]}
         onChange={(event) => onChange(event.currentTarget.value)}
@@ -350,20 +353,31 @@ function GeneralSettingsPane() {
                     : "Send a tiny completion using the saved provider settings."}
               </span>
               {connection.data && (
-                <span className={connection.data.ok ? "settings-test-success" : "settings-inline-error"} role="status">
+                <span
+                  className={`settings-test-result ${connection.data.ok ? "is-ok" : "is-error"}`}
+                  role="status"
+                >
+                  {connection.data.ok ? <Check size={14} aria-hidden /> : <TriangleAlert size={14} aria-hidden />}
                   {connection.data.ok
                     ? `Connected${connection.data.model ? ` with ${connection.data.model}` : ""}.`
                     : connection.data.error}
                 </span>
               )}
-              {connection.error && <span className="settings-inline-error" role="alert">{connection.error.message}</span>}
+              {connection.error && (
+                <span className="settings-test-result is-error" role="alert">
+                  <TriangleAlert size={14} aria-hidden /> {connection.error.message}
+                </span>
+              )}
             </div>
             <button
-              className="btn-secondary"
+              className="settings-test-btn"
               type="button"
               disabled={!providerSaved || dirty || connection.isPending || saving}
               onClick={() => connection.mutate()}
             >
+              {connection.isPending
+                ? <LoaderCircle size={14} className="spin" aria-hidden />
+                : <PlugZap size={14} aria-hidden />}
               {connection.isPending ? "Testing…" : "Test connection"}
             </button>
           </div>
@@ -401,7 +415,7 @@ export function Settings() {
     <div className="settings-shell">
       <aside className="settings-rail">
         <button type="button" className="settings-back" onClick={goBack}>
-          <ArrowLeft size={17} aria-hidden />
+          <ArrowLeft size={16} aria-hidden />
           <span>Back to app</span>
         </button>
         <h1>Settings</h1>
@@ -412,7 +426,7 @@ export function Settings() {
             className="settings-nav-link"
             aria-current={category === "general" ? "page" : undefined}
           >
-            <SlidersHorizontal size={17} aria-hidden />
+            <SlidersHorizontal size={16} aria-hidden />
             <span>General</span>
           </Link>
         </nav>
