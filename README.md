@@ -350,9 +350,12 @@ bun run demo    # seeds a realistic 5-person fake team into .demo/ — the faste
   reverse proxy with TLS — do not expose it directly to the internet.
 - **`hub.db` is sensitive.** It contains the full session data of every syncing user. Restrict
   filesystem access (Hub chmods it to `0600` on creation) and include it in backups.
-- Uploaded payloads are JSON rows merged directly into `hub.db`; the client's raw `argus.db`
-  never leaves the developer's machine.
+- Uploaded payloads are resolved usage rows, session rows (including title/summary), tasks,
+  interaction metadata, tool/MCP invocations, and labels — merged directly into `hub.db`. The
+  client's raw `argus.db` never leaves the developer's machine. **Not** sent: prompt/response
+  text, or any BYO model API keys configured on the client.
 - A disabled key (`is_enabled = 0`) is rejected immediately without reading the request body.
+- `GET /healthz` intentionally bypasses all auth, for health checks.
 
 ---
 
