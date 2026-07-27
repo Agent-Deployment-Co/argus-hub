@@ -308,32 +308,34 @@ function GeneralSettingsPane() {
             void settings.refetch();
           }} />
         )}
-        <div className="settings-test-row">
-          <div className="settings-row-copy">
-            <span className="settings-row-label">Test connection</span>
-            <span className="settings-row-description">
-              {providerSaved
-                ? "Send a tiny completion using the saved provider settings."
-                : "Choose and save a provider to enable connection testing."}
-            </span>
-            {connection.data && (
-              <span className={connection.data.ok ? "settings-test-success" : "settings-inline-error"} role="status">
-                {connection.data.ok
-                  ? `Connected${connection.data.model ? ` with ${connection.data.model}` : ""}.`
-                  : connection.data.error}
+        {provider && (
+          <div className="settings-test-row">
+            <div className="settings-row-copy">
+              <span className="settings-row-label">Test connection</span>
+              <span className="settings-row-description">
+                {providerSaved
+                  ? "Send a tiny completion using the saved provider settings."
+                  : "Choose and save a provider to enable connection testing."}
               </span>
-            )}
-            {connection.error && <span className="settings-inline-error" role="alert">{connection.error.message}</span>}
+              {connection.data && (
+                <span className={connection.data.ok ? "settings-test-success" : "settings-inline-error"} role="status">
+                  {connection.data.ok
+                    ? `Connected${connection.data.model ? ` with ${connection.data.model}` : ""}.`
+                    : connection.data.error}
+                </span>
+              )}
+              {connection.error && <span className="settings-inline-error" role="alert">{connection.error.message}</span>}
+            </div>
+            <button
+              className="btn-secondary"
+              type="button"
+              disabled={!providerSaved || connection.isPending || saveQueue.status.state === "saving"}
+              onClick={() => connection.mutate()}
+            >
+              {connection.isPending ? "Testing…" : "Test connection"}
+            </button>
           </div>
-          <button
-            className="btn-secondary"
-            type="button"
-            disabled={!providerSaved || connection.isPending || saveQueue.status.state === "saving"}
-            onClick={() => connection.mutate()}
-          >
-            {connection.isPending ? "Testing…" : "Test connection"}
-          </button>
-        </div>
+        )}
       </section>
     </div>
   );
