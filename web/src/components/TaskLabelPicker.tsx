@@ -69,9 +69,26 @@ export function TaskLabelPicker({ taskRef, applied }: { taskRef: TaskRef; applie
     setTaskLabel.mutate({ labelId: label.labelId, ref: taskRef, applied: !appliedIds.has(label.labelId) });
   };
 
-  const clearAll = () => {
-    for (const label of applied) {
-      setTaskLabel.mutate({ labelId: label.labelId, ref: taskRef, applied: false });
+  const [clearing, setClearing] = useState(false);
+  const [clearError, setClearError] = useState<string | null>(null);
+
+  /** Runs all removals concurrently on setTaskLabel's shared mutation state, so we can't rely on
+   *  its isPending/isError to reflect this batch — a faster call settling can clear those flags
+   *  while a slower one is still in flight or has failed. Track this batch's own busy/error state
+   *  instead, from Promise.allSettled, so a partial failure doesn't get silently swallowed. */
+  const clearAll = async () => {
+    setClearing(true);
+    setClearError(null);
+    try {
+      const results = await Promise.allSettled(
+        applied.map((label) => setTaskLabel.mutateAsync({ labelId: label.labelId, ref: taskRef, applied: false })),
+      );
+      const failedCount = results.filter((r) => r.status === "rejected").length;
+      if (failedCount > 0) {
+        setClearError(`Failed to clear ${failedCount} of ${applied.length} label${applied.length === 1 ? "" : "s"}.`);
+      }
+    } finally {
+      setClearing(false);
     }
   };
 
@@ -80,7 +97,7 @@ export function TaskLabelPicker({ taskRef, applied }: { taskRef: TaskRef; applie
 
   useEffect(() => {
     if (open) inputRef.current?.focus();
-    else setQuery("");
+    else { setQuery(""); setClearError(null); }
   }, [open]);
 
   const allLabels = labelsQuery.data ?? [];
@@ -88,7 +105,7 @@ export function TaskLabelPicker({ taskRef, applied }: { taskRef: TaskRef; applie
   const filtered = trimmed ? allLabels.filter((l) => l.name.toLowerCase().includes(trimmed.toLowerCase())) : allLabels;
   const exactMatch = allLabels.some((l) => l.name.toLowerCase() === trimmed.toLowerCase());
   const canCreate = trimmed.length > 0 && !exactMatch;
-  const busy = setTaskLabel.isPending || createLabel.isPending;
+  const busy = setTaskLabel.isPending || createLabel.isPending || clearing;
 
   const submitCreate = async () => {
     if (!canCreate) return;
@@ -141,9 +158,9 @@ export function TaskLabelPicker({ taskRef, applied }: { taskRef: TaskRef; applie
             onKeyDown={(e) => { if (e.key === "Enter") submitCreate(); }}
           />
 
-          {(setTaskLabel.isError || createLabel.isError) && (
+          {(clearError || setTaskLabel.isError || createLabel.isError) && (
             <div className="group-popover-error" role="alert">
-              {((createLabel.error ?? setTaskLabel.error) as Error).message}
+              {clearError ?? ((createLabel.error ?? setTaskLabel.error) as Error).message}
             </div>
           )}
 
