@@ -82,6 +82,9 @@ function SecretField({
   onStartEdit,
   onCancelEdit,
   onChanged,
+  onSave,
+  saving,
+  saveError,
 }: {
   provider: LlmProvider;
   value: string;
@@ -90,14 +93,18 @@ function SecretField({
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onChanged: () => void;
+  onSave: () => void;
+  saving: boolean;
+  saveError: Error | null;
 }) {
   const status = useSecretStatusQuery(provider);
   const remove = useDeleteSecretMutation(provider);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
-  const error = remove.error ?? status.error;
+  const error = remove.error ?? saveError ?? status.error;
 
-  const escape = (event: KeyboardEvent) => {
+  const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Escape") onCancelEdit();
+    if (event.key === "Enter" && value.trim()) onSave();
   };
   const showInput = !status.data?.configured || editing;
 
@@ -127,15 +134,27 @@ function SecretField({
               autoComplete="new-password"
               placeholder={status.data?.configured ? "New API key" : "Paste API key"}
               value={value}
+              disabled={saving}
               onChange={(event) => onChange(event.currentTarget.value)}
-              onKeyDown={escape}
+              onKeyDown={onKeyDown}
             />
+            <button
+              className="settings-secret-icon-btn"
+              type="button"
+              title="Save key"
+              aria-label="Save key"
+              disabled={saving || !value.trim()}
+              onClick={onSave}
+            >
+              {saving ? <LoaderCircle size={15} className="spin" aria-hidden /> : <Check size={15} aria-hidden />}
+            </button>
             {status.data?.configured && (
               <button
                 className="settings-secret-icon-btn"
                 type="button"
                 title="Cancel"
                 aria-label="Cancel"
+                disabled={saving}
                 onClick={onCancelEdit}
               >
                 <X size={15} aria-hidden />
@@ -349,6 +368,18 @@ function GeneralSettingsPane() {
                 connection.reset();
                 void saveQueue.save("llm.provider", "").then(() => settings.refetch());
               }}
+              onSave={() => {
+                if (!apiKeyDraft.trim()) return;
+                saveSecretMutation.mutate(apiKeyDraft.trim(), {
+                  onSuccess: () => {
+                    setApiKeyDraft("");
+                    setApiKeyEditing(false);
+                    connection.reset();
+                  },
+                });
+              }}
+              saving={saveSecretMutation.isPending}
+              saveError={saveSecretMutation.error}
             />
           )}
           {provider && (
