@@ -264,20 +264,23 @@ Tasks tab.
 
 ## Query the Hub from an agent (MCP)
 
-Hub exposes a small, read-only [MCP](https://modelcontextprotocol.io) surface at `POST /mcp` so an
-agent — Claude Code, or any other MCP client — can query an org's pooled Argus data directly,
-instead of scraping the dashboard. It's the same stateless Streamable HTTP transport as any other
-MCP server; no session, no subprocess, just JSON-RPC over HTTPS.
+Hub exposes a small [MCP](https://modelcontextprotocol.io) surface at `POST /mcp` so an agent —
+Claude Code, or any other MCP client — can query an org's pooled Argus data directly, instead of
+scraping the dashboard, and manage hub labels on tasks. It's the same stateless Streamable HTTP
+transport as any other MCP server; no session, no subprocess, just JSON-RPC over HTTPS.
 
 **Tools:**
 
 | Tool | Answers |
 |------|---------|
 | `query_activity` | How much are we using agents, by whom, trending how (usage/cost over a window, vs. the previous window) |
-| `query_tasks` | What did people ask agents to do — a paged, filterable list of extracted tasks |
+| `query_tasks` | What did people ask agents to do — a paged, filterable list of extracted tasks, each with its applied hub labels |
 | `query_task_quality` | How *well* is agent work going — success/frustration/interrupted rates, outcomes over time, top failure signals |
 | `query_tool_usage` | Which tools and MCP servers are actually being used, and by how many people |
 | `query_users` | The org's user roster — userId, display name, email, last-sync, sessions, tokens, cost |
+| `list_labels` | Every hub label defined for the org — labelId, name, description, applied-task count |
+| `create_label` | Create a new hub label (name + optional description) |
+| `set_task_label` | Apply or remove one hub label on one task (by clientId/sessionId/taskSeq from a `query_tasks` row) |
 
 The first four take the same optional filters — `since`/`until` (ISO dates), `project`
 (substring), `source` (`claude`/`codex`/`gemini`/`cowork`), `user` (scope to one userId), and
@@ -295,6 +298,11 @@ through the task list.
 `query_users` takes an optional `group` filter (matches groupId or groupName, case-insensitively)
 instead of the shared filter set; use it to look up a `userId` before scoping the other tools to
 one person.
+
+`list_labels`, `create_label`, and `set_task_label` don't take the shared filter set — `create_label`
+takes `name` (required, must be unique in the org) and an optional `description`; `set_task_label`
+takes `labelId` (from `list_labels`/`create_label`), `clientId`/`sessionId`/`taskSeq` (from a
+`query_tasks` row), and `applied` (`true` to apply, `false` to remove; defaults to `true`).
 
 **Auth** reuses the Hub's existing admin password — no new credential to issue or rotate:
 
