@@ -1,5 +1,5 @@
 import { Link, useParams, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, Check, ListTodo, LoaderCircle, Lock, Pencil, Trash2, X } from "lucide-react";
+import { ArrowLeft, Bot, Check, LoaderCircle, Lock, Pencil, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useSettingsBackHref } from "../components/Layout";
 import {
@@ -217,7 +217,7 @@ function SecretField({ provider, onChanged }: { provider: LlmProvider; onChanged
   );
 }
 
-function TasksSettingsPane() {
+function LlmSettingsPane() {
   const settings = useSettingsQuery();
   const saveQueue = useSettingsSaveQueue();
   const connection = useTestConnectionMutation();
@@ -244,7 +244,7 @@ function TasksSettingsPane() {
     void saveQueue.save(path, value).catch(() => undefined);
   };
 
-  if (settings.isLoading) return <div className="settings-loading">Loading Tasks settings…</div>;
+  if (settings.isLoading) return <div className="settings-loading">Loading LLM settings…</div>;
   if (settings.error || !section || !providerDescriptor) {
     return <div className="settings-load-error" role="alert">
       {settings.error?.message ?? "The settings response was incomplete."}
@@ -252,10 +252,10 @@ function TasksSettingsPane() {
   }
 
   return (
-    <div className="settings-pane" data-settings-pane="tasks">
+    <div className="settings-pane" data-settings-pane="llm">
       <div className="settings-pane-head">
         <div>
-          <h2>Tasks</h2>
+          <h2>LLM</h2>
           <p className="settings-pane-intro">Configure the LLM connection for organization task features.</p>
         </div>
         <SaveIndicator status={saveQueue.status} />
@@ -353,23 +353,23 @@ export function Settings() {
         <nav aria-label="Settings categories">
           <Link
             to="/settings/$category"
-            params={{ category: "tasks" }}
+            params={{ category: "llm" }}
             className="settings-nav-link"
-            aria-current={category === "tasks" ? "page" : undefined}
+            aria-current={category === "llm" ? "page" : undefined}
           >
-            <ListTodo size={17} aria-hidden />
-            <span>Tasks</span>
+            <Bot size={17} aria-hidden />
+            <span>LLM</span>
           </Link>
         </nav>
       </aside>
       <main className="settings-main">
-        {category === "tasks" ? (
-          <TasksSettingsPane />
+        {category === "llm" ? (
+          <LlmSettingsPane />
         ) : (
           <div className="settings-not-found" role="status">
             <h2>Settings category not found</h2>
             <p>There is no settings category named “{category}”.</p>
-            <Link to="/settings/$category" params={{ category: "tasks" }}>Open Tasks settings</Link>
+            <Link to="/settings/$category" params={{ category: "llm" }}>Open LLM settings</Link>
           </div>
         )}
       </main>
