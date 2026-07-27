@@ -4,12 +4,19 @@ Self-hosted server that collects usage data from multiple Argus clients and pres
 org-wide dashboard. It is the on-premise alternative to the hosted `argus-dash` backend.
 
 Each developer runs `argus sync` as usual. Instead of uploading to `argus.agentdeployment.co`,
-they point their client at a Hub instance. Hub receives each client's local `argus.db` via a
-single `POST /api/sync` endpoint, merges the data into one central database tagged by user, and
-serves the same dashboard UI as `argus serve` — extended with a user dimension so you can view
-the full org at once or scope any view to a specific person.
+they point their client at a Hub instance. The client first calls `POST /api/sync/unknown-sessions`
+to learn which session IDs Hub is already missing (capped at 10,000 IDs per request), then Hub
+receives the usage snapshot — a JSON payload of resolved rows, not the raw `argus.db` file — at
+`POST /api/sync`, merges it into one central database tagged by user, and serves the same
+dashboard UI as `argus serve` — extended with a user dimension so you can view the full org at
+once or scope any view to a specific person.
 
 Nothing is forwarded anywhere else. Hub runs entirely on your network.
+
+**Documentation:** the canonical user-facing docs live at
+[argus.agentdeployment.co/argus-hub](https://argus.agentdeployment.co/argus-hub). This README
+covers self-hosting Hub itself (deployment, config, security); the hosted page covers connecting
+a client to it day-to-day.
 
 ---
 
@@ -37,28 +44,36 @@ across restarts; otherwise a fresh random password is generated each launch.
 
 ## Connecting clients
 
-On each developer's machine, set two environment variables before running `argus sync`:
+On each developer's machine, point the client at Hub and store the API key in the OS secret
+store (never in plaintext config):
+
+```bash
+npx @agentdeploymentco/argus config set hub.url http://hub.internal:4343
+npx @agentdeploymentco/argus secret set ARGUS_HUB_KEY   # prompts for the key, never touches argus.json
+```
+
+To configure a single process instead (e.g. CI, a container), use the environment variable pair:
 
 ```bash
 export ARGUS_HUB_URL=http://hub.internal:4343
 export ARGUS_HUB_KEY=hub-550e8400-e29b-41d4-a716-446655440000
 ```
 
-Or add them to `argus.json` in the Argus config directory:
-
-```json
-{
-  "hub": {
-    "url": "http://hub.internal:4343",
-    "key": "hub-550e8400-e29b-41d4-a716-446655440000"
-  }
-}
-```
+Key resolution order is `ARGUS_HUB_KEY` env var → OS secret store → unset. Putting `hub.key`
+directly in `argus.json` also still works, but it's a legacy path the client actively migrates
+users off of — `hub.key` is marked `secret: true`, and a one-time migration moves any plaintext
+key it finds out of `argus.json` and into the secret store. Prefer `secret set` above.
 
 With Hub configured, `argus sync` posts a JSON payload of resolved session rows to Hub
 instead of the hosted service. No `argus login` / OAuth flow is needed. Hub identifies each
-user from the client's latest fingerprint — Claude/Codex OAuth email when present, falling
-back to `git.user.name` — and folds repeat clients from the same person into a single user.
+user from the client's latest identity signal — Claude/Codex OAuth email when present, falling
+back to `git.user.name` — and folds repeat clients from the same person into a single user
+(the underlying table is named `fingerprint`, but that's an implementation detail).
+
+The desktop app (macOS/Windows) offers the same connection under Settings → Hub URL + key, and
+uploads on a schedule automatically. From the CLI, `argus run` also syncs on a built-in five-minute
+schedule; use `--sync-interval N` to change it or `--no-sync` to disable it and rely on manual
+`argus sync` calls.
 
 ---
 
@@ -73,6 +88,14 @@ CLI flags — highest precedence last.
 | `--data-dir` | `HUB_DATA_DIR` | `dataDir` | `./data` | Directory for `hub.db` |
 | —        | `ADMIN_PASSWORD` | —     | _(random)_ | Dashboard login password (pinned across restarts when set) |
 | —        | `HUB_INSECURE_COOKIE_HOSTS` | — | _(none)_ | Comma-separated hostnames (no port) that get a non-`Secure` session cookie, for plain-HTTP-only deployments (e.g. a cluster-internal address reachable only via a private network). **Never** list a host reachable from the public internet. |
+
+`GET /healthz` is always unauthenticated and returns `200 ok` — the one route that intentionally
+bypasses both API-key and admin-password auth, for load balancer / orchestrator health checks.
+
+**Client compatibility:** Hub ingests client store schema versions v10–v23
+(`HUB_MIN_CLIENT_SCHEMA_VERSION` / `HUB_MAX_CLIENT_SCHEMA_VERSION`). A client outside that range
+gets a `422` with an actionable message — update Hub if the client is newer than Hub supports, or
+run `argus index` to migrate if the client's store is older than Hub's minimum.
 
 Example `hub.json`:
 
@@ -91,10 +114,13 @@ Default org and prints it to stdout.
 
 ## API keys
 
-Keys are stored in `hub.db`. The printed key is the only time it appears in plain text.
+Keys are stored in `hub.db` **hashed** (`key_hash`, via `hashApiKey()`) — the printed key is the
+only time the plaintext value exists anywhere.
 
 To rotate a key: delete the old row from `api_keys` directly in `hub.db`, then restart Hub. A
-new key will be generated and printed on startup if the table is empty.
+new key will be generated and printed on startup if the table is now empty. Disabling a key
+(below) instead of deleting it does **not** trigger a new key on restart — Hub only mints one
+when the `api_keys` table has no rows at all.
 
 To disable a key without deleting it (e.g. while rotating), set `is_enabled = 0` in `hub.db`.
 Hub rejects disabled keys with `401` before reading the request body.
@@ -131,14 +157,23 @@ sudo journalctl -fu argus-hub    # follow logs
 
 ### Docker
 
+A public multi-arch image is published to GHCR — no `docker login` needed to pull it:
+
 ```bash
-docker build -t argus-hub .
+docker pull ghcr.io/agent-deployment-co/argus-hub:latest
 
 docker run -d \
   --name argus-hub \
   -p 4343:4343 \
   -v argus-hub-data:/data \
-  argus-hub
+  ghcr.io/agent-deployment-co/argus-hub:latest
+```
+
+To build from source instead:
+
+```bash
+docker build -t argus-hub .
+docker run -d --name argus-hub -p 4343:4343 -v argus-hub-data:/data argus-hub
 ```
 
 On first startup Hub prints the admin password and API key to stdout — retrieve them with:
@@ -192,12 +227,34 @@ launchctl load ~/Library/LaunchAgents/co.agentdeployment.argus-hub.plist
 
 ## Dashboard
 
-Open `http://hub.internal:4343` in a browser. The dashboard is the same UI as `argus serve`
-with one addition: a **user picker** appears in the filter bar once at least one client has
-synced. Use it to scope all views (Activity, Sessions, Projects, Tools, Health) to a single
-user, or leave it on "All users" for an org-wide view. The **Users** tab (rail link, visible in
-hub mode) shows a per-user summary table — sessions, total tokens, estimated cost, and last-sync
-time — sortable by any column.
+Open `http://hub.internal:4343` in a browser. The dashboard is the same UI as `argus serve` with
+a user/group dimension layered on top. The rail links to:
+
+| Tab | Path | Shows |
+|-----|------|-------|
+| Activity | `/` | Usage/cost over time, org-wide or scoped |
+| Tasks | `/tasks` | Extracted tasks — outcomes, frustration/interrupted rates, failure signals |
+| Tools | `/tools` | Tool and MCP server usage |
+| Team | `/users` | Per-user summary table — sessions, total tokens, estimated cost, last-sync time — sortable by any column |
+| Export | `/export` | Download the full dataset as a Snowflake-ready zip (see [Export to Snowflake](#export-to-snowflake)) |
+
+There's also a per-user activity view at `/users/$userId`, reached by clicking a row in Team.
+
+A combined user/group scope dropdown in the filter bar (visible once at least one client has
+synced) scopes Activity, Tasks, and Tools to a single user or group, or "All" for an org-wide
+view.
+
+### Groups
+
+Users can be organized into groups for reporting:
+
+- Full CRUD: `GET/POST /api/groups`, `PATCH/DELETE /api/groups/:groupId`
+- Bulk membership changes: `POST/DELETE /api/groups/:groupId/members`
+- Per-user assignment: `PATCH /api/users/:userId` with `{"groupId": "..."}`
+- UI: the group picker and combined user/group scope dropdown in the filter bar
+
+Deleting a group **ungroups** its members rather than deleting them — `groupId` is nulled on
+each affected user, the users themselves are untouched.
 
 ---
 
@@ -219,13 +276,21 @@ MCP server; no session, no subprocess, just JSON-RPC over HTTPS.
 | `query_users` | The org's user roster — userId, display name, email, last-sync, sessions, tokens, cost |
 
 The first four take the same optional filters — `since`/`until` (ISO dates), `project`
-(substring), `source` (`claude`/`codex`/`gemini`/`cowork`), `user` (scope to one userId) — read by
-the same query parsing the REST API uses, so an agent's answers can never disagree with what you
+(substring), `source` (`claude`/`codex`/`gemini`/`cowork`), `user` (scope to one userId), and
+`group` (scope to one groupId, or `__none__` for users with no group assigned) — read by the
+same query parsing the REST API uses, so an agent's answers can never disagree with what you
 see in the UI for the filters the UI itself exposes. `query_task_quality` and `query_tool_usage`'s
 `user` filter mirrors the dashboard's per-user page (`/users/$userId`); `query_activity`'s `user`
 filter has no dashboard equivalent — the Activity page is always team-wide — so use it to get a
-per-user usage/cost view the UI doesn't offer. `query_users` takes no arguments; use it to look up
-a `userId` before scoping the other tools to one person.
+per-user usage/cost view the UI doesn't offer.
+
+`query_tasks` additionally takes `q` (search over task description/project), `outcome` (comma
+list of `success`/`failure`/`unknown`), `limit` (default 50, max 200), and `offset`, for paging
+through the task list.
+
+`query_users` takes an optional `group` filter (matches groupId or groupName, case-insensitively)
+instead of the shared filter set; use it to look up a `userId` before scoping the other tools to
+one person.
 
 **Auth** reuses the Hub's existing admin password — no new credential to issue or rotate:
 
@@ -259,6 +324,23 @@ JSONL files and `load.sql` for a manual or externally scheduled load.
 See [Export Argus Hub data to Snowflake](docs/snowflake.md) for data coverage, one-time role and
 schema setup, authentication, scheduling, and limitations.
 
+The same bundle is also available straight from the browser: the **Export** tab
+(`GET /api/export`) streams it as a zip with no separate CLI step. `api_keys` is deliberately
+excluded from the bundle either way.
+
+---
+
+## Development
+
+```bash
+bun install     # required first — `bun test` fails with a misleading
+                # "Cannot find package 'sqlite3'" error if you skip this
+make test       # 179 tests
+make typecheck
+bun run dev     # dev server
+bun run demo    # seeds a realistic 5-person fake team into .demo/ — the fastest way to see the product
+```
+
 ---
 
 ## Security
@@ -268,22 +350,29 @@ schema setup, authentication, scheduling, and limitations.
   reverse proxy with TLS — do not expose it directly to the internet.
 - **`hub.db` is sensitive.** It contains the full session data of every syncing user. Restrict
   filesystem access (Hub chmods it to `0600` on creation) and include it in backups.
-- Uploaded payloads are JSON rows merged directly into `hub.db`; the client's raw `argus.db`
-  never leaves the developer's machine.
+- Uploaded payloads are resolved usage rows, session rows (including title/summary), tasks,
+  interaction metadata, tool/MCP invocations, and labels — merged directly into `hub.db`. The
+  client's raw `argus.db` never leaves the developer's machine. **Not** sent: prompt/response
+  text, or any BYO model API keys configured on the client.
 - A disabled key (`is_enabled = 0`) is rejected immediately without reading the request body.
+- `GET /healthz` intentionally bypasses all auth, for health checks.
 
 ---
 
 ## Architecture
 
 ```
-argus clients  ──POST /api/sync──►  Hub ingest  ──►  hub.db
-(argus sync)      JSON {schemaVersion,            resolved_* + org_id + user_id
-                  rows, fingerprint}              (auto-mapped from OAuth email)
+argus clients  ──POST /api/sync/unknown-sessions──►  Hub (which session IDs are missing?)
+(argus sync)   ──POST /api/sync───────────────────►  Hub ingest  ──►  hub.db
+                  JSON {schemaVersion,                resolved_* + org_id + user_id
+                  rows, fingerprint}                  (auto-mapped from OAuth email)
 
-hub.db  ──►  GET /api/snapshot, /api/sessions, /api/session/:id,
-         ──►       /api/users, /api/user/:id, /api/clients
-         ──►  React SPA  (user picker · Users tab · per-user filter on all views)
+hub.db  ──►  GET /api/activity, /api/tasks, /api/tasks/report,
+         ──►      /api/snapshot, /api/sessions, /api/session/:id,
+         ──►      /api/users, /api/user/:id, /api/clients,
+         ──►      /api/groups*, /api/export, /healthz
+         ──►  POST /mcp  (read-only MCP surface — see "Query the Hub from an agent")
+         ──►  React SPA  (Activity · Tasks · Tools · Team · Export · per-user filter)
 ```
 
 Hub supports multiple orgs via the `organizations` table — each API key is scoped to one org.

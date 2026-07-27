@@ -3,6 +3,7 @@ import { defineCommand, runMain } from "citty";
 import { openHubStore } from "./store/hub-store.ts";
 import { startHubServer } from "./api/serve.ts";
 import { createAdminAuth } from "./admin-auth.ts";
+import { VERSION } from "./version.ts";
 import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -169,7 +170,7 @@ const exportCommand = defineCommand({
 
 runMain(
   defineCommand({
-    meta: { name: "argus-hub", version: "0.1.0", description: "Argus Hub server" },
+    meta: { name: "argus-hub", version: VERSION, description: "Argus Hub server" },
     subCommands: { serve, export: exportCommand },
   }),
 );
