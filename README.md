@@ -330,6 +330,19 @@ excluded from the bundle either way.
 
 ---
 
+## Development
+
+```bash
+bun install     # required first — `bun test` fails with a misleading
+                # "Cannot find package 'sqlite3'" error if you skip this
+make test       # 179 tests
+make typecheck
+bun run dev     # dev server
+bun run demo    # seeds a realistic 5-person fake team into .demo/ — the fastest way to see the product
+```
+
+---
+
 ## Security
 
 - **Two access layers.** API keys gate `/api/sync` uploads; the admin password gates the
