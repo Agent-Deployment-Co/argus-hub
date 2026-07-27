@@ -44,28 +44,36 @@ across restarts; otherwise a fresh random password is generated each launch.
 
 ## Connecting clients
 
-On each developer's machine, set two environment variables before running `argus sync`:
+On each developer's machine, point the client at Hub and store the API key in the OS secret
+store (never in plaintext config):
+
+```bash
+npx @agentdeploymentco/argus config set hub.url http://hub.internal:4343
+npx @agentdeploymentco/argus secret set ARGUS_HUB_KEY   # prompts for the key, never touches argus.json
+```
+
+To configure a single process instead (e.g. CI, a container), use the environment variable pair:
 
 ```bash
 export ARGUS_HUB_URL=http://hub.internal:4343
 export ARGUS_HUB_KEY=hub-550e8400-e29b-41d4-a716-446655440000
 ```
 
-Or add them to `argus.json` in the Argus config directory:
-
-```json
-{
-  "hub": {
-    "url": "http://hub.internal:4343",
-    "key": "hub-550e8400-e29b-41d4-a716-446655440000"
-  }
-}
-```
+Key resolution order is `ARGUS_HUB_KEY` env var → OS secret store → unset. Putting `hub.key`
+directly in `argus.json` also still works, but it's a legacy path the client actively migrates
+users off of — `hub.key` is marked `secret: true`, and a one-time migration moves any plaintext
+key it finds out of `argus.json` and into the secret store. Prefer `secret set` above.
 
 With Hub configured, `argus sync` posts a JSON payload of resolved session rows to Hub
 instead of the hosted service. No `argus login` / OAuth flow is needed. Hub identifies each
-user from the client's latest fingerprint — Claude/Codex OAuth email when present, falling
-back to `git.user.name` — and folds repeat clients from the same person into a single user.
+user from the client's latest identity signal — Claude/Codex OAuth email when present, falling
+back to `git.user.name` — and folds repeat clients from the same person into a single user
+(the underlying table is named `fingerprint`, but that's an implementation detail).
+
+The desktop app (macOS/Windows) offers the same connection under Settings → Hub URL + key, and
+uploads on a schedule automatically. From the CLI, `argus run` also syncs on a built-in five-minute
+schedule; use `--sync-interval N` to change it or `--no-sync` to disable it and rely on manual
+`argus sync` calls.
 
 ---
 
