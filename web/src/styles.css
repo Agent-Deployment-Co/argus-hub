@@ -468,7 +468,7 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
   box-shadow: 0 20px 48px rgba(0, 0, 0, .35); padding: 18px;
 }
 .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-.modal-head h2 { margin: 0; color: var(--heading); font: 700 16px "Poppins", "Avenir Next", Arial, sans-serif; }
+.modal-head h2 { margin: 0; color: var(--heading); font: 700 16px "Poppins", "Avenir Next", Arial, sans-serif; text-transform: none; letter-spacing: normal; }
 .modal-form { display: flex; flex-direction: column; gap: 14px; }
 .modal-field { display: flex; flex-direction: column; gap: 6px; font: 600 12px "Poppins", "Avenir Next", Arial, sans-serif; color: var(--muted); }
 .modal-field .filter-input { height: 34px; width: 100%; }
