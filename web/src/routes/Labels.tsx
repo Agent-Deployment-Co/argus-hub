@@ -76,12 +76,13 @@ export function Labels() {
 
 function CreateLabelDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const createLabel = useCreateLabel();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    createLabel.mutate(name.trim(), { onSuccess: onClose });
+    createLabel.mutate({ name: name.trim(), description: description.trim() }, { onSuccess: onClose });
   };
 
   return (
@@ -95,6 +96,15 @@ function CreateLabelDialog({ onClose }: { onClose: () => void }) {
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Needs review"
             autoFocus
+          />
+        </label>
+        <label className="modal-field">
+          <span>Description (optional)</span>
+          <input
+            className="filter-input"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="What this label means"
           />
         </label>
         <p className="modal-copy">

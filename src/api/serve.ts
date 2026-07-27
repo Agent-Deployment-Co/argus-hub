@@ -275,12 +275,13 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
 
-    const body = await c.req.json().catch(() => null) as { name?: unknown } | null;
+    const body = await c.req.json().catch(() => null) as { name?: unknown; description?: unknown } | null;
     const name = typeof body?.name === "string" ? body.name.trim() : "";
     if (!name) return c.json({ error: 'Missing required "name".' }, 400);
+    const description = typeof body?.description === "string" && body.description.trim() ? body.description.trim() : null;
 
     try {
-      const label = await store.createLabel(orgId, name);
+      const label = await store.createLabel(orgId, name, description);
       return c.json({ label }, 201);
     } catch (err) {
       if (err instanceof DuplicateLabelNameError) return c.json({ error: err.message }, 409);

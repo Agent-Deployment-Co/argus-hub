@@ -200,6 +200,7 @@ export interface LabelInfo {
   labelId: string;
   orgId: string;
   name: string;
+  description: string | null;
   createdAt: number;
   taskCount: number;
 }
@@ -334,6 +335,7 @@ const HUB_LABELS_DDL = `
     label_id    TEXT PRIMARY KEY,
     org_id      TEXT NOT NULL REFERENCES organizations(org_id),
     name        TEXT NOT NULL,
+    description TEXT,
     created_at  INTEGER NOT NULL,
     UNIQUE (org_id, name)
   );
@@ -2041,7 +2043,7 @@ export class HubStore {
   // that's scoped out of this pass).
 
   /** Create a label. Throws DuplicateLabelNameError if the name is already taken in this org. */
-  createLabel(orgId: string, name: string, now = Date.now()): Promise<LabelInfo> {
+  createLabel(orgId: string, name: string, description: string | null = null, now = Date.now()): Promise<LabelInfo> {
     return this.schedule(async () => {
       const existing = await get<{ label_id: string }>(
         this.db,
@@ -2053,19 +2055,19 @@ export class HubStore {
       const labelId = `label-${randomUUID()}`;
       await run(
         this.db,
-        "INSERT INTO hub_labels(label_id, org_id, name, created_at) VALUES (?, ?, ?, ?)",
-        [labelId, orgId, name, now],
+        "INSERT INTO hub_labels(label_id, org_id, name, description, created_at) VALUES (?, ?, ?, ?, ?)",
+        [labelId, orgId, name, description, now],
       );
-      return { labelId, orgId, name, createdAt: now, taskCount: 0 };
+      return { labelId, orgId, name, description, createdAt: now, taskCount: 0 };
     });
   }
 
   /** Every label in an org with its current applied-task count, ordered by name. */
   listLabels(orgId: string): Promise<LabelInfo[]> {
     return this.schedule(async () => {
-      const rows = await all<{ label_id: string; name: string; created_at: number; task_count: number }>(
+      const rows = await all<{ label_id: string; name: string; description: string | null; created_at: number; task_count: number }>(
         this.db,
-        `SELECT l.label_id, l.name, l.created_at, COUNT(tl.label_id) AS task_count
+        `SELECT l.label_id, l.name, l.description, l.created_at, COUNT(tl.label_id) AS task_count
          FROM hub_labels l
          LEFT JOIN hub_task_labels tl ON tl.org_id = l.org_id AND tl.label_id = l.label_id
          WHERE l.org_id = ?
@@ -2074,7 +2076,7 @@ export class HubStore {
         [orgId],
       );
       return rows.map((r) => ({
-        labelId: r.label_id, orgId, name: r.name, createdAt: r.created_at, taskCount: r.task_count,
+        labelId: r.label_id, orgId, name: r.name, description: r.description, createdAt: r.created_at, taskCount: r.task_count,
       }));
     });
   }

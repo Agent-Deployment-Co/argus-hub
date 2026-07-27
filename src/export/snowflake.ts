@@ -89,7 +89,7 @@ export const SNOWFLAKE_EXPORT_TABLES: readonly ExportTable[] = [
   },
   {
     name: "hub_labels",
-    columns: [text("label_id"), text("org_id"), text("name"), number("created_at")],
+    columns: [text("label_id"), text("org_id"), text("name"), text("description"), number("created_at")],
   },
   {
     name: "hub_task_labels",
