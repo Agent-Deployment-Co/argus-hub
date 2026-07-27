@@ -350,6 +350,7 @@ th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--lin
 th { color: var(--muted); font-family: "Poppins", "Avenir Next", Arial, sans-serif; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; cursor: pointer; user-select: none; white-space: nowrap; position: sticky; top: 0; background: var(--surface); z-index: 1; }
 th:hover { color: var(--accent); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.right, th.right { text-align: right; }
 .nowrap { white-space: nowrap; }
 .session-project { width: clamp(160px, 24vw, 260px); max-width: clamp(160px, 24vw, 260px); }
 .truncate { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

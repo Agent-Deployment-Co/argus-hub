@@ -1,4 +1,4 @@
-import { Plus, Tag, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Modal } from "../components/Modal";
 import { useCreateLabel, useDeleteLabel, useLabels, type HubLabel } from "../lib/labels";
@@ -36,20 +36,14 @@ export function Labels() {
             <thead>
               <tr>
                 <th>Name</th>
-                <th className="num">Tasks</th>
-                <th>Actions</th>
+                <th className="right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {labels.map((label) => (
                 <tr key={label.labelId}>
-                  <td>
-                    <span className="table-link" style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
-                      <Tag size={13} strokeWidth={2} aria-hidden /> {label.name}
-                    </span>
-                  </td>
-                  <td className="num">{label.taskCount}</td>
-                  <td>
+                  <td>{label.name}</td>
+                  <td className="right">
                     <button
                       type="button"
                       className="icon-btn"
