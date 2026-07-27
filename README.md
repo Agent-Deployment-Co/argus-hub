@@ -362,13 +362,17 @@ bun run demo    # seeds a realistic 5-person fake team into .demo/ — the faste
 ## Architecture
 
 ```
-argus clients  ──POST /api/sync──►  Hub ingest  ──►  hub.db
-(argus sync)      JSON {schemaVersion,            resolved_* + org_id + user_id
-                  rows, fingerprint}              (auto-mapped from OAuth email)
+argus clients  ──POST /api/sync/unknown-sessions──►  Hub (which session IDs are missing?)
+(argus sync)   ──POST /api/sync───────────────────►  Hub ingest  ──►  hub.db
+                  JSON {schemaVersion,                resolved_* + org_id + user_id
+                  rows, fingerprint}                  (auto-mapped from OAuth email)
 
-hub.db  ──►  GET /api/snapshot, /api/sessions, /api/session/:id,
-         ──►       /api/users, /api/user/:id, /api/clients
-         ──►  React SPA  (user picker · Users tab · per-user filter on all views)
+hub.db  ──►  GET /api/activity, /api/tasks, /api/tasks/report,
+         ──►      /api/snapshot, /api/sessions, /api/session/:id,
+         ──►      /api/users, /api/user/:id, /api/clients,
+         ──►      /api/groups*, /api/export, /healthz
+         ──►  POST /mcp  (read-only MCP surface — see "Query the Hub from an agent")
+         ──►  React SPA  (Activity · Tasks · Tools · Team · Export · per-user filter)
 ```
 
 Hub supports multiple orgs via the `organizations` table — each API key is scoped to one org.
