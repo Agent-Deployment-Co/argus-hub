@@ -186,7 +186,7 @@ function CreateLabelDialog({
               rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Which tasks belong under this label?"
+              placeholder={automatic ? "Which tasks belong under this label?" : "Optional notes about this label"}
             />
           </label>
           <div
@@ -209,9 +209,9 @@ function CreateLabelDialog({
               ? "Argus will suggest matching tasks for you to review before the label is created."
               : "Applied by hand from the Tasks page."}
           </p>
-          {(search.isError || createManualLabel.isError) && (
+          {(automatic ? search.isError : createManualLabel.isError) && (
             <p className="modal-error">
-              {((search.error ?? createManualLabel.error) as Error).message}
+              {((automatic ? search.error : createManualLabel.error) as Error).message}
             </p>
           )}
           <div className="modal-actions">
