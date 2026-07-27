@@ -797,6 +797,7 @@ export interface TaskLlmSettings {
 
 export interface LlmSecretStatus {
   configured: boolean;
+  /** A masked hint (e.g. "…WXYZ"), present only when configured. Never the raw value. */
   hint?: string;
 }
 

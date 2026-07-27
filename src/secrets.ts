@@ -17,6 +17,11 @@ export interface SecretCipher {
   decrypt(orgId: string, provider: LlmProvider, record: EncryptedSecret): string;
 }
 
+/** Mask a secret to a short, non-reversible hint. */
+export function maskSecret(value: string): string {
+  return value.length <= 4 ? "…" : `…${value.slice(-4)}`;
+}
+
 function additionalData(orgId: string, provider: LlmProvider): Buffer {
   return Buffer.from(JSON.stringify([AAD_VERSION, orgId, provider]), "utf8");
 }

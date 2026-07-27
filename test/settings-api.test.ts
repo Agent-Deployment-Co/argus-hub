@@ -102,9 +102,9 @@ describe("settings API", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ value: firstKey }),
     });
-    expect(await created.json()).toEqual({ configured: true, hint: "sk-f" });
+    expect(await created.json()).toEqual({ configured: true, hint: "…1234" });
     expect(await (await app.request("/api/settings/secrets/openai")).json())
-      .toEqual({ configured: true, hint: "sk-f" });
+      .toEqual({ configured: true, hint: "…1234" });
     const encrypted = await store.readEncryptedLlmSecret((await store.getDefaultOrgId())!, "openai");
     expect(JSON.stringify(encrypted)).not.toContain("sk-first");
 
@@ -113,7 +113,7 @@ describe("settings API", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ value: "sk-second-5678" }),
     });
-    expect(await replaced.json()).toEqual({ configured: true, hint: "sk-s" });
+    expect(await replaced.json()).toEqual({ configured: true, hint: "…5678" });
     expect(await (await app.request("/api/settings/secrets/openai", { method: "DELETE" })).json())
       .toEqual({ configured: false });
     await store.close();

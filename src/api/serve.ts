@@ -41,7 +41,7 @@ import {
   resolveTaskLlmConfig,
   sanitizeLlmError,
 } from "../llm/resolve.ts";
-import type { SecretCipher } from "../secrets.ts";
+import { maskSecret, type SecretCipher } from "../secrets.ts";
 import {
   describeSettings,
   SettingsValidationError,
@@ -207,7 +207,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
       orgId,
       provider.name,
       options.secretCipher.encrypt(orgId, provider.name, value),
-      value.slice(0, 4),
+      maskSecret(value),
       Date.now(),
     );
     return c.json(await store.readLlmSecretStatus(orgId, provider.name));
