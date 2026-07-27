@@ -557,7 +557,7 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 .settings-control {
   flex: 0 0 auto; width: var(--setting-control-w); min-width: 0; height: 32px; padding: 0 10px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text);
-  font-size: 13px;
+  font: 13px "Aleo", Georgia, serif;
 }
 .settings-control:hover { border-color: color-mix(in srgb, var(--muted) 65%, var(--line)); }
 .settings-control:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
