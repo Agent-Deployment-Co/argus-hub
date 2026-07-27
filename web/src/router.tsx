@@ -74,7 +74,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({
     getParentRoute: () => rootRoute,
     path: "/settings",
-    beforeLoad: () => { throw redirect({ to: "/settings/$category", params: { category: "tasks" } }); },
+    beforeLoad: () => { throw redirect({ to: "/settings/$category", params: { category: "llm" } }); },
   }),
   createRoute({
     getParentRoute: () => rootRoute,

@@ -1,5 +1,5 @@
 import { Link, useParams, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, Check, ListTodo, LoaderCircle, Lock, Pencil, Trash2, X } from "lucide-react";
+import { ArrowLeft, Bot, Check, LoaderCircle, Lock, Pencil, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useSettingsBackHref } from "../components/Layout";
 import {
@@ -217,7 +217,7 @@ function SecretField({ provider, onChanged }: { provider: LlmProvider; onChanged
   );
 }
 
-function TasksSettingsPane() {
+function LlmSettingsPane() {
   const settings = useSettingsQuery();
   const saveQueue = useSettingsSaveQueue();
   const connection = useTestConnectionMutation();
@@ -230,10 +230,6 @@ function TasksSettingsPane() {
   const section = settings.data?.categories[0].sections[0];
   const provider = (values["llm.provider"] || null) as LlmProvider | null;
   const providerDescriptor = section?.settings.find((setting) => setting.path === "llm.provider");
-  const automaticDescriptor = section?.settings.find((setting) => setting.path === "automaticTaggingEnabled");
-  const automaticEnabled = automaticDescriptor?.value === true;
-  const automaticEligibility = settings.data?.automaticTaggingEligibility;
-  const automaticAvailable = automaticEligibility?.eligible === true;
   const providerSaved = !!provider && providerDescriptor?.value === provider;
   const visibleFields = useMemo(() => section?.settings.filter((setting) =>
     setting.providerScoped && providerSaved && setting.visibleWhen?.in.includes(provider!)) ?? [],
@@ -248,7 +244,7 @@ function TasksSettingsPane() {
     void saveQueue.save(path, value).catch(() => undefined);
   };
 
-  if (settings.isLoading) return <div className="settings-loading">Loading Tasks settings…</div>;
+  if (settings.isLoading) return <div className="settings-loading">Loading LLM settings…</div>;
   if (settings.error || !section || !providerDescriptor) {
     return <div className="settings-load-error" role="alert">
       {settings.error?.message ?? "The settings response was incomplete."}
@@ -256,39 +252,15 @@ function TasksSettingsPane() {
   }
 
   return (
-    <div className="settings-pane" data-settings-pane="tasks">
+    <div className="settings-pane" data-settings-pane="llm">
       <div className="settings-pane-head">
         <div>
-          <h2>Tasks</h2>
+          <h2>LLM</h2>
           <p className="settings-pane-intro">Configure the LLM connection for organization task features.</p>
         </div>
         <SaveIndicator status={saveQueue.status} />
       </div>
       <section className="settings-section">
-        <div className="settings-row">
-          <label htmlFor="setting-automatic-tagging" className="settings-row-copy">
-            <span className="settings-row-label">{automaticDescriptor?.label ?? "Automatic task tagging"}</span>
-            <span className="settings-row-description">
-              {automaticEnabled
-                ? "New and changed tasks are classified against automatic labels."
-                : automaticEligibility?.eligible
-                  ? automaticDescriptor?.description
-                  : automaticEligibility?.reason}
-            </span>
-          </label>
-          <input
-            id="setting-automatic-tagging"
-            className="settings-toggle"
-            type="checkbox"
-            role="switch"
-            checked={automaticAvailable && automaticEnabled}
-            disabled={!automaticAvailable || saveQueue.status.state === "saving"}
-            onChange={(event) => {
-              void saveQueue.save("automaticTaggingEnabled", event.currentTarget.checked)
-                .catch(() => undefined);
-            }}
-          />
-        </div>
         <div className="settings-row">
           <label htmlFor="setting-provider" className="settings-row-copy">
             <span className="settings-row-label">{providerDescriptor.label}</span>
@@ -384,23 +356,23 @@ export function Settings() {
         <nav aria-label="Settings categories">
           <Link
             to="/settings/$category"
-            params={{ category: "tasks" }}
+            params={{ category: "llm" }}
             className="settings-nav-link"
-            aria-current={category === "tasks" ? "page" : undefined}
+            aria-current={category === "llm" ? "page" : undefined}
           >
-            <ListTodo size={17} aria-hidden />
-            <span>Tasks</span>
+            <Bot size={17} aria-hidden />
+            <span>LLM</span>
           </Link>
         </nav>
       </aside>
       <main className="settings-main">
-        {category === "tasks" ? (
-          <TasksSettingsPane />
+        {category === "llm" ? (
+          <LlmSettingsPane />
         ) : (
           <div className="settings-not-found" role="status">
             <h2>Settings category not found</h2>
             <p>There is no settings category named “{category}”.</p>
-            <Link to="/settings/$category" params={{ category: "tasks" }}>Open Tasks settings</Link>
+            <Link to="/settings/$category" params={{ category: "llm" }}>Open LLM settings</Link>
           </div>
         )}
       </main>

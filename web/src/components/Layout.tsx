@@ -160,7 +160,7 @@ export function Layout() {
           <ThemeToggle />
           <Link
             to="/settings/$category"
-            params={{ category: "tasks" }}
+            params={{ category: "llm" }}
             className="rail-icon-btn"
             title="Settings"
             aria-label="Settings"

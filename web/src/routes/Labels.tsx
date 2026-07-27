@@ -1,5 +1,4 @@
 import { Plus, Tag, Trash2 } from "lucide-react";
-import { Link } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
 import { Modal } from "../components/Modal";
 import {
@@ -32,13 +31,6 @@ export function Labels() {
           </button>
         </div>
       </div>
-      {!automaticEnabled && !settingsQuery.isPending && (
-        <p className="muted">
-          Automatic labels are off.{" "}
-          <Link to="/settings/$category" params={{ category: "tasks" }}>Enable them in Tasks settings</Link>.
-        </p>
-      )}
-
       {labelsQuery.isPending ? (
         <div className="center-state">Loading…</div>
       ) : labelsQuery.isError ? (
@@ -191,7 +183,7 @@ function CreateLabelDialog({
           </label>
           <div
             className="modal-toggle"
-            title={automaticEnabled ? undefined : "Enable automatic task tagging in Tasks settings first."}
+            title={automaticEnabled ? undefined : "Automatic task tagging is not enabled for this organization."}
           >
             <label htmlFor="label-apply-automatically">Apply automatically</label>
             <input
