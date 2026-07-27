@@ -276,7 +276,7 @@ function GeneralSettingsPane() {
               persist("llm.provider", value);
             }}
           >
-            <option value="" disabled>Choose a provider…</option>
+            <option value="">None</option>
             {providerDescriptor.options?.map((option) => (
               <option key={option.value} value={option.value} disabled={option.disabled}>
                 {option.label}{option.disabled ? " (requires HUB_SECRET_KEY)" : ""}
