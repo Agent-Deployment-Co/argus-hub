@@ -223,6 +223,7 @@ function GeneralSettingsPane() {
     setting.providerScoped && provider && setting.visibleWhen?.in.includes(provider)) ?? [],
   [section, provider]);
   const needsKey = !!provider && section?.secretField.providers.includes(provider);
+  const secretStatus = useSecretStatusQuery(provider, needsKey);
 
   const saveSecretMutation = useSaveSecretMutation(provider);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
@@ -234,10 +235,12 @@ function GeneralSettingsPane() {
   }, [provider]);
 
   const apiKeyDirty = needsKey && apiKeyDraft.trim().length > 0;
+  const providerChanged = (values["llm.provider"] ?? "") !== (savedValues["llm.provider"] ?? "");
+  const keyRequirementMet = !needsKey || !!secretStatus.data?.configured || apiKeyDirty;
 
   const dirtyPaths = useMemo(() => {
     const paths: string[] = [];
-    if ((values["llm.provider"] ?? "") !== (savedValues["llm.provider"] ?? "")) paths.push("llm.provider");
+    if (providerChanged) paths.push("llm.provider");
     if (provider) {
       for (const descriptor of visibleFields) {
         const path = writePath(provider, descriptor.field!);
@@ -245,8 +248,9 @@ function GeneralSettingsPane() {
       }
     }
     return paths;
-  }, [values, savedValues, provider, visibleFields]);
-  const dirty = dirtyPaths.length > 0 || apiKeyDirty;
+  }, [values, savedValues, provider, visibleFields, providerChanged]);
+  const dirty = (dirtyPaths.length > 0 || apiKeyDirty)
+    && (!providerChanged || keyRequirementMet);
   const saving = saveQueue.status.state === "saving" || saveSecretMutation.isPending;
 
   const setLocal = (path: string, value: string) => {
