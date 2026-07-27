@@ -89,6 +89,14 @@ CLI flags — highest precedence last.
 | —        | `ADMIN_PASSWORD` | —     | _(random)_ | Dashboard login password (pinned across restarts when set) |
 | —        | `HUB_INSECURE_COOKIE_HOSTS` | — | _(none)_ | Comma-separated hostnames (no port) that get a non-`Secure` session cookie, for plain-HTTP-only deployments (e.g. a cluster-internal address reachable only via a private network). **Never** list a host reachable from the public internet. |
 
+`GET /healthz` is always unauthenticated and returns `200 ok` — the one route that intentionally
+bypasses both API-key and admin-password auth, for load balancer / orchestrator health checks.
+
+**Client compatibility:** Hub ingests client store schema versions v10–v23
+(`HUB_MIN_CLIENT_SCHEMA_VERSION` / `HUB_MAX_CLIENT_SCHEMA_VERSION`). A client outside that range
+gets a `422` with an actionable message — update Hub if the client is newer than Hub supports, or
+run `argus index` to migrate if the client's store is older than Hub's minimum.
+
 Example `hub.json`:
 
 ```json
