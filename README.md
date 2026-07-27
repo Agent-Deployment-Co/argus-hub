@@ -157,14 +157,23 @@ sudo journalctl -fu argus-hub    # follow logs
 
 ### Docker
 
+A public multi-arch image is published to GHCR — no `docker login` needed to pull it:
+
 ```bash
-docker build -t argus-hub .
+docker pull ghcr.io/agent-deployment-co/argus-hub:latest
 
 docker run -d \
   --name argus-hub \
   -p 4343:4343 \
   -v argus-hub-data:/data \
-  argus-hub
+  ghcr.io/agent-deployment-co/argus-hub:latest
+```
+
+To build from source instead:
+
+```bash
+docker build -t argus-hub .
+docker run -d --name argus-hub -p 4343:4343 -v argus-hub-data:/data argus-hub
 ```
 
 On first startup Hub prints the admin password and API key to stdout — retrieve them with:
