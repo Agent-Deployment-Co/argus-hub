@@ -1,15 +1,22 @@
 # Argus Hub
 
 Self-hosted server that collects usage data from multiple Argus clients and presents an
-org-wide dashboard. It is the on-premise alternative to the hosted `argus-dash` backend.
+org-wide dashboard. It is the on-premises alternative to the hosted `argus-dash` backend.
 
 Each developer runs `argus sync` as usual. Instead of uploading to `argus.agentdeployment.co`,
-they point their client at a Hub instance. Hub receives each client's local `argus.db` via a
-single `POST /api/sync` endpoint, merges the data into one central database tagged by user, and
-serves the same dashboard UI as `argus serve` — extended with a user dimension so you can view
-the full org at once or scope any view to a specific person.
+they point their client at a Hub instance. The client first calls `POST /api/sync/unknown-sessions`
+to learn which session IDs Hub is already missing (capped at 10,000 IDs per request), then Hub
+receives the usage snapshot — a JSON payload of resolved rows, not the raw `argus.db` file — at
+`POST /api/sync`, merges it into one central database tagged by user, and serves the same
+dashboard UI as `argus serve` — extended with a user dimension so you can view the full org at
+once or scope any view to a specific person.
 
 Nothing is forwarded anywhere else. Hub runs entirely on your network.
+
+**Documentation:** the canonical user-facing docs live at
+[argus.agentdeployment.co/argus-hub](https://argus.agentdeployment.co/argus-hub). This README
+covers self-hosting Hub itself (deployment, config, security); the hosted page covers connecting
+a client to it day-to-day.
 
 ---
 
