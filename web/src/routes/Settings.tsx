@@ -238,6 +238,12 @@ function GeneralSettingsPane() {
   const providerChanged = (values["llm.provider"] ?? "") !== (savedValues["llm.provider"] ?? "");
   const keyRequirementMet = !needsKey || !!secretStatus.data?.configured || apiKeyDirty;
 
+  const commandPath = writePath("command", "command");
+  const commandChangedAndNonEmpty = provider === "command"
+    && (values[commandPath] ?? "").trim().length > 0
+    && (values[commandPath] ?? "") !== (savedValues[commandPath] ?? "");
+  const commandRequirementMet = provider !== "command" || commandChangedAndNonEmpty;
+
   const dirtyPaths = useMemo(() => {
     const paths: string[] = [];
     if (providerChanged) paths.push("llm.provider");
@@ -250,7 +256,8 @@ function GeneralSettingsPane() {
     return paths;
   }, [values, savedValues, provider, visibleFields, providerChanged]);
   const dirty = (dirtyPaths.length > 0 || apiKeyDirty)
-    && (!providerChanged || keyRequirementMet);
+    && (!providerChanged || keyRequirementMet)
+    && commandRequirementMet;
   const saving = saveQueue.status.state === "saving" || saveSecretMutation.isPending;
 
   const setLocal = (path: string, value: string) => {
