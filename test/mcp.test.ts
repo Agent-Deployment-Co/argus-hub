@@ -158,7 +158,7 @@ function callTool(
 // ---- Tests -------------------------------------------------------------------------------
 
 describe("tools/list", () => {
-  test("returns all five tools with a JSON-schema input", async () => {
+  test("returns all eight tools with a JSON-schema input", async () => {
     const env = await openTestEnv();
     const app = createHubApp(env.store);
     try {
@@ -167,6 +167,7 @@ describe("tools/list", () => {
       const tools = (body as { result: { tools: Array<{ name: string; inputSchema: { type: string } }> } }).result.tools;
       expect(tools.map((t) => t.name)).toEqual([
         "query_activity", "query_tasks", "query_task_quality", "query_tool_usage", "query_users",
+        "list_labels", "create_label", "set_task_label",
       ]);
       for (const t of tools) expect(t.inputSchema.type).toBe("object");
     } finally {
@@ -277,6 +278,59 @@ describe("tools/call query_tasks", () => {
       const restBody = await restRes.json();
 
       const { body } = await callTool(app, "query_tasks", { limit: 1, offset: 0 });
+      const result = (body as { result: { content: Array<{ text: string }> } }).result;
+      expect(JSON.parse(result.content[0]!.text)).toEqual(restBody as object);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("attaches hub labels to rows, matching the equivalent /api/tasks response", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const clientId = `client-${randomUUID()}`;
+      const payload = buildUploadPayload([{ id: "label-sess" }]);
+      payload.rows.tasks.push({
+        session_id: "label-sess",
+        seq: 0,
+        source: "claude",
+        ts: 1_000_000,
+        task_json: JSON.stringify({
+          id: "label-sess-task-0",
+          source: "claude",
+          sourceSessionId: "label-sess",
+          timestampMs: 1_000_000,
+          description: "Fix the login bug",
+          evidence: "user said please fix the login bug",
+          evidenceKind: "user_message",
+          position: { originKey: "label-sess", recordIndex: 0, itemIndex: 0 },
+        }),
+      });
+      const syncRes = await app.request("/api/sync", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.apiKey}`,
+          "X-Argus-Client": clientId,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...payload,
+          fingerprint: [{ key: "claude.oauth.email", value: "alice@example.com", tsMs: 1_000_000 }],
+        }),
+      });
+      expect(syncRes.status).toBe(200);
+
+      const orgId = await env.store.getDefaultOrgId();
+      const label = await env.store.createLabel(orgId!, "Bug fix");
+      await env.store.setTaskLabel(orgId!, { clientId, sessionId: "label-sess", taskSeq: 0 }, label.labelId, true);
+
+      const restBody = (await (await app.request("/api/tasks")).json()) as {
+        rows: Array<{ labels: Array<{ labelId: string; name: string }> }>;
+      };
+      expect(restBody.rows[0]!.labels).toEqual([{ labelId: label.labelId, name: "Bug fix" }]);
+
+      const { body } = await callTool(app, "query_tasks");
       const result = (body as { result: { content: Array<{ text: string }> } }).result;
       expect(JSON.parse(result.content[0]!.text)).toEqual(restBody as object);
     } finally {
@@ -417,6 +471,162 @@ describe("tools/call query_users", () => {
         (unmatched.body as { result: { content: Array<{ text: string }> } }).result.content[0]!.text,
       ) as { users: unknown[] }).users;
       expect(unmatchedUsers).toEqual([]);
+    } finally {
+      await env.store.close();
+    }
+  });
+});
+
+describe("tools/call list_labels / create_label / set_task_label", () => {
+  test("list_labels returns an empty list when the org has no labels", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const { body } = await callTool(app, "list_labels");
+      const result = (body as { result: { content: Array<{ text: string }> } }).result;
+      expect(JSON.parse(result.content[0]!.text)).toEqual({ labels: [] });
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("create_label creates a label, matching the equivalent POST /api/labels response", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const { body } = await callTool(app, "create_label", { name: "Needs review", description: "Flag for review" });
+      const result = (body as { result: { content: Array<{ text: string }> } }).result;
+      const created = JSON.parse(result.content[0]!.text) as { label: { labelId: string; name: string; description: string | null } };
+      expect(created.label.name).toBe("Needs review");
+      expect(created.label.description).toBe("Flag for review");
+
+      const { body: listBody } = await callTool(app, "list_labels");
+      const listResult = (listBody as { result: { content: Array<{ text: string }> } }).result;
+      const restBody = await (await app.request("/api/labels")).json();
+      expect(JSON.parse(listResult.content[0]!.text)).toEqual(restBody as object);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("create_label returns a tool error for a duplicate name", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await callTool(app, "create_label", { name: "Bug fix" });
+      const { body } = await callTool(app, "create_label", { name: "bug fix" });
+      const result = (body as { result: { isError?: boolean; content: Array<{ text: string }> } }).result;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain("already exists");
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("create_label returns a tool error for a missing name", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const { body } = await callTool(app, "create_label", {});
+      const result = (body as { result: { isError?: boolean; content: Array<{ text: string }> } }).result;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('Missing required "name"');
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("set_task_label applies and removes a label, matching the equivalent /api/tasks response", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const clientId = `client-${randomUUID()}`;
+      const payload = buildUploadPayload([{ id: "label-sess" }]);
+      payload.rows.tasks.push({
+        session_id: "label-sess",
+        seq: 0,
+        source: "claude",
+        ts: 1_000_000,
+        task_json: JSON.stringify({
+          id: "label-sess-task-0",
+          source: "claude",
+          sourceSessionId: "label-sess",
+          timestampMs: 1_000_000,
+          description: "Fix the login bug",
+          evidence: "user said please fix the login bug",
+          evidenceKind: "user_message",
+          position: { originKey: "label-sess", recordIndex: 0, itemIndex: 0 },
+        }),
+      });
+      const syncRes = await app.request("/api/sync", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.apiKey}`,
+          "X-Argus-Client": clientId,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...payload,
+          fingerprint: [{ key: "claude.oauth.email", value: "alice@example.com", tsMs: 1_000_000 }],
+        }),
+      });
+      expect(syncRes.status).toBe(200);
+
+      const { body: createBody } = await callTool(app, "create_label", { name: "Bug fix" });
+      const { label } = JSON.parse(
+        (createBody as { result: { content: Array<{ text: string }> } }).result.content[0]!.text,
+      ) as { label: { labelId: string } };
+
+      const { body: applyBody } = await callTool(app, "set_task_label", {
+        labelId: label.labelId, clientId, sessionId: "label-sess", taskSeq: 0, applied: true,
+      });
+      expect((applyBody as { result: { isError?: boolean } }).result.isError).toBeUndefined();
+
+      const restBody = (await (await app.request("/api/tasks")).json()) as {
+        rows: Array<{ labels: Array<{ labelId: string; name: string }> }>;
+      };
+      expect(restBody.rows[0]!.labels).toEqual([{ labelId: label.labelId, name: "Bug fix" }]);
+
+      const { body: tasksBody } = await callTool(app, "query_tasks");
+      const tasksResult = (tasksBody as { result: { content: Array<{ text: string }> } }).result;
+      expect(JSON.parse(tasksResult.content[0]!.text)).toEqual(restBody as object);
+
+      const { body: removeBody } = await callTool(app, "set_task_label", {
+        labelId: label.labelId, clientId, sessionId: "label-sess", taskSeq: 0, applied: false,
+      });
+      expect((removeBody as { result: { isError?: boolean } }).result.isError).toBeUndefined();
+      const restAfter = (await (await app.request("/api/tasks")).json()) as { rows: Array<{ labels: unknown[] }> };
+      expect(restAfter.rows[0]!.labels).toEqual([]);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("set_task_label returns a tool error for an unknown labelId", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const clientId = `client-${randomUUID()}`;
+      await syncSessionsAs(env, "alice@example.com", [{ id: "s1" }]);
+      const { body } = await callTool(app, "set_task_label", {
+        labelId: "label-nope", clientId, sessionId: "s1", taskSeq: 0, applied: true,
+      });
+      const result = (body as { result: { isError?: boolean; content: Array<{ text: string }> } }).result;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain("not found");
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("set_task_label returns a tool error for a missing task ref", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      const { body } = await callTool(app, "set_task_label", { labelId: "label-anything" });
+      const result = (body as { result: { isError?: boolean; content: Array<{ text: string }> } }).result;
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain('"clientId"/"sessionId"/"taskSeq"');
     } finally {
       await env.store.close();
     }

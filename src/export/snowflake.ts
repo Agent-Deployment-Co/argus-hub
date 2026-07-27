@@ -87,6 +87,17 @@ export const SNOWFLAKE_EXPORT_TABLES: readonly ExportTable[] = [
       text("target_kind"), number("task_seq"), number("applied_at_ms"),
     ],
   },
+  {
+    name: "hub_labels",
+    columns: [text("label_id"), text("org_id"), text("name"), text("description"), number("created_at")],
+  },
+  {
+    name: "hub_task_labels",
+    columns: [
+      text("org_id"), text("client_id"), text("session_id"), number("task_seq"), text("label_id"),
+      number("applied_at_ms"),
+    ],
+  },
 ] as const;
 
 export interface SnowflakeTarget {
