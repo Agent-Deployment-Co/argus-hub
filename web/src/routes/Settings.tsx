@@ -4,6 +4,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { useSettingsBackHref } from "../components/Layout";
+import { Modal } from "../components/Modal";
 import {
   useDeleteSecretMutation,
   useSaveSecretMutation,
@@ -141,35 +142,6 @@ function SecretField({
               </button>
             )}
           </div>
-        ) : confirmingRemove ? (
-          <div className="settings-secret-line">
-            <span className="settings-secret-confirm">Remove key?</span>
-            <button
-              className="settings-secret-icon-btn is-danger"
-              type="button"
-              title="Confirm remove"
-              aria-label="Confirm remove"
-              disabled={remove.isPending}
-              onClick={() => remove.mutate(undefined, { onSuccess: () => {
-                setConfirmingRemove(false);
-                onChanged();
-              } })}
-            >
-              {remove.isPending
-                ? <LoaderCircle size={15} className="spin" aria-hidden />
-                : <Check size={15} aria-hidden />}
-            </button>
-            <button
-              className="settings-secret-icon-btn"
-              type="button"
-              title="Cancel"
-              aria-label="Cancel"
-              disabled={remove.isPending}
-              onClick={() => setConfirmingRemove(false)}
-            >
-              <X size={15} aria-hidden />
-            </button>
-          </div>
         ) : (
           <div className="settings-secret-line">
             <code className="settings-secret-mask">••••••••••••••••</code>
@@ -195,6 +167,35 @@ function SecretField({
         )}
         {error && <span className="settings-inline-error" role="alert">{error.message}</span>}
       </div>
+      {confirmingRemove && (
+        <Modal title="Remove API key?" onClose={() => setConfirmingRemove(false)}>
+          <p className="modal-copy">
+            Removing the API key will reset the provider to None. Do you wish to proceed?
+          </p>
+          {error && <p className="modal-error">{error.message}</p>}
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={remove.isPending}
+              onClick={() => setConfirmingRemove(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn-danger"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate(undefined, { onSuccess: () => {
+                setConfirmingRemove(false);
+                onChanged();
+              } })}
+            >
+              {remove.isPending ? "Removing…" : "Remove key"}
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -346,7 +347,7 @@ function GeneralSettingsPane() {
               }}
               onChanged={() => {
                 connection.reset();
-                void settings.refetch();
+                void saveQueue.save("llm.provider", "").then(() => settings.refetch());
               }}
             />
           )}
