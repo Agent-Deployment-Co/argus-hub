@@ -114,10 +114,13 @@ Default org and prints it to stdout.
 
 ## API keys
 
-Keys are stored in `hub.db`. The printed key is the only time it appears in plain text.
+Keys are stored in `hub.db` **hashed** (`key_hash`, via `hashApiKey()`) — the printed key is the
+only time the plaintext value exists anywhere.
 
 To rotate a key: delete the old row from `api_keys` directly in `hub.db`, then restart Hub. A
-new key will be generated and printed on startup if the table is empty.
+new key will be generated and printed on startup if the table is now empty. Disabling a key
+(below) instead of deleting it does **not** trigger a new key on restart — Hub only mints one
+when the `api_keys` table has no rows at all.
 
 To disable a key without deleting it (e.g. while rotating), set `is_enabled = 0` in `hub.db`.
 Hub rejects disabled keys with `401` before reading the request body.
