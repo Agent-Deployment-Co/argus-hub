@@ -159,32 +159,8 @@ Argus Hub's dashboard runs in your browser at `http://hub.internal:4343`, the sa
   optional grouping for reporting.
 - **Labels** manages hub-level task labels — distinct from any labels an Argus client applies
   itself — and applies them to tasks from the Tasks tab.
-- **Export** downloads the full dataset as a Snowflake-ready zip.
-- **MCP** lets an agent query pooled usage data and manage task labels directly.
-
-## Dashboard
-
-There's a per-user activity view at `/users/$userId`, reached by clicking a row in Team.
-
-A combined user/group scope dropdown in the filter bar (visible once at least one client has
-synced) scopes Activity, Tasks, and Tools to a single user or group, or "All" for an org-wide
-view.
-
-## MCP
-
-Argus Hub exposes a small [MCP](https://modelcontextprotocol.io) surface at `POST /mcp` so an agent
-can query an org's pooled Argus data directly instead of scraping the dashboard, and manage hub
-labels on tasks.
-
-See **[docs/MCP.md](docs/MCP.md)** for the tool reference, filters, auth, and how to add it to
-Claude Code.
-
-## Export
-
-`argus-hub export snowflake` creates a consistent Snowflake-ready snapshot of the live Argus Hub
-database, and the **Export** tab offers the same bundle straight from the browser.
-
-See **[docs/export.md](docs/export.md)** for the CLI, data coverage, and Snowflake setup.
+- **[Export](docs/export.md)** downloads the full dataset as a Snowflake-ready zip.
+- **[MCP](docs/MCP.md)** lets an agent query pooled usage data and manage task labels directly.
 
 ## Contributing
 
