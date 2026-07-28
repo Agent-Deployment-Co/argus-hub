@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget \
 
 COPY --from=builder /build/dist ./dist
 COPY --from=builder /build/node_modules ./node_modules
+COPY --from=builder /build/package.json ./package.json
 
 ENV HUB_DATA_DIR=/data
 EXPOSE 4343
