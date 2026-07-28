@@ -18,6 +18,21 @@ Nothing is forwarded anywhere else. Hub runs entirely on your network.
 covers self-hosting Hub itself (deployment, config, security); the hosted page covers connecting
 a client to it day-to-day.
 
+## Contents
+
+- [Quick start](#quick-start)
+- [Connecting clients](#connecting-clients)
+- [Configuration](#configuration)
+- [API keys](#api-keys)
+- [Running as a service](#running-as-a-service)
+- [Dashboard](#dashboard)
+- [Query the Hub from an agent (MCP)](#query-the-hub-from-an-agent-mcp)
+- [Export to Snowflake](#export-to-snowflake)
+- [Contributing](#contributing)
+- [Security](#security)
+- [Architecture](#architecture)
+- [License](#license)
+
 ---
 
 ## Quick start
@@ -84,19 +99,18 @@ schedule; use `--sync-interval N` to change it or `--no-sync` to disable it and 
 
 ## Configuration
 
-Hub reads config from `hub.json` in the current directory, then environment variables, then
-CLI flags — highest precedence last.
+Hub reads config from `hub.json`, then environment variables, then CLI flags — highest
+precedence last.
 
 | CLI flag | Env var | Config key | Default | Description |
 |----------|---------|-----------|---------|-------------|
 | `--port` | `HUB_PORT` | `port` | `4343` | Port to listen on |
 | `--data-dir` | `HUB_DATA_DIR` | `dataDir` | `./data` | Directory for `hub.db` |
-| —        | `HUB_SECRET_KEY` | — | _(optional)_ | Canonical base64 encoding of exactly 32 random bytes; enables and encrypts API-key-based task providers |
+| —        | `HUB_SECRET_KEY` | — | _(optional)_ | Base64 encoding of 32 random bytes; enables and encrypts API-key-based task providers |
 | —        | `ADMIN_PASSWORD` | —     | _(random)_ | Dashboard login password (pinned across restarts when set) |
-| —        | `HUB_INSECURE_COOKIE_HOSTS` | — | _(none)_ | Comma-separated hostnames (no port) that get a non-`Secure` session cookie, for plain-HTTP-only deployments (e.g. a cluster-internal address reachable only via a private network). **Never** list a host reachable from the public internet. |
+| —        | `HUB_INSECURE_COOKIE_HOSTS` | — | _(none)_ | Comma-separated hostnames (no port) that get a non-`Secure` session cookie, for plain-HTTP-only internal deployments. **Never** list a host reachable from the public internet |
 
-`GET /healthz` is always unauthenticated and returns `200 ok` — the one route that intentionally
-bypasses both API-key and admin-password auth, for load balancer / orchestrator health checks.
+`GET /healthz` always returns `200 ok` unauthenticated, for load balancer / orchestrator health checks.
 
 **Client compatibility:** Hub ingests client store schema versions v10–v23
 (`HUB_MIN_CLIENT_SCHEMA_VERSION` / `HUB_MAX_CLIENT_SCHEMA_VERSION`). A client outside that range
@@ -112,28 +126,25 @@ Example `hub.json`:
 }
 ```
 
-There is no `HUB_KEY` setting. API keys are stored in `hub.db` and managed there. On first
+There is no `HUB_KEY` setting — API keys live in `hub.db` and are managed there. On first
 startup, if the `api_keys` table is empty, Hub generates a `hub-{UUID}` key linked to the
 Default org and prints it to stdout.
 
 ### Task LLM settings
 
 Administrators can open **Settings → Tasks** to select and configure one of these providers:
-Anthropic API, a host command, Google Gemini, OpenAI, or OpenRouter. The provider begins blank;
-Hub will not make an implicit LLM call. Provider settings and encrypted API keys are scoped to
-the current organization. Provider environment variables such as `OPENAI_API_KEY` are not read.
+Anthropic API, a host command, Google Gemini, OpenAI, or OpenRouter. The provider begins blank —
+Hub makes no implicit LLM call — and settings, along with encrypted API keys, are scoped to the
+current organization. Provider environment variables such as `OPENAI_API_KEY` are not read.
 
 API keys entered in Settings are encrypted in SQLite with AES-256-GCM using `HUB_SECRET_KEY`.
-Back up that key separately from `hub.db`. Changing or losing it makes existing provider keys
-unreadable; restore the original key or replace every saved provider key. Generate a key with:
+Back that key up separately from `hub.db`: changing or losing it makes existing provider keys
+unreadable, and recovery means restoring the original key or replacing every saved provider key.
+Generate one with `openssl rand -base64 32`.
 
-```bash
-openssl rand -base64 32
-```
-
-The **Command** provider executes the configured command directly on the Hub host, with the
-prompt on stdin and completion on stdout. This is administrator-controlled remote code
-execution. Enable it only when Hub administrators and the configured command are fully trusted.
+The **Command** provider runs the configured command directly on the Hub host, with the prompt
+on stdin and completion on stdout — administrator-controlled remote code execution. Enable it
+only when Hub administrators and the configured command are fully trusted.
 
 ---
 
@@ -154,104 +165,19 @@ Hub rejects disabled keys with `401` before reading the request body.
 
 ## Running as a service
 
-### systemd (Linux)
-
-Save as `/etc/systemd/system/argus-hub.service`:
-
-```ini
-[Unit]
-Description=Argus Hub
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=npx @agentdeploymentco/argus-hub serve --port 4343
-WorkingDirectory=/srv/argus-hub
-Environment=HUB_DATA_DIR=/srv/argus-hub/data
-EnvironmentFile=/etc/argus-hub.env
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Create `/etc/argus-hub.env` with `HUB_SECRET_KEY=<output of openssl rand -base64 32>`, restrict
-it to the service administrator, and include it in the deployment's secret backup.
-
-```bash
-sudo systemctl enable --now argus-hub
-sudo journalctl -fu argus-hub    # follow logs
-```
-
-### Docker
-
-A public multi-arch image is published to GHCR — no `docker login` needed to pull it:
+Docker is the recommended path for anything beyond local testing — see **[DOCKER.md](DOCKER.md)**
+for building/pulling the image, environment variables, Compose, health checks, persisting data,
+and running behind a reverse proxy:
 
 ```bash
 docker pull ghcr.io/agent-deployment-co/argus-hub:latest
-
-docker run -d \
-  --name argus-hub \
-  -p 4343:4343 \
-  -v argus-hub-data:/data \
+docker run -d --name argus-hub -p 4343:4343 -v argus-hub-data:/data \
   ghcr.io/agent-deployment-co/argus-hub:latest
-```
-
-To build from source instead:
-
-```bash
-docker build -t argus-hub .
-docker run -d --name argus-hub -p 4343:4343 -v argus-hub-data:/data argus-hub
-```
-
-On first startup Hub prints the admin password and API key to stdout — retrieve them with:
-
-```bash
 docker logs argus-hub 2>&1 | grep -E "Hub API key|Admin password"
 ```
 
-See **[DOCKER.md](DOCKER.md)** for environment variables, Docker Compose, health checks,
-persisting data, and running behind a reverse proxy.
-
----
-
-### launchd (macOS)
-
-Save as `~/Library/LaunchAgents/co.agentdeployment.argus-hub.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>             <string>co.agentdeployment.argus-hub</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/usr/local/bin/npx</string>
-    <string>@agentdeploymentco/argus-hub</string>
-    <string>serve</string>
-    <string>--port</string>
-    <string>4343</string>
-  </array>
-  <key>WorkingDirectory</key>  <string>/Users/you/argus-hub</string>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>HUB_DATA_DIR</key>   <string>/Users/you/argus-hub/data</string>
-    <key>HUB_SECRET_KEY</key> <string>REPLACE_WITH_BASE64_32_BYTE_KEY</string>
-  </dict>
-  <key>RunAtLoad</key>         <true/>
-  <key>KeepAlive</key>         <true/>
-  <key>StandardOutPath</key>   <string>/Users/you/argus-hub/hub.log</string>
-  <key>StandardErrorPath</key> <string>/Users/you/argus-hub/hub.log</string>
-</dict>
-</plist>
-```
-
-```bash
-launchctl load ~/Library/LaunchAgents/co.agentdeployment.argus-hub.plist
-```
+To run Hub directly on a host instead, see **[DEPLOYMENT.md](DEPLOYMENT.md)** for systemd
+(Linux) and launchd (macOS) unit files.
 
 ---
 
@@ -294,12 +220,9 @@ Tasks tab.
 
 ## Query the Hub from an agent (MCP)
 
-Hub exposes a small [MCP](https://modelcontextprotocol.io) surface at `POST /mcp` so an agent —
-Claude Code, or any other MCP client — can query an org's pooled Argus data directly, instead of
-scraping the dashboard, and manage hub labels on tasks. It's the same stateless Streamable HTTP
-transport as any other MCP server; no session, no subprocess, just JSON-RPC over HTTPS.
-
-**Tools:**
+Hub exposes a small [MCP](https://modelcontextprotocol.io) surface at `POST /mcp` — the same
+stateless Streamable HTTP transport as any other MCP server — so an agent can query an org's
+pooled Argus data directly instead of scraping the dashboard, and manage hub labels on tasks.
 
 | Tool | Answers |
 |------|---------|
@@ -312,27 +235,24 @@ transport as any other MCP server; no session, no subprocess, just JSON-RPC over
 | `create_label` | Create a new hub label (name + optional description) |
 | `set_task_label` | Apply or remove one hub label on one task (by clientId/sessionId/taskSeq from a `query_tasks` row) |
 
-The first four take the same optional filters — `since`/`until` (ISO dates), `project`
+The first four share one optional filter set: `since`/`until` (ISO dates), `project`
 (substring), `source` (`claude`/`codex`/`gemini`/`cowork`), `user` (scope to one userId), and
-`group` (scope to one groupId, or `__none__` for users with no group assigned) — read by the
-same query parsing the REST API uses, so an agent's answers can never disagree with what you
-see in the UI for the filters the UI itself exposes. `query_task_quality` and `query_tool_usage`'s
-`user` filter mirrors the dashboard's per-user page (`/users/$userId`); `query_activity`'s `user`
-filter has no dashboard equivalent — the Activity page is always team-wide — so use it to get a
-per-user usage/cost view the UI doesn't offer.
+`group` (scope to one groupId, or `__none__` for users with no group). It's the same filter
+parsing the REST API uses, so an agent's answers can't disagree with the dashboard for filters
+the UI itself exposes. `query_task_quality` and `query_tool_usage`'s `user` filter mirrors the
+per-user dashboard page; `query_activity`'s `user` filter has no dashboard equivalent (Activity
+is always team-wide there), so it's the only way to get a per-user usage/cost view.
 
-`query_tasks` additionally takes `q` (search over task description/project), `outcome` (comma
-list of `success`/`failure`/`unknown`), `limit` (default 50, max 200), and `offset`, for paging
-through the task list.
+`query_tasks` adds `q` (search over task description/project), `outcome` (comma list of
+`success`/`failure`/`unknown`), `limit` (default 50, max 200), and `offset`.
 
-`query_users` takes an optional `group` filter (matches groupId or groupName, case-insensitively)
-instead of the shared filter set; use it to look up a `userId` before scoping the other tools to
-one person.
+`query_users` takes an optional `group` filter (matches groupId or groupName) instead of the
+shared filter set — use it to look up a `userId` before scoping other tools to one person.
 
-`list_labels`, `create_label`, and `set_task_label` don't take the shared filter set — `create_label`
-takes `name` (required, must be unique in the org) and an optional `description`; `set_task_label`
-takes `labelId` (from `list_labels`/`create_label`), `clientId`/`sessionId`/`taskSeq` (from a
-`query_tasks` row), and `applied` (`true` to apply, `false` to remove; defaults to `true`).
+`list_labels`, `create_label`, and `set_task_label` skip the shared filter set: `create_label`
+takes `name` (required, unique per org) and an optional `description`; `set_task_label` takes
+`labelId`, `clientId`/`sessionId`/`taskSeq` (from a `query_tasks` row), and `applied` (default
+`true`).
 
 **Auth** reuses the Hub's existing admin password — no new credential to issue or rotate:
 
@@ -372,16 +292,16 @@ excluded from the bundle either way.
 
 ---
 
-## Development
+## Contributing
 
 ```bash
-bun install     # required first — `bun test` fails with a misleading
-                # "Cannot find package 'sqlite3'" error if you skip this
-make test       # 179 tests
+bun install
+bun run dev
+make test
 make typecheck
-bun run dev     # dev server
-bun run demo    # seeds a realistic 5-person fake team into .demo/ — the fastest way to see the product
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup details and the full command list.
 
 ---
 
@@ -400,8 +320,8 @@ bun run demo    # seeds a realistic 5-person fake team into .demo/ — the faste
   interaction metadata, tool/MCP invocations, and labels — merged directly into `hub.db`. The
   client's raw `argus.db` never leaves the developer's machine. **Not** sent: prompt/response
   text, or any BYO model API keys configured on the client.
-- A disabled key (`is_enabled = 0`) is rejected immediately without reading the request body.
-- `GET /healthz` intentionally bypasses all auth, for health checks.
+
+See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ---
 
