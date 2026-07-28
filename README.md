@@ -1,46 +1,17 @@
 # Argus Hub
 
-Self-hosted server that collects usage data from multiple Argus clients and presents an
-org-wide dashboard. It is the on-premise alternative to the hosted `argus-dash` backend.
+Argus Hub is a self-hosted server that pools usage data from a team's
+[Argus](https://github.com/Agent-Deployment-Co/argus) clients into one org-wide dashboard. Each Hub aggregates session and task data into a centralized dashboard. Hub runs entirely on your own network.
 
-Each developer runs `argus sync` as usual. Instead of uploading to `argus.agentdeployment.co`,
-they point their client at a Hub instance. The client first calls `POST /api/sync/unknown-sessions`
-to learn which session IDs Hub is already missing (capped at 10,000 IDs per request), then Hub
-receives the usage snapshot — a JSON payload of resolved rows, not the raw `argus.db` file — at
-`POST /api/sync`, merges it into one central database tagged by user, and serves the same
-dashboard UI as `argus serve` — extended with a user dimension so you can view the full org at
-once or scope any view to a specific person.
-
-Nothing is forwarded anywhere else. Hub runs entirely on your network.
-
-**Documentation:** the canonical user-facing docs live at
-[argus.agentdeployment.co/argus-hub](https://argus.agentdeployment.co/argus-hub). This README
-covers self-hosting Hub itself (deployment, config, security); the hosted page covers connecting
-a client to it day-to-day.
-
-## Contents
-
-- [Quick start](#quick-start)
-- [Connecting clients](#connecting-clients)
-- [Configuration](#configuration)
-- [API keys](#api-keys)
-- [Running as a service](#running-as-a-service)
-- [Dashboard](#dashboard)
-- [Query the Hub from an agent (MCP)](#query-the-hub-from-an-agent-mcp)
-- [Export to Snowflake](#export-to-snowflake)
-- [Contributing](#contributing)
-- [Security](#security)
-- [Architecture](#architecture)
-- [License](#license)
-
----
+Hub is free to self-host, including commercially, and source-available under the Functional
+Source License (see [License](#license)), converting to MIT two years after each release.
 
 ## Quick start
 
 **Requirements:** Node.js ≥ 20.17 (or Bun ≥ 1.0).
 
 ```bash
-export HUB_SECRET_KEY="$(openssl rand -base64 32)"
+export HUB_SECRET_KEY="$(openssl rand -base64 32)" # save this value
 npx @agentdeploymentco/argus-hub serve --port 4343
 ```
 
