@@ -1,0 +1,49 @@
+# Product screenshots for the Argus Hub docs.
+#
+# Run the whole batch:
+#   bun run screenshot --batch docs/screenshots.yaml
+#
+# The Hub must be running and logged in (the dashboard sits behind admin-password auth
+# whenever ADMIN_PASSWORD/HUB_SECRET_KEY are configured — `bun run demo` always enables
+# it and prints the password). See .claude/skills/screenshot/SKILL.md for the login step.
+#
+# `bun run demo` serves at http://localhost:4343 (the default below). If you're on
+# another port, point there:
+#   bun run screenshot --batch docs/screenshots.yaml --base-url http://localhost:5173
+#
+# Files land at docs/images/screenshots/{name}@{width}x{height}@2.webp, one per viewport.
+
+baseUrl: http://localhost:4343
+
+screenshots:
+  - name: activity
+    url: /
+
+  - name: tasks
+    url: /tasks
+
+  - name: tools
+    url: /tools
+
+  - name: labels
+    url: /labels
+
+  - name: export
+    url: /export
+
+  - name: settings-general
+    url: /settings/general
+
+  # Scripted states. The screenshot skill runs these interactions via
+  # agent-browser and then captures; the --batch runner skips them (it only
+  # navigates to a URL). See .claude/skills/screenshot/SKILL.md.
+  - name: team-user-detail
+    url: /users
+    script: |
+      1. Click the first user row in the Team table
+
+  - name: tasks-filtered
+    url: /tasks
+    script: |
+      1. Open the user/group scope dropdown in the filter bar
+      2. Select any single user
