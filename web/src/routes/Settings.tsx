@@ -2,7 +2,7 @@ import { Link, useParams, useRouter } from "@tanstack/react-router";
 import {
   ArrowLeft, Check, LoaderCircle, Lock, Pencil, PlugZap, SlidersHorizontal, Trash2, TriangleAlert, X,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useSettingsBackHref } from "../components/Layout";
 import { Modal } from "../components/Modal";
 import {
@@ -252,6 +252,23 @@ function GeneralSettingsPane() {
   useEffect(() => {
     setApiKeyDraft("");
     setApiKeyEditing(false);
+  }, [provider]);
+
+  const prevProviderRef = useRef<LlmProvider | null>(null);
+  useEffect(() => {
+    const prevProvider = prevProviderRef.current;
+    prevProviderRef.current = provider;
+    if (!prevProvider || prevProvider === provider || !section) return;
+    setValues((current) => {
+      const next = { ...current };
+      for (const setting of section.settings) {
+        if (setting.providerScoped && setting.field && setting.visibleWhen?.in.includes(prevProvider)) {
+          const path = writePath(prevProvider, setting.field);
+          next[path] = savedValues[path] ?? "";
+        }
+      }
+      return next;
+    });
   }, [provider]);
 
   const apiKeyDirty = needsKey && apiKeyDraft.trim().length > 0;
