@@ -21,8 +21,28 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
 async function readCappedText(res: Response): Promise<string | undefined> {
   const declared = Number(res.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > MAX_LLM_RESPONSE_BYTES) return undefined;
-  const text = await res.text();
-  return Buffer.byteLength(text, "utf8") <= MAX_LLM_RESPONSE_BYTES ? text : undefined;
+  if (!res.body) {
+    const text = await res.text();
+    return Buffer.byteLength(text, "utf8") <= MAX_LLM_RESPONSE_BYTES ? text : undefined;
+  }
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_LLM_RESPONSE_BYTES) {
+        await reader.cancel();
+        return undefined;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 function describeHttpError(status: number, text: string): string {
