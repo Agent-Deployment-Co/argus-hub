@@ -25,9 +25,6 @@ screenshots:
   - name: tools
     url: /tools
 
-  - name: team
-    url: /users
-
   - name: labels
     url: /labels
 

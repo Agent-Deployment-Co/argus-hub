@@ -71,6 +71,10 @@ Argus Hub's dashboard runs in your browser at `http://hub.internal:4343`, the sa
 - **[Export](docs/export.md)** downloads the full dataset as a Snowflake-ready zip.
 - **[MCP](docs/MCP.md)** lets an agent query pooled usage data and manage task labels directly.
 
+| Tasks | Tools |
+| --- | --- |
+| ![The Tasks view: total tasks, success rate, frustration rate and outcome trends over time.](docs/images/screenshots/tasks@1920x1080@2.webp) | ![The Tools view: tools, skills and MCP servers used across the org, and what's going unused.](docs/images/screenshots/tools@1920x1080@2.webp) |
+
 ## Contributing
 
 ```bash
