@@ -1,7 +1,7 @@
 # Argus Hub
 
-Argus Hub is a self-hosted server that pools usage data from a team's
-[Argus](https://github.com/Agent-Deployment-Co/argus) clients into one org-wide dashboard. Each Argus Hub aggregates session and task data into a centralized dashboard. Argus Hub runs entirely on your own network.
+Argus Hub is a self-hosted server that pools session, task, and usage data from a team's
+[Argus](https://github.com/Agent-Deployment-Co/argus) clients into one org-wide dashboard. Argus Hub runs entirely on your own network.
 
 Argus Hub is free to self-host, including commercially, and source-available under the Functional
 Source License (see [License](#license)), converting to MIT two years after each release.
