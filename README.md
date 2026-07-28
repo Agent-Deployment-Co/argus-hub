@@ -104,25 +104,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup details and the full command li
 
 See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
-## Architecture
-
-```
-argus clients  ──POST /api/sync/unknown-sessions──►  Argus Hub (which session IDs are missing?)
-(argus sync)   ──POST /api/sync───────────────────►  Argus Hub ingest  ──►  hub.db
-                  JSON {schemaVersion,                resolved_* + org_id + user_id
-                  rows, fingerprint}                  (auto-mapped from OAuth email)
-
-hub.db  ──►  GET /api/activity, /api/tasks, /api/tasks/report,
-         ──►      /api/snapshot, /api/sessions, /api/session/:id,
-         ──►      /api/users, /api/user/:id, /api/clients,
-         ──►      /api/groups*, /api/export, /healthz
-         ──►  POST /mcp  (read-only MCP surface — see docs/MCP.md)
-         ──►  React SPA  (Activity · Tasks · Tools · Team · Export · per-user filter)
-```
-
-Argus Hub supports multiple orgs via the `organizations` table — each API key is scoped to one org.
-For strict isolation between unrelated tenants, run separate Argus Hub instances.
-
 ## License
 
 Argus Hub is licensed under the **Functional Source License 1.1 (FSL-1.1)**, converting to **MIT** after two years.
