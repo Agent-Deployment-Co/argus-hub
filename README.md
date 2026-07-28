@@ -6,6 +6,8 @@ Argus Hub is a self-hosted server that pools usage data from a team's
 Argus Hub is free to self-host, including commercially, and source-available under the Functional
 Source License (see [License](#license)), converting to MIT two years after each release.
 
+![The Argus Hub Activity view: sessions, tasks and token usage up top, with activity and cost-by-model trends below.](docs/images/screenshots/activity@1920x1080@2.webp)
+
 ## Quick start
 
 **Requirements:** Node.js ≥ 20.17 (or Bun ≥ 1.0).
