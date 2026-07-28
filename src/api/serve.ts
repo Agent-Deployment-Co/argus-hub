@@ -35,6 +35,18 @@ import {
 import type { AdminAuth } from "../admin-auth.ts";
 import { verifySession, makeSessionCookie, clearSessionCookie } from "../admin-auth.ts";
 import { LOGIN_PAGE } from "./pages.ts";
+import { complete, getProvider, isLlmProvider, type ExecuteCommand } from "../llm/index.ts";
+import {
+  LlmConfigurationError,
+  resolveTaskLlmConfig,
+  sanitizeLlmError,
+} from "../llm/resolve.ts";
+import { maskSecret, type SecretCipher } from "../secrets.ts";
+import {
+  describeSettings,
+  SettingsValidationError,
+  validateSettingWrite,
+} from "../settings.ts";
 
 // ---- Query param parsing ----------------------------------------------------------------
 //
@@ -57,7 +69,14 @@ function requestHost(c: Context): string | undefined {
  *  `app.request(...)` directly without starting a real server.
  *  `auth` is required in production (passed by cli.ts); omit in tests that don't
  *  exercise the login flow — routes are open when auth is undefined. */
-export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
+export interface HubAppOptions {
+  secretCipher?: SecretCipher;
+  fetch?: typeof fetch;
+  executeCommand?: ExecuteCommand;
+  connectionTimeoutMs?: number;
+}
+
+export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppOptions = {}): Hono {
   const app = new Hono();
 
   // ---- Health check (no auth) ---------------------------------------------------
@@ -116,6 +135,130 @@ export function createHubApp(store: HubStore, auth?: AdminAuth): Hono {
   // ---- MCP (read-only query tools for external agents) --------------------------
 
   mountMcp(app, store, auth);
+
+  // ---- Task LLM settings -------------------------------------------------------
+
+  const currentOrgId = async () => {
+    const orgId = await store.getDefaultOrgId();
+    return orgId ?? null;
+  };
+  const taskSettingsResponse = async (orgId: string) => {
+    const settings = await store.readTaskLlmSettings(orgId);
+    return describeSettings(settings, !!options.secretCipher);
+  };
+
+  app.get("/api/settings", async (c) => {
+    const orgId = await currentOrgId();
+    if (!orgId) return c.json({ error: "No organization configured." }, 503);
+    return c.json(await taskSettingsResponse(orgId));
+  });
+
+  app.put("/api/settings/:path", async (c) => {
+    const orgId = await currentOrgId();
+    if (!orgId) return c.json({ error: "No organization configured." }, 503);
+    const body = await c.req.json().catch(() => null) as { value?: unknown } | null;
+    if (!body || !Object.hasOwn(body, "value")) return c.json({ error: 'Missing required "value".' }, 400);
+    try {
+      const write = validateSettingWrite(c.req.param("path"), body.value);
+      if (
+        (write.kind === "provider" && write.provider && getProvider(write.provider)?.requiresApiKey) ||
+        (write.kind === "field" && getProvider(write.provider)?.requiresApiKey)
+      ) {
+        if (!options.secretCipher) {
+          return c.json({
+            error: "HUB_SECRET_KEY is not configured; API-key-based LLM providers are disabled.",
+          }, 503);
+        }
+      }
+      if (write.kind === "provider") {
+        await store.setTaskLlmProvider(orgId, write.provider, Date.now());
+      } else {
+        await store.setTaskLlmProviderField(orgId, write.provider, write.field, write.value, Date.now());
+      }
+      return c.json(await taskSettingsResponse(orgId));
+    } catch (error) {
+      if (error instanceof SettingsValidationError) return c.json({ error: error.message }, error.status);
+      throw error;
+    }
+  });
+
+  app.get("/api/settings/secrets/:provider", async (c) => {
+    const providerName = c.req.param("provider");
+    const provider = getProvider(providerName);
+    if (!provider || !provider.requiresApiKey) return c.json({ error: "Unknown API-key provider." }, 404);
+    const orgId = await currentOrgId();
+    if (!orgId) return c.json({ error: "No organization configured." }, 503);
+    return c.json(await store.readLlmSecretStatus(orgId, provider.name));
+  });
+
+  app.post("/api/settings/secrets/:provider", async (c) => {
+    const providerName = c.req.param("provider");
+    const provider = getProvider(providerName);
+    if (!provider || !provider.requiresApiKey) return c.json({ error: "Unknown API-key provider." }, 404);
+    if (!options.secretCipher) return c.json({ error: "Secret encryption is unavailable." }, 503);
+    const body = await c.req.json().catch(() => null) as { value?: unknown } | null;
+    if (!body || typeof body.value !== "string") return c.json({ error: 'The "value" must be a string.' }, 400);
+    const value = body.value.trim();
+    if (!value) return c.json({ error: "API key cannot be blank." }, 400);
+    if (value.length > 16_384) return c.json({ error: "API key is too long." }, 400);
+    const orgId = await currentOrgId();
+    if (!orgId) return c.json({ error: "No organization configured." }, 503);
+    await store.setLlmSecret(
+      orgId,
+      provider.name,
+      options.secretCipher.encrypt(orgId, provider.name, value),
+      maskSecret(value),
+      Date.now(),
+    );
+    return c.json(await store.readLlmSecretStatus(orgId, provider.name));
+  });
+
+  app.delete("/api/settings/secrets/:provider", async (c) => {
+    const providerName = c.req.param("provider");
+    if (!isLlmProvider(providerName) || !getProvider(providerName)?.requiresApiKey) {
+      return c.json({ error: "Unknown API-key provider." }, 404);
+    }
+    const orgId = await currentOrgId();
+    if (!orgId) return c.json({ error: "No organization configured." }, 503);
+    await store.deleteLlmSecret(orgId, providerName);
+    return c.json({ configured: false });
+  });
+
+  app.post("/api/settings/test-connection", async (c) => {
+    const orgId = await currentOrgId();
+    if (!orgId) return c.json({ error: "No organization configured." }, 503);
+    let config;
+    try {
+      config = await resolveTaskLlmConfig(store, orgId, options.secretCipher);
+    } catch (error) {
+      if (error instanceof LlmConfigurationError) {
+        return c.json({ ok: false, error: error.message }, error.status);
+      }
+      throw error;
+    }
+    const providerName = config.provider;
+    const provider = getProvider(providerName)!;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), options.connectionTimeoutMs ?? 15_000);
+    try {
+      const result = await complete(
+        { prompt: "Reply with OK.", maxTokens: 8, signal: controller.signal },
+        config,
+        { fetch: options.fetch, executeCommand: options.executeCommand },
+      );
+      const model = config.model || provider.defaultModel || undefined;
+      if (result.ok) return c.json({ ok: true, provider: providerName, ...(model ? { model } : {}) });
+      return c.json({
+        ok: false,
+        provider: providerName,
+        ...(model ? { model } : {}),
+        error: sanitizeLlmError(result.error, result.status, providerName, config.apiKey),
+      }, 502);
+    } finally {
+      clearTimeout(timeout);
+      config.apiKey = undefined;
+    }
+  });
 
   // ---- Users --------------------------------------------------------------------
 
@@ -591,6 +734,7 @@ export interface HubServeOptions {
   port: number;
   store: HubStore;
   auth: AdminAuth;
+  secretCipher?: SecretCipher;
   /** Aborting this signal stops the server gracefully. */
   signal?: AbortSignal;
 }
@@ -598,7 +742,7 @@ export interface HubServeOptions {
 /** Start listening. Resolves once the server has fully shut down (after `signal` fires or
  *  the process exits). Call site is responsible for opening and closing the store. */
 export function startHubServer(opts: HubServeOptions): Promise<void> {
-  const app = createHubApp(opts.store, opts.auth);
+  const app = createHubApp(opts.store, opts.auth, { secretCipher: opts.secretCipher });
 
   return new Promise((resolve, reject) => {
     const server = serve(

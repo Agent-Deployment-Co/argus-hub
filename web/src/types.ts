@@ -5,6 +5,60 @@
 
 export type AgentSource = "claude" | "codex" | "gemini" | "cowork";
 
+export type LlmProvider = "claude-api" | "command" | "gemini" | "openai" | "openrouter";
+export type LlmConfigField = "model" | "baseUrl" | "effort" | "command";
+
+export interface SettingsOption {
+  value: string;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+}
+
+export interface SettingDescriptor {
+  path: string;
+  field?: LlmConfigField;
+  label: string;
+  description?: string;
+  control: "select" | "text" | "textarea";
+  options?: SettingsOption[];
+  value: string | null;
+  providerScoped?: boolean;
+  visibleWhen?: { path: "llm.provider"; in: LlmProvider[] };
+  placeholderByProvider?: Record<string, string>;
+}
+
+export interface SettingsResponse {
+  categories: [{
+    id: "tasks";
+    label: "Tasks";
+    sections: [{
+      settings: SettingDescriptor[];
+      secretField: {
+        key: "llm.apiKey";
+        label: "API key";
+        description: string;
+        providerPath: "llm.provider";
+        providers: LlmProvider[];
+      };
+      connectionTest: { label: string; providerPath: "llm.provider" };
+    }];
+  }];
+  providerConfigs: Partial<Record<LlmProvider, Partial<Record<LlmConfigField, string>>>>;
+}
+
+export interface SecretStatus {
+  configured: boolean;
+  hint?: string;
+}
+
+export interface ConnectionTestResult {
+  ok: boolean;
+  provider?: LlmProvider;
+  model?: string;
+  error?: string;
+}
+
 export interface Usage {
   input: number;
   output: number;

@@ -13,6 +13,15 @@ Build it:
 docker build -t argus-hub .
 ```
 
+Create a deployment secret file before running the image:
+
+```bash
+printf 'HUB_SECRET_KEY=%s\n' "$(openssl rand -base64 32)" > hub.env
+chmod 600 hub.env
+```
+
+Keep `hub.env` in a secret manager or protected backup. Do not commit it.
+
 The image listens on port `4343` and writes its SQLite database under `/data` (set via
 `HUB_DATA_DIR`, baked into the image as an `ENV` default).
 
@@ -52,6 +61,7 @@ docker run -d \
   --name argus-hub \
   -p 4343:4343 \
   -v argus-hub-data:/data \
+  --env-file hub.env \
   ghcr.io/agent-deployment-co/argus-hub:latest
 ```
 
@@ -62,6 +72,7 @@ docker run -d \
   --name argus-hub \
   -p 4343:4343 \
   -v argus-hub-data:/data \
+  --env-file hub.env \
   argus-hub
 ```
 
@@ -102,6 +113,7 @@ environment variables → CLI flags. In a container, environment variables are t
 |----------|---------|-------------|
 | `HUB_PORT` | `4343` | Port the server listens on inside the container |
 | `HUB_DATA_DIR` | `/data` | Directory for `hub.db` |
+| `HUB_SECRET_KEY` | _(required)_ | Canonical base64 encoding of exactly 32 random bytes. Encrypts task-provider API keys stored in SQLite |
 | `ADMIN_PASSWORD` | _(generated)_ | Pins the dashboard login password across container restarts. Without it, a new random password is generated — and printed — every time the container starts |
 | `HUB_INSECURE_COOKIE_HOSTS` | _(none)_ | Comma-separated hostnames (no port) that receive a non-`Secure` session cookie, for plain-HTTP-only deployments (e.g. a cluster-internal address reachable only over a private network/VPN). **Never** list a host reachable from the public internet |
 
@@ -119,8 +131,14 @@ docker run -d \
 `hub.env`:
 
 ```
+HUB_SECRET_KEY=replace-with-output-of-openssl-rand-base64-32
 ADMIN_PASSWORD=change-me
 ```
+
+Hub fails before listening if `HUB_SECRET_KEY` is missing or malformed. Preserve the exact value
+across container upgrades and restarts. Back it up separately from the `/data` volume: `hub.db`
+contains only encrypted provider keys, and changing or losing the master key makes them unreadable.
+The administrator must then restore the original master key or replace each saved provider key.
 
 If you change `HUB_PORT`, also update the `-p` mapping and the `HEALTHCHECK` will still hit
 `localhost:4343` **inside** the container unless you rebuild — the healthcheck URL is baked
@@ -142,6 +160,8 @@ services:
       - "4343:4343"
     environment:
       - ADMIN_PASSWORD=change-me
+    env_file:
+      - hub.env
     volumes:
       - argus-hub-data:/data
 
@@ -204,6 +224,7 @@ If you're running the prebuilt image, pull the new tag and recreate the containe
 docker pull ghcr.io/agent-deployment-co/argus-hub:latest
 docker stop argus-hub && docker rm argus-hub
 docker run -d --name argus-hub -p 4343:4343 -v argus-hub-data:/data \
+  --env-file hub.env \
   ghcr.io/agent-deployment-co/argus-hub:latest
 ```
 
@@ -213,7 +234,8 @@ If you're building from source instead:
 docker pull node:24-slim        # optional: refresh the base layer
 docker build -t argus-hub .
 docker stop argus-hub && docker rm argus-hub
-docker run -d --name argus-hub -p 4343:4343 -v argus-hub-data:/data argus-hub
+docker run -d --name argus-hub -p 4343:4343 -v argus-hub-data:/data \
+  --env-file hub.env argus-hub
 ```
 
 Either way, the volume is untouched, so `hub.db` and its contents survive the upgrade.
@@ -223,7 +245,10 @@ Either way, the volume is untouched, so `hub.db` and its contents survive the up
 ## Troubleshooting
 
 - **Container exits immediately** — check `docker logs argus-hub`. A common cause is the data
-  directory not being writable (bind mount owned by a different UID).
+  directory not being writable (bind mount owned by a different UID) or a missing/malformed
+  `HUB_SECRET_KEY`.
+- **Saved provider keys cannot be decrypted** — restore the `HUB_SECRET_KEY` that was used to
+  encrypt them, or replace the affected keys in Settings → Tasks.
 - **Lost the admin password** — set `ADMIN_PASSWORD` and restart the container to pin a known
   value; this does not touch existing session data.
 - **Dashboard login doesn't stick over plain HTTP** — see `HUB_INSECURE_COOKIE_HOSTS` above.

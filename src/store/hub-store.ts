@@ -16,8 +16,10 @@ import type {
   Usage,
 } from "../types.ts";
 import { emptyFrictionTotals, foldFriction, HIGH_TOKEN_GROWTH_RATIO } from "../health.ts";
+import type { LlmConfigField, LlmProvider } from "../llm/types.ts";
+import type { EncryptedSecret } from "../secrets.ts";
 
-export const HUB_SCHEMA_VERSION = 4;
+export const HUB_SCHEMA_VERSION = 5;
 export const HUB_APPLICATION_ID = 0x48554200; // "HUB\0"
 
 // ---- Raw row types (mirrors client argus.db resolved_* column shapes) -------------------
@@ -360,6 +362,37 @@ const HUB_LABELS_DDL = `
   CREATE INDEX hub_task_labels_label ON hub_task_labels(org_id, label_id);
 `;
 
+const ORGANIZATION_LLM_SETTINGS_DDL = `
+  CREATE TABLE organization_task_llm (
+    org_id     TEXT PRIMARY KEY REFERENCES organizations(org_id) ON DELETE CASCADE,
+    provider   TEXT,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE organization_llm_provider_configs (
+    org_id     TEXT NOT NULL REFERENCES organizations(org_id) ON DELETE CASCADE,
+    provider   TEXT NOT NULL,
+    model      TEXT,
+    base_url   TEXT,
+    effort     TEXT,
+    command    TEXT,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (org_id, provider)
+  );
+
+  CREATE TABLE organization_llm_secrets (
+    org_id      TEXT NOT NULL REFERENCES organizations(org_id) ON DELETE CASCADE,
+    provider    TEXT NOT NULL,
+    ciphertext BLOB NOT NULL,
+    nonce       BLOB NOT NULL,
+    auth_tag    BLOB NOT NULL,
+    hint        TEXT NOT NULL,
+    key_version INTEGER NOT NULL DEFAULT 1,
+    updated_at  INTEGER NOT NULL,
+    PRIMARY KEY (org_id, provider)
+  );
+`;
+
 const CREATE_HUB_SCHEMA_SQL = `
   CREATE TABLE organizations (
     org_id     TEXT PRIMARY KEY,
@@ -545,6 +578,7 @@ const CREATE_HUB_SCHEMA_SQL = `
   CREATE INDEX resolved_invocations_skill      ON resolved_invocations(skill) WHERE skill IS NOT NULL;
   ${RESOLVED_SESSION_LABELS_DDL}
   ${HUB_LABELS_DDL}
+  ${ORGANIZATION_LLM_SETTINGS_DDL}
 `;
 
 // Forward-only, in-place migrations keyed by the version they upgrade FROM. Each step is purely
@@ -572,6 +606,8 @@ const HUB_MIGRATIONS: Record<number, string> = {
   `,
   // v3 → v4: hub-level task labels (#26).
   3: HUB_LABELS_DDL,
+  // v4 → v5: organization-scoped task LLM settings and encrypted secrets.
+  4: ORGANIZATION_LLM_SETTINGS_DDL,
 };
 
 // ---- DB open / init ---------------------------------------------------------------------
@@ -747,6 +783,24 @@ export interface HubTaskRow {
   disposition: string | null;
 }
 
+export interface TaskLlmProviderConfig {
+  model?: string;
+  baseUrl?: string;
+  effort?: string;
+  command?: string;
+}
+
+export interface TaskLlmSettings {
+  provider: LlmProvider | null;
+  providerConfigs: Partial<Record<LlmProvider, TaskLlmProviderConfig>>;
+}
+
+export interface LlmSecretStatus {
+  configured: boolean;
+  /** A masked hint (e.g. "…WXYZ"), present only when configured. Never the raw value. */
+  hint?: string;
+}
+
 export class HubStore {
   private queue: Promise<void> = Promise.resolve();
   private closed = false;
@@ -777,6 +831,149 @@ export class HubStore {
       );
       if (!row) return undefined;
       return { orgId: row.org_id, isEnabled: row.is_enabled === 1 };
+    });
+  }
+
+  // ---- Organization task LLM settings ------------------------------------------
+
+  readTaskLlmSettings(orgId: string): Promise<TaskLlmSettings> {
+    return this.schedule(async () => {
+      const active = await get<{ provider: LlmProvider | null }>(
+        this.db,
+        "SELECT provider FROM organization_task_llm WHERE org_id = ?",
+        [orgId],
+      );
+      const rows = await all<{
+        provider: LlmProvider;
+        model: string | null;
+        base_url: string | null;
+        effort: string | null;
+        command: string | null;
+      }>(
+        this.db,
+        `SELECT provider, model, base_url, effort, command
+         FROM organization_llm_provider_configs WHERE org_id = ?`,
+        [orgId],
+      );
+      const providerConfigs: TaskLlmSettings["providerConfigs"] = {};
+      for (const row of rows) {
+        providerConfigs[row.provider] = {
+          ...(row.model !== null ? { model: row.model } : {}),
+          ...(row.base_url !== null ? { baseUrl: row.base_url } : {}),
+          ...(row.effort !== null ? { effort: row.effort } : {}),
+          ...(row.command !== null ? { command: row.command } : {}),
+        };
+      }
+      return { provider: active?.provider ?? null, providerConfigs };
+    });
+  }
+
+  setTaskLlmProvider(orgId: string, provider: LlmProvider | null, now: number): Promise<void> {
+    return this.schedule(async () => {
+      await run(
+        this.db,
+        `INSERT INTO organization_task_llm(org_id, provider, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(org_id) DO UPDATE SET provider = excluded.provider, updated_at = excluded.updated_at`,
+        [orgId, provider, now],
+      );
+    });
+  }
+
+  setTaskLlmProviderField(
+    orgId: string,
+    provider: LlmProvider,
+    field: LlmConfigField,
+    value: string | null,
+    now: number,
+  ): Promise<void> {
+    const column = ({ model: "model", baseUrl: "base_url", effort: "effort", command: "command" } as const)[field];
+    if (!column) return Promise.reject(new Error(`Unsupported LLM provider field: ${field}`));
+    return this.schedule(async () => {
+      await run(
+        this.db,
+        `INSERT INTO organization_llm_provider_configs(org_id, provider, ${column}, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(org_id, provider) DO UPDATE SET
+           ${column} = excluded.${column}, updated_at = excluded.updated_at`,
+        [orgId, provider, value, now],
+      );
+    });
+  }
+
+  readLlmSecretStatus(orgId: string, provider: LlmProvider): Promise<LlmSecretStatus> {
+    return this.schedule(async () => {
+      const row = await get<{ hint: string }>(
+        this.db,
+        "SELECT hint FROM organization_llm_secrets WHERE org_id = ? AND provider = ?",
+        [orgId, provider],
+      );
+      return row ? { configured: true, hint: row.hint } : { configured: false };
+    });
+  }
+
+  setLlmSecret(
+    orgId: string,
+    provider: LlmProvider,
+    encrypted: EncryptedSecret,
+    hint: string,
+    now: number,
+  ): Promise<void> {
+    return this.schedule(async () => {
+      await run(
+        this.db,
+        `INSERT INTO organization_llm_secrets(
+           org_id, provider, ciphertext, nonce, auth_tag, hint, key_version, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(org_id, provider) DO UPDATE SET
+           ciphertext = excluded.ciphertext,
+           nonce = excluded.nonce,
+           auth_tag = excluded.auth_tag,
+           hint = excluded.hint,
+           key_version = excluded.key_version,
+           updated_at = excluded.updated_at`,
+        [
+          orgId,
+          provider,
+          encrypted.ciphertext,
+          encrypted.nonce,
+          encrypted.authTag,
+          hint,
+          encrypted.keyVersion,
+          now,
+        ],
+      );
+    });
+  }
+
+  readEncryptedLlmSecret(orgId: string, provider: LlmProvider): Promise<EncryptedSecret | undefined> {
+    return this.schedule(async () => {
+      const row = await get<{
+        ciphertext: Buffer;
+        nonce: Buffer;
+        auth_tag: Buffer;
+        key_version: 1;
+      }>(
+        this.db,
+        `SELECT ciphertext, nonce, auth_tag, key_version
+         FROM organization_llm_secrets WHERE org_id = ? AND provider = ?`,
+        [orgId, provider],
+      );
+      return row ? {
+        ciphertext: row.ciphertext,
+        nonce: row.nonce,
+        authTag: row.auth_tag,
+        keyVersion: row.key_version,
+      } : undefined;
+    });
+  }
+
+  deleteLlmSecret(orgId: string, provider: LlmProvider): Promise<void> {
+    return this.schedule(async () => {
+      await run(
+        this.db,
+        "DELETE FROM organization_llm_secrets WHERE org_id = ? AND provider = ?",
+        [orgId, provider],
+      );
     });
   }
 

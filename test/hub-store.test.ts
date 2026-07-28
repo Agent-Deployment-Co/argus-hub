@@ -15,6 +15,7 @@ import {
   type HubUploadRows,
 } from "../src/store/hub-store.ts";
 import sqlite3 from "sqlite3";
+import { createSecretCipher } from "../src/secrets.ts";
 
 const tempDirs: string[] = [];
 
@@ -259,6 +260,9 @@ describe("schema", () => {
       expect(names).toContain("resolved_tasks");
       expect(names).toContain("resolved_interactions");
       expect(names).toContain("resolved_invocations");
+      expect(names).toContain("organization_task_llm");
+      expect(names).toContain("organization_llm_provider_configs");
+      expect(names).toContain("organization_llm_secrets");
     } finally {
       await closeRaw(db);
     }
@@ -311,6 +315,9 @@ describe("schema", () => {
        DROP INDEX users_group;
        ALTER TABLE users DROP COLUMN group_id;
        DROP TABLE groups;
+       DROP TABLE organization_llm_secrets;
+       DROP TABLE organization_llm_provider_configs;
+       DROP TABLE organization_task_llm;
        PRAGMA user_version = 1;`);
     await closeRaw(raw);
 
@@ -345,6 +352,16 @@ describe("schema", () => {
       const userCols = (await rawAll<{ name: string }>(db, "PRAGMA table_info(users)")).map((c) => c.name);
       expect(userCols).toContain("group_id");
 
+      const llmTables = await rawAll<{ name: string }>(
+        db,
+        "SELECT name FROM sqlite_schema WHERE type='table' AND name LIKE 'organization%llm%' ORDER BY name",
+      );
+      expect(llmTables.map((row) => row.name)).toEqual([
+        "organization_llm_provider_configs",
+        "organization_llm_secrets",
+        "organization_task_llm",
+      ]);
+
       // Pre-existing session data survived the upgrade.
       const sess = await rawGet<{ session_id: string; title: string | null }>(
         db, "SELECT session_id, title FROM resolved_sessions WHERE session_id = ?", ["sess-mig"]);
@@ -352,6 +369,48 @@ describe("schema", () => {
       expect(sess?.title).toBeNull();
     } finally {
       await closeRaw(db);
+    }
+  });
+
+  test("upgrades v4 with the same LLM table layouts as a fresh v5 store", async () => {
+    const freshDir = tempDataDir();
+    const migratedDir = tempDataDir();
+    const freshStore = await openHubStore(freshDir, 1_000_000);
+    const migratedStore = await openHubStore(migratedDir, 1_000_000);
+    const migratedOrgId = await migratedStore.getDefaultOrgId();
+    await freshStore.close();
+    await migratedStore.close();
+
+    const migratedPath = join(migratedDir, "hub.db");
+    const before = await openRaw(migratedPath);
+    await rawExec(before, `
+      DROP TABLE organization_llm_secrets;
+      DROP TABLE organization_llm_provider_configs;
+      DROP TABLE organization_task_llm;
+      PRAGMA user_version = 4;
+    `);
+    await closeRaw(before);
+
+    const upgraded = await openHubStore(migratedDir, 2_000_000);
+    expect(await upgraded.getDefaultOrgId()).toBe(migratedOrgId);
+    await upgraded.close();
+
+    const tableNames = [
+      "organization_task_llm",
+      "organization_llm_provider_configs",
+      "organization_llm_secrets",
+    ];
+    const freshDb = await openRaw(join(freshDir, "hub.db"));
+    const migratedDb = await openRaw(migratedPath);
+    try {
+      for (const table of tableNames) {
+        const freshColumns = await rawAll<Record<string, unknown>>(freshDb, `PRAGMA table_info(${table})`);
+        const migratedColumns = await rawAll<Record<string, unknown>>(migratedDb, `PRAGMA table_info(${table})`);
+        expect(migratedColumns).toEqual(freshColumns);
+      }
+    } finally {
+      await closeRaw(freshDb);
+      await closeRaw(migratedDb);
     }
   });
 
@@ -427,6 +486,80 @@ describe("bootstrap", () => {
       (process.stdout as unknown as { write: (s: string) => boolean }).write = origWrite;
     }
     expect(printed).toBe("");
+  });
+});
+
+// ---- Organization LLM settings ---------------------------------------------------------
+
+describe("organization task LLM settings", () => {
+  test("starts unconfigured and preserves provider-specific fields across switching and clearing", async () => {
+    const store = await openHubStore(tempDataDir(), 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    expect(await store.readTaskLlmSettings(orgId)).toEqual({ provider: null, providerConfigs: {} });
+
+    await store.setTaskLlmProviderField(orgId, "openai", "model", "gpt-test", 10);
+    await store.setTaskLlmProviderField(orgId, "gemini", "model", "gemini-test", 11);
+    await store.setTaskLlmProvider(orgId, "openai", 12);
+    await store.setTaskLlmProvider(orgId, "gemini", 13);
+    await store.setTaskLlmProvider(orgId, null, 14);
+
+    expect(await store.readTaskLlmSettings(orgId)).toEqual({
+      provider: null,
+      providerConfigs: {
+        openai: { model: "gpt-test" },
+        gemini: { model: "gemini-test" },
+      },
+    });
+    await store.close();
+  });
+
+  test("isolates settings and encrypted secret status across organizations", async () => {
+    const store = await openHubStore(tempDataDir(), 1_000_000);
+    const orgA = (await store.getDefaultOrgId())!;
+    const orgB = "org-test-other";
+    const raw = await openRaw(store.path);
+    await rawExec(raw, `INSERT INTO organizations(org_id, name, created_at) VALUES ('${orgB}', 'Other', 1)`);
+    await closeRaw(raw);
+
+    const cipher = createSecretCipher(Buffer.alloc(32, 4));
+    await store.setTaskLlmProvider(orgA, "openai", 1);
+    await store.setTaskLlmProvider(orgB, "gemini", 2);
+    await store.setLlmSecret(orgA, "openai", cipher.encrypt(orgA, "openai", "key-a-1234"), "1234", 3);
+    await store.setLlmSecret(orgB, "openai", cipher.encrypt(orgB, "openai", "key-b-5678"), "5678", 4);
+
+    expect((await store.readTaskLlmSettings(orgA)).provider).toBe("openai");
+    expect((await store.readTaskLlmSettings(orgB)).provider).toBe("gemini");
+    expect(await store.readLlmSecretStatus(orgA, "openai")).toEqual({ configured: true, hint: "1234" });
+    expect(await store.readLlmSecretStatus(orgB, "openai")).toEqual({ configured: true, hint: "5678" });
+    expect(Object.keys((await store.readEncryptedLlmSecret(orgA, "openai"))!)).not.toContain("plaintext");
+
+    await store.deleteLlmSecret(orgA, "openai");
+    expect(await store.readLlmSecretStatus(orgA, "openai")).toEqual({ configured: false });
+    expect(await store.readLlmSecretStatus(orgB, "openai")).toEqual({ configured: true, hint: "5678" });
+    await store.close();
+  });
+
+  test("organization deletion cascades through settings, configs, and secrets", async () => {
+    const store = await openHubStore(tempDataDir(), 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+    const cipher = createSecretCipher(Buffer.alloc(32, 5));
+    await store.setTaskLlmProvider(orgId, "openai", 1);
+    await store.setTaskLlmProviderField(orgId, "openai", "model", "gpt-test", 2);
+    await store.setLlmSecret(orgId, "openai", cipher.encrypt(orgId, "openai", "key-1234"), "1234", 3);
+    await store.close();
+
+    const raw = await openRaw(store.path);
+    await rawExec(raw, "PRAGMA foreign_keys = ON");
+    await rawExec(raw, `DELETE FROM api_keys; DELETE FROM organizations WHERE org_id = '${orgId}'`);
+    for (const table of [
+      "organization_task_llm",
+      "organization_llm_provider_configs",
+      "organization_llm_secrets",
+    ]) {
+      const row = await rawGet<{ count: number }>(raw, `SELECT COUNT(*) AS count FROM ${table}`);
+      expect(row?.count).toBe(0);
+    }
+    await closeRaw(raw);
   });
 });
 

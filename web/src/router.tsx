@@ -1,4 +1,4 @@
-import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/react-router";
 import { Layout } from "./components/Layout";
 import { Activity } from "./routes/Activity";
 import { Export } from "./routes/Export";
@@ -7,6 +7,7 @@ import { Tasks } from "./routes/Tasks";
 import { Team } from "./routes/Team";
 import { Tools } from "./routes/Tools";
 import { UserActivity } from "./routes/UserActivity";
+import { Settings } from "./routes/Settings";
 
 const rootRoute = createRootRoute({ component: Layout });
 
@@ -69,6 +70,16 @@ const routeTree = rootRoute.addChildren([
     path: "/users/$userId",
     component: UserActivity,
     validateSearch: validateSnapshotSearch,
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/settings",
+    beforeLoad: () => { throw redirect({ to: "/settings/$category", params: { category: "general" } }); },
+  }),
+  createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/settings/$category",
+    component: Settings,
   }),
 ]);
 

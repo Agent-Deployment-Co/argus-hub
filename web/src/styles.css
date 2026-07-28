@@ -465,7 +465,7 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
   box-shadow: 0 20px 48px rgba(0, 0, 0, .35); padding: 18px;
 }
 .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-.modal-head h2 { margin: 0; color: var(--heading); font: 700 16px "Poppins", "Avenir Next", Arial, sans-serif; }
+.modal-head h2 { margin: 0; color: var(--heading); font: 700 16px "Poppins", "Avenir Next", Arial, sans-serif; text-transform: none; letter-spacing: normal; }
 .modal-form { display: flex; flex-direction: column; gap: 14px; }
 .modal-field { display: flex; flex-direction: column; gap: 6px; font: 600 12px "Poppins", "Avenir Next", Arial, sans-serif; color: var(--muted); }
 .modal-field .filter-input { height: 34px; width: 100%; }
@@ -482,4 +482,177 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
   main { padding-left: 18px; padding-right: 18px; }
   .filter-bar { margin-left: -18px; margin-right: -18px; padding-left: 18px; padding-right: 18px; gap: 12px; }
   main:has(.sessions-split) .filter-bar { margin: 0; }
+}
+
+/* ---- Full-screen settings (styling matched to argus's /settings/general) --------------- */
+.settings-shell {
+  min-height: 100vh; display: grid; grid-template-columns: 248px minmax(0, 1fr);
+  background: var(--bg);
+}
+.settings-rail {
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 4px; padding: 18px 14px;
+  border-right: 1px solid var(--line); background: var(--surface);
+}
+.settings-back {
+  display: inline-flex; align-items: center; gap: 8px; align-self: flex-start;
+  padding: 6px 8px; margin-bottom: 8px;
+  border: 0; border-radius: 8px; background: transparent; color: var(--muted);
+  font: 600 13px "Poppins", "Avenir Next", Arial, sans-serif; cursor: pointer;
+}
+.settings-back:hover { background: var(--hover); color: var(--heading); }
+.settings-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.settings-rail h1 {
+  margin: 4px 8px 14px; color: var(--heading);
+  font-family: "Poppins", "Avenir Next", Arial, sans-serif; font-size: 22px; font-weight: 700;
+  letter-spacing: -0.04em;
+}
+.settings-rail nav { display: flex; flex-direction: column; gap: 2px; }
+.settings-nav-link {
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px;
+  color: var(--muted); text-decoration: none;
+  font: 600 13px "Poppins", "Avenir Next", Arial, sans-serif;
+}
+.settings-nav-link:hover { color: var(--heading); background: var(--hover); }
+.settings-nav-link[aria-current="page"] {
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.settings-nav-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.settings-main { min-width: 0; padding: 0; }
+.settings-pane { overflow-y: auto; padding: 40px 48px 80px; }
+.settings-not-found, .settings-loading, .settings-load-error {
+  max-width: 760px; width: 100%; margin: 0 auto; padding: 40px 48px 80px;
+}
+/* --setting-control-w: the fixed width of the right-hand control column (inputs, select, secret
+   widget) so they all line up; widen here to give longer values more room. */
+.settings-content { max-width: 760px; margin: 0 auto; --setting-control-w: 300px; }
+.settings-pane-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 20px;
+}
+.settings-pane h2, .settings-not-found h2 {
+  margin: 0; color: var(--heading);
+  font-size: 22px; font-weight: 700; line-height: 1.25;
+}
+.settings-save-status {
+  min-height: 24px; display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
+  padding: 3px 8px; border-radius: 999px; color: var(--muted);
+  font: 600 12px "Poppins", "Avenir Next", Arial, sans-serif;
+}
+.settings-save-status.is-saved { color: var(--sky-surge); }
+.settings-save-status.is-error { max-width: 320px; color: var(--racing-red); border-radius: 7px; }
+.settings-save-status .spin { animation: spin .8s linear infinite; }
+.settings-section {
+  margin-top: 28px;
+}
+.settings-row, .settings-test-row {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 24px;
+  padding: 18px 0; border-bottom: 1px solid var(--line);
+}
+.settings-section > :last-child { border-bottom: 0; }
+.settings-row-copy { display: flex; min-width: 0; max-width: 60%; flex-direction: column; gap: 4px; }
+.settings-row-label {
+  color: var(--heading); font-weight: 600; font-size: 14px;
+}
+.settings-row-description { color: var(--muted); font-size: 13px; line-height: 1.45; }
+.settings-control {
+  flex: 0 0 auto; width: var(--setting-control-w); min-width: 0; height: 32px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text);
+  font: 13px "Aleo", Georgia, serif;
+}
+.settings-control:hover { border-color: color-mix(in srgb, var(--muted) 65%, var(--line)); }
+.settings-control:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.settings-control::placeholder { color: color-mix(in srgb, var(--muted) 70%, transparent); }
+.settings-select { cursor: pointer; }
+.settings-textarea {
+  width: var(--setting-control-w); min-height: 72px; height: auto; padding: 8px 10px; resize: vertical;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+/* A textarea is too wide for the right-hand control column, so its row stacks: label + description
+   on top, the full-width control beneath — same convention as argus's .setting-row-stacked. */
+.settings-row-stacked { flex-direction: column; align-items: stretch; gap: 10px; }
+.settings-row-stacked .settings-row-copy { max-width: 100%; }
+.settings-row-stacked .settings-textarea { width: 100%; min-height: 120px; }
+.settings-provider-note {
+  margin: 0; padding: 12px; border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--sky-surge) 6%, transparent);
+  color: var(--muted); font-size: 13px;
+}
+.settings-provider-note.is-warning {
+  background: color-mix(in srgb, var(--racing-red) 8%, transparent); color: var(--text);
+}
+.settings-secret-lock { vertical-align: -2px; color: var(--muted); }
+.settings-secret-control { display: flex; min-width: 0; flex-direction: column; align-items: stretch; }
+.settings-secret-form, .settings-secret-line {
+  display: flex; align-items: center; gap: 6px; width: var(--setting-control-w);
+}
+.settings-secret-input { flex: 1 1 auto; width: auto; }
+.settings-secret-mask {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; padding: 6px 9px;
+  border-radius: 8px; letter-spacing: .08em; text-overflow: ellipsis;
+}
+.settings-secret-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; flex: 0 0 auto; padding: 0;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.settings-secret-icon-btn:hover:not(:disabled) { color: var(--heading); border-color: var(--accent); }
+.settings-secret-icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.settings-secret-icon-btn:disabled { opacity: .45; cursor: not-allowed; }
+.settings-secret-icon-btn.is-danger:hover:not(:disabled) {
+  color: var(--racing-red); border-color: var(--racing-red);
+}
+.settings-secret-confirm { flex: 1 1 auto; min-width: 0; color: var(--racing-red); font-size: 13px; }
+.settings-secret-status {
+  display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px;
+}
+.settings-row-actions { display: flex; justify-content: flex-end; gap: 7px; }
+.settings-inline-error {
+  margin-top: 3px; color: var(--racing-red); font-size: 12.5px; line-height: 1.4;
+}
+/* Pill-shaped action button + icon-accompanied result line, matching argus's .secret-btn/.conn-result. */
+.settings-test-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px;
+  border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--text);
+  font: 600 12.5px "Poppins", "Avenir Next", Arial, sans-serif; cursor: pointer;
+}
+.settings-test-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--heading); }
+.settings-test-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.settings-test-btn:disabled { opacity: .45; cursor: not-allowed; }
+.settings-test-btn .spin { animation: spin .8s linear infinite; }
+.settings-test-result { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.settings-test-result.is-ok { color: var(--sky-surge); }
+.settings-test-result.is-error { color: var(--racing-red); }
+.settings-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 28px; }
+.settings-not-found p { color: var(--muted); }
+.settings-load-error { color: var(--racing-red); }
+.settings-loading { color: var(--muted); }
+
+/* Four footer controls need two compact rows in the expanded Hub rail. */
+.app-shell:not(.rail-collapsed) .rail-footer {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+}
+.app-shell:not(.rail-collapsed) .rail-footer .theme-switcher {
+  grid-column: 1 / -1; justify-self: stretch;
+}
+.app-shell:not(.rail-collapsed) .rail-footer .theme-choice { flex: 1 1 50%; }
+
+@media (max-width: 700px) {
+  .settings-shell { grid-template-columns: 58px minmax(0, 1fr); }
+  .settings-rail { padding: 14px 9px; }
+  .settings-rail h1, .settings-back span, .settings-nav-link span { display: none; }
+  .settings-back, .settings-nav-link { justify-content: center; padding: 10px 0; }
+  .settings-rail nav { margin-top: 20px; }
+  .settings-pane, .settings-not-found, .settings-loading, .settings-load-error {
+    padding: 28px 18px 56px;
+  }
+  .settings-pane-head { gap: 8px; }
+  .settings-section { margin-top: 20px; }
+  .settings-pane h2, .settings-not-found h2 { font-size: 21px; }
+  .settings-save-status.is-error { max-width: 180px; white-space: normal; text-align: right; }
+  .settings-row, .settings-test-row {
+    flex-direction: column; align-items: stretch; gap: 10px; padding: 17px 0;
+  }
+  .settings-row-copy { max-width: 100%; }
+  .settings-control, .settings-secret-form, .settings-secret-line { width: 100%; }
 }

@@ -5,6 +5,7 @@ import { startHubServer } from "./api/serve.ts";
 import { createAdminAuth } from "./admin-auth.ts";
 import { VERSION } from "./version.ts";
 import { randomUUID } from "node:crypto";
+import { createSecretCipher, parseHubSecretKey } from "./secrets.ts";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -29,6 +30,13 @@ const serve = defineCommand({
     },
   },
   async run({ args }) {
+    const secretKey = parseHubSecretKey(process.env.HUB_SECRET_KEY);
+    const secretCipher = secretKey ? createSecretCipher(secretKey) : undefined;
+    if (!secretCipher) {
+      process.stderr.write(
+        "Warning: HUB_SECRET_KEY is not set. API-key-based LLM providers are disabled.\n",
+      );
+    }
     const port = Number(args.port);
     const insecureCookieHosts = process.env.HUB_INSECURE_COOKIE_HOSTS
       ?.split(",")
@@ -46,7 +54,7 @@ const serve = defineCommand({
       process.once(sig, () => ac.abort());
     }
 
-    await startHubServer({ port, store, auth, signal: ac.signal });
+    await startHubServer({ port, store, auth, secretCipher, signal: ac.signal });
     store.close();
   },
 });
