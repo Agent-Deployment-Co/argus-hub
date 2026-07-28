@@ -33,8 +33,6 @@ Both are only shown at this moment — copy them somewhere safe before scrolling
 login at `http://localhost:4343/login`. Set `ADMIN_PASSWORD` in the environment to pin it
 across restarts; otherwise a fresh random password is generated each launch.
 
----
-
 ## Connecting clients
 
 On each developer's machine, point the client at Argus Hub and store the API key in the OS secret
@@ -67,8 +65,6 @@ The desktop app (macOS/Windows) offers the same connection under Settings → Ar
 uploads on a schedule automatically. From the CLI, `argus run` also syncs on a built-in five-minute
 schedule; use `--sync-interval N` to change it or `--no-sync` to disable it and rely on manual
 `argus sync` calls.
-
----
 
 ## Configuration
 
@@ -121,8 +117,6 @@ The **Command** provider runs the configured command directly on the Argus Hub h
 on stdin and completion on stdout — administrator-controlled remote code execution. Enable it
 only when Argus Hub administrators and the configured command are fully trusted.
 
----
-
 ## API keys
 
 Keys are stored in `hub.db` **hashed** (`key_hash`, via `hashApiKey()`) — the printed key is the
@@ -135,8 +129,6 @@ when the `api_keys` table has no rows at all.
 
 To disable a key without deleting it (e.g. while rotating), set `is_enabled = 0` in `hub.db`.
 Argus Hub rejects disabled keys with `401` before reading the request body.
-
----
 
 ## Running as a service
 
@@ -154,8 +146,6 @@ docker logs argus-hub 2>&1 | grep -E "Hub API key|Admin password"
 To run Argus Hub directly on a host instead, see **[DEPLOYMENT.md](DEPLOYMENT.md)** for systemd
 (Linux) and launchd (macOS) unit files.
 
----
-
 ## Features
 
 Argus Hub's dashboard runs in your browser at `http://hub.internal:4343`, the same UI as
@@ -169,8 +159,6 @@ Argus Hub's dashboard runs in your browser at `http://hub.internal:4343`, the sa
   optional grouping for reporting.
 - **Export** downloads the full dataset as a Snowflake-ready zip.
 - **MCP** lets an agent query pooled usage data and manage task labels directly.
-
----
 
 ## Dashboard
 
@@ -196,8 +184,6 @@ The **Labels** tab manages hub-level task labels — distinct from any labels an
 applies itself. Create a label there, then apply or remove it on individual tasks from the
 Tasks tab.
 
----
-
 ## MCP
 
 Argus Hub exposes a small [MCP](https://modelcontextprotocol.io) surface at `POST /mcp` so an agent
@@ -207,16 +193,12 @@ labels on tasks.
 See **[docs/MCP.md](docs/MCP.md)** for the tool reference, filters, auth, and how to add it to
 Claude Code.
 
----
-
 ## Export
 
 `argus-hub export snowflake` creates a consistent Snowflake-ready snapshot of the live Argus Hub
 database, and the **Export** tab offers the same bundle straight from the browser.
 
 See **[docs/export.md](docs/export.md)** for the CLI, data coverage, and Snowflake setup.
-
----
 
 ## Contributing
 
@@ -228,8 +210,6 @@ make typecheck
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup details and the full command list.
-
----
 
 ## Security
 
@@ -249,8 +229,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup details and the full command li
 
 See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
----
-
 ## Architecture
 
 ```
@@ -269,8 +247,6 @@ hub.db  ──►  GET /api/activity, /api/tasks, /api/tasks/report,
 
 Argus Hub supports multiple orgs via the `organizations` table — each API key is scoped to one org.
 For strict isolation between unrelated tenants, run separate Argus Hub instances.
-
----
 
 ## License
 
@@ -296,7 +272,5 @@ Each released version automatically becomes **MIT-licensed** two years after it 
 ### In short
 
 Free to use and build with. Don't resell it as a hosted Argus Hub clone. After two years, do whatever you want.
-
----
 
 Questions? Contact support@agentdeployment.co
