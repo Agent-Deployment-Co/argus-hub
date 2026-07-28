@@ -157,6 +157,8 @@ Argus Hub's dashboard runs in your browser at `http://hub.internal:4343`, the sa
 - **Tools** shows tool, skill, and MCP server usage across the org.
 - **Team** is a per-user summary — sessions, total tokens, estimated cost, last-sync time — with
   optional grouping for reporting.
+- **Labels** manages hub-level task labels — distinct from any labels an Argus client applies
+  itself — and applies them to tasks from the Tasks tab.
 - **Export** downloads the full dataset as a Snowflake-ready zip.
 - **MCP** lets an agent query pooled usage data and manage task labels directly.
 
@@ -167,22 +169,6 @@ There's a per-user activity view at `/users/$userId`, reached by clicking a row 
 A combined user/group scope dropdown in the filter bar (visible once at least one client has
 synced) scopes Activity, Tasks, and Tools to a single user or group, or "All" for an org-wide
 view.
-
-### Groups
-
-Users can be organized into groups for reporting:
-
-- Full CRUD: `GET/POST /api/groups`, `PATCH/DELETE /api/groups/:groupId`
-- Bulk membership changes: `POST/DELETE /api/groups/:groupId/members`
-- Per-user assignment: `PATCH /api/users/:userId` with `{"groupId": "..."}`
-- UI: the group picker and combined user/group scope dropdown in the filter bar
-
-Deleting a group **ungroups** its members rather than deleting them — `groupId` is nulled on
-each affected user, the users themselves are untouched.
-
-The **Labels** tab manages hub-level task labels — distinct from any labels an Argus client
-applies itself. Create a label there, then apply or remove it on individual tasks from the
-Tasks tab.
 
 ## MCP
 
