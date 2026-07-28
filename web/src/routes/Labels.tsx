@@ -107,9 +107,6 @@ function CreateLabelDialog({ onClose }: { onClose: () => void }) {
             placeholder="What this label means"
           />
         </label>
-        <p className="modal-copy">
-          Labels aren't applied automatically — apply them to individual tasks from the Tasks page.
-        </p>
         {createLabel.isError && <p className="modal-error">{(createLabel.error as Error).message}</p>}
         <div className="modal-actions">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>

@@ -100,7 +100,7 @@ const BASE_DESCRIPTORS: Omit<SettingDescriptor, "value">[] = [
     path: "llm.command",
     field: "command",
     label: "Command",
-    description: "Executes this administrator-configured command on the Hub host. The prompt is sent on stdin and completion text is read from stdout.",
+    description: "Command line to run for the \"command\" provider. The prompt is sent on stdin and the completion read from stdout.",
     control: "textarea",
     providerScoped: true,
     visibleWhen: { path: "llm.provider", in: providersFor("command") },

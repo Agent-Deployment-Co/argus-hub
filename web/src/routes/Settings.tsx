@@ -352,8 +352,9 @@ function GeneralSettingsPane() {
               ))}
             </select>
           </div>
-          {provider && providerDescriptor.options?.find((option) => option.value === provider)?.description && (
-            <p className={`settings-provider-note${provider === "command" ? " is-warning" : ""}`}>
+          {provider && provider !== "command"
+            && providerDescriptor.options?.find((option) => option.value === provider)?.description && (
+            <p className="settings-provider-note">
               {providerDescriptor.options.find((option) => option.value === provider)!.description}
             </p>
           )}
