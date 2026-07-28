@@ -54,7 +54,7 @@ export function sanitizeLlmError(
   if (provider === "command") return "The configured command failed. Check the command on the Hub host.";
   let safe = (error ?? "Provider request failed.").replaceAll(apiKey ?? "\0", "[redacted]");
   safe = safe.replace(/(https?:\/\/)[^/\s:@]+:[^/\s@]+@/gi, "$1");
-  safe = safe.replace(/([?&#][^\s]*)/g, "");
+  safe = safe.replace(/(https?:\/\/[^\s?#]+)[?#][^\s]*/gi, "$1");
   safe = safe.replace(/(authorization|x-api-key)\s*[:=]\s*[^\s,;]+/gi, "$1: [redacted]");
   return safe.slice(0, 300) || "Provider request failed.";
 }
