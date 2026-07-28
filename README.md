@@ -1,9 +1,9 @@
 # Argus Hub
 
 Argus Hub is a self-hosted server that pools usage data from a team's
-[Argus](https://github.com/Agent-Deployment-Co/argus) clients into one org-wide dashboard. Each Hub aggregates session and task data into a centralized dashboard. Hub runs entirely on your own network.
+[Argus](https://github.com/Agent-Deployment-Co/argus) clients into one org-wide dashboard. Each Argus Hub aggregates session and task data into a centralized dashboard. Argus Hub runs entirely on your own network.
 
-Hub is free to self-host, including commercially, and source-available under the Functional
+Argus Hub is free to self-host, including commercially, and source-available under the Functional
 Source License (see [License](#license)), converting to MIT two years after each release.
 
 ## Quick start
@@ -15,11 +15,11 @@ export HUB_SECRET_KEY="$(openssl rand -base64 32)" # save this value
 npx @agentdeploymentco/argus-hub serve --port 4343
 ```
 
-`HUB_SECRET_KEY` is optional. Without it, Hub starts with a warning and disables API-key-based
+`HUB_SECRET_KEY` is optional. Without it, Argus Hub starts with a warning and disables API-key-based
 LLM providers. Set it in your deployment's secret manager to enable those providers; it encrypts
 task-provider API keys and must remain stable across restarts.
 
-On first startup, Hub creates `data/hub.db`, generates a sync API key and a random admin password, and prints them once:
+On first startup, Argus Hub creates `data/hub.db`, generates a sync API key and a random admin password, and prints them once:
 
 ```
 Admin password: 4f2c8a91b7e3d6502a1c9f48de07b3a5
@@ -35,7 +35,7 @@ across restarts; otherwise a fresh random password is generated each launch.
 
 ## Connecting clients
 
-On each developer's machine, point the client at Hub and store the API key in the OS secret
+On each developer's machine, point the client at Argus Hub and store the API key in the OS secret
 store (never in plaintext config):
 
 ```bash
@@ -55,13 +55,13 @@ directly in `argus.json` also still works, but it's a legacy path the client act
 users off of — `hub.key` is marked `secret: true`, and a one-time migration moves any plaintext
 key it finds out of `argus.json` and into the secret store. Prefer `secret set` above.
 
-With Hub configured, `argus sync` posts a JSON payload of resolved session rows to Hub
-instead of the hosted service. No `argus login` / OAuth flow is needed. Hub identifies each
+With Argus Hub configured, `argus sync` posts a JSON payload of resolved session rows to Argus Hub
+instead of the hosted service. No `argus login` / OAuth flow is needed. Argus Hub identifies each
 user from the client's latest identity signal — Claude/Codex OAuth email when present, falling
 back to `git.user.name` — and folds repeat clients from the same person into a single user
 (the underlying table is named `fingerprint`, but that's an implementation detail).
 
-The desktop app (macOS/Windows) offers the same connection under Settings → Hub URL + key, and
+The desktop app (macOS/Windows) offers the same connection under Settings → Argus Hub URL + key, and
 uploads on a schedule automatically. From the CLI, `argus run` also syncs on a built-in five-minute
 schedule; use `--sync-interval N` to change it or `--no-sync` to disable it and rely on manual
 `argus sync` calls.
@@ -70,7 +70,7 @@ schedule; use `--sync-interval N` to change it or `--no-sync` to disable it and 
 
 ## Configuration
 
-Hub reads config from `hub.json`, then environment variables, then CLI flags — highest
+Argus Hub reads config from `hub.json`, then environment variables, then CLI flags — highest
 precedence last.
 
 | CLI flag | Env var | Config key | Default | Description |
@@ -83,10 +83,10 @@ precedence last.
 
 `GET /healthz` always returns `200 ok` unauthenticated, for load balancer / orchestrator health checks.
 
-**Client compatibility:** Hub ingests client store schema versions v10–v23
+**Client compatibility:** Argus Hub ingests client store schema versions v10–v23
 (`HUB_MIN_CLIENT_SCHEMA_VERSION` / `HUB_MAX_CLIENT_SCHEMA_VERSION`). A client outside that range
-gets a `422` with an actionable message — update Hub if the client is newer than Hub supports, or
-run `argus index` to migrate if the client's store is older than Hub's minimum.
+gets a `422` with an actionable message — update Argus Hub if the client is newer than Argus Hub supports, or
+run `argus index` to migrate if the client's store is older than Argus Hub's minimum.
 
 Example `hub.json`:
 
@@ -98,14 +98,14 @@ Example `hub.json`:
 ```
 
 There is no `HUB_KEY` setting — API keys live in `hub.db` and are managed there. On first
-startup, if the `api_keys` table is empty, Hub generates a `hub-{UUID}` key linked to the
+startup, if the `api_keys` table is empty, Argus Hub generates a `hub-{UUID}` key linked to the
 Default org and prints it to stdout.
 
 ### Task LLM settings
 
 Administrators can open **Settings → Tasks** to select and configure one of these providers:
 Anthropic API, a host command, Google Gemini, OpenAI, or OpenRouter. The provider begins blank —
-Hub makes no implicit LLM call — and settings, along with encrypted API keys, are scoped to the
+Argus Hub makes no implicit LLM call — and settings, along with encrypted API keys, are scoped to the
 current organization. Provider environment variables such as `OPENAI_API_KEY` are not read.
 
 API keys entered in Settings are encrypted in SQLite with AES-256-GCM using `HUB_SECRET_KEY`.
@@ -113,9 +113,9 @@ Back that key up separately from `hub.db`: changing or losing it makes existing 
 unreadable, and recovery means restoring the original key or replacing every saved provider key.
 Generate one with `openssl rand -base64 32`.
 
-The **Command** provider runs the configured command directly on the Hub host, with the prompt
+The **Command** provider runs the configured command directly on the Argus Hub host, with the prompt
 on stdin and completion on stdout — administrator-controlled remote code execution. Enable it
-only when Hub administrators and the configured command are fully trusted.
+only when Argus Hub administrators and the configured command are fully trusted.
 
 ---
 
@@ -124,13 +124,13 @@ only when Hub administrators and the configured command are fully trusted.
 Keys are stored in `hub.db` **hashed** (`key_hash`, via `hashApiKey()`) — the printed key is the
 only time the plaintext value exists anywhere.
 
-To rotate a key: delete the old row from `api_keys` directly in `hub.db`, then restart Hub. A
+To rotate a key: delete the old row from `api_keys` directly in `hub.db`, then restart Argus Hub. A
 new key will be generated and printed on startup if the table is now empty. Disabling a key
-(below) instead of deleting it does **not** trigger a new key on restart — Hub only mints one
+(below) instead of deleting it does **not** trigger a new key on restart — Argus Hub only mints one
 when the `api_keys` table has no rows at all.
 
 To disable a key without deleting it (e.g. while rotating), set `is_enabled = 0` in `hub.db`.
-Hub rejects disabled keys with `401` before reading the request body.
+Argus Hub rejects disabled keys with `401` before reading the request body.
 
 ---
 
@@ -147,7 +147,7 @@ docker run -d --name argus-hub -p 4343:4343 -v argus-hub-data:/data \
 docker logs argus-hub 2>&1 | grep -E "Hub API key|Admin password"
 ```
 
-To run Hub directly on a host instead, see **[DEPLOYMENT.md](DEPLOYMENT.md)** for systemd
+To run Argus Hub directly on a host instead, see **[DEPLOYMENT.md](DEPLOYMENT.md)** for systemd
 (Linux) and launchd (macOS) unit files.
 
 ---
@@ -189,9 +189,9 @@ Tasks tab.
 
 ---
 
-## Query the Hub from an agent (MCP)
+## Query Argus Hub from an agent (MCP)
 
-Hub exposes a small [MCP](https://modelcontextprotocol.io) surface at `POST /mcp` — the same
+Argus Hub exposes a small [MCP](https://modelcontextprotocol.io) surface at `POST /mcp` — the same
 stateless Streamable HTTP transport as any other MCP server — so an agent can query an org's
 pooled Argus data directly instead of scraping the dashboard, and manage hub labels on tasks.
 
@@ -225,7 +225,7 @@ takes `name` (required, unique per org) and an optional `description`; `set_task
 `labelId`, `clientId`/`sessionId`/`taskSeq` (from a `query_tasks` row), and `applied` (default
 `true`).
 
-**Auth** reuses the Hub's existing admin password — no new credential to issue or rotate:
+**Auth** reuses Argus Hub's existing admin password — no new credential to issue or rotate:
 
 ```
 Authorization: Bearer <admin password>
@@ -243,14 +243,14 @@ and common query recipes — lives at `.claude/skills/argus-hub-query/` in this 
 
 Treat the admin password as a shared read credential for the org's pooled data once it's
 handed out this way — anyone holding it can query everyone's activity, tasks, and tool usage. The
-route is open (no auth required) only when Hub itself is run without `ADMIN_PASSWORD` configured,
+route is open (no auth required) only when Argus Hub itself is run without `ADMIN_PASSWORD` configured,
 matching how `/api/*` behaves in that case.
 
 ---
 
 ## Export to Snowflake
 
-`argus-hub export snowflake` creates a consistent Snowflake-ready snapshot of the live Hub
+`argus-hub export snowflake` creates a consistent Snowflake-ready snapshot of the live Argus Hub
 database. Add `--load` to upload it with the built-in Snowflake connector, or use the generated
 JSONL files and `load.sql` for a manual or externally scheduled load.
 
@@ -279,14 +279,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup details and the full command li
 ## Security
 
 - **Two access layers.** API keys gate `/api/sync` uploads; the admin password gates the
-  dashboard (via session cookie) and the `/mcp` tools (via bearer token). Put Hub behind a VPN or
+  dashboard (via session cookie) and the `/mcp` tools (via bearer token). Put Argus Hub behind a VPN or
   reverse proxy with TLS — do not expose it directly to the internet.
 - **`hub.db` is sensitive.** It contains the full session data of every syncing user. Restrict
-  filesystem access (Hub chmods it to `0600` on creation) and include it in backups.
+  filesystem access (Argus Hub chmods it to `0600` on creation) and include it in backups.
 - **Back up `HUB_SECRET_KEY` separately.** It is required to decrypt task-provider API keys in
   `hub.db`; losing or changing it requires replacing those keys.
-- **The Command provider runs code on the Hub host.** Only trusted administrators should be able
-  to configure it, and the Hub admin surface must not be exposed to untrusted users.
+- **The Command provider runs code on the Argus Hub host.** Only trusted administrators should be able
+  to configure it, and the Argus Hub admin surface must not be exposed to untrusted users.
 - Uploaded payloads are resolved usage rows, session rows (including title/summary), tasks,
   interaction metadata, tool/MCP invocations, and labels — merged directly into `hub.db`. The
   client's raw `argus.db` never leaves the developer's machine. **Not** sent: prompt/response
@@ -299,8 +299,8 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 ## Architecture
 
 ```
-argus clients  ──POST /api/sync/unknown-sessions──►  Hub (which session IDs are missing?)
-(argus sync)   ──POST /api/sync───────────────────►  Hub ingest  ──►  hub.db
+argus clients  ──POST /api/sync/unknown-sessions──►  Argus Hub (which session IDs are missing?)
+(argus sync)   ──POST /api/sync───────────────────►  Argus Hub ingest  ──►  hub.db
                   JSON {schemaVersion,                resolved_* + org_id + user_id
                   rows, fingerprint}                  (auto-mapped from OAuth email)
 
@@ -308,12 +308,12 @@ hub.db  ──►  GET /api/activity, /api/tasks, /api/tasks/report,
          ──►      /api/snapshot, /api/sessions, /api/session/:id,
          ──►      /api/users, /api/user/:id, /api/clients,
          ──►      /api/groups*, /api/export, /healthz
-         ──►  POST /mcp  (read-only MCP surface — see "Query the Hub from an agent")
+         ──►  POST /mcp  (read-only MCP surface — see "Query Argus Hub from an agent")
          ──►  React SPA  (Activity · Tasks · Tools · Team · Export · per-user filter)
 ```
 
-Hub supports multiple orgs via the `organizations` table — each API key is scoped to one org.
-For strict isolation between unrelated tenants, run separate Hub instances.
+Argus Hub supports multiple orgs via the `organizations` table — each API key is scoped to one org.
+For strict isolation between unrelated tenants, run separate Argus Hub instances.
 
 ---
 
