@@ -17,6 +17,7 @@
     "demo": "bun run scripts/demo.ts",
     "dev:web": "vite --config web/vite.config.ts",
     "build:web": "vite build --config web/vite.config.ts",
+    "screenshot": "bun scripts/screenshot.ts",
     "build": "bun run build:web && bun build src/cli.ts --target=node --external sqlite3 --external snowflake-sdk --outfile=dist/cli.js && tail -n +2 dist/cli.js > dist/cli.temp && echo '#!/usr/bin/env node' | cat - dist/cli.temp > dist/cli.js && rm dist/cli.temp && chmod +x dist/cli.js",
     "bump-version": "bun run scripts/bump-version.ts",
     "get-version": "bun run scripts/get-version.ts"
@@ -47,6 +48,7 @@
     "react": "^19.2.7",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "^19.2.7",
+    "sharp": "^0.35.3",
     "typescript": "^5.9.3",
     "vite": "^8.0.16"
   }
