@@ -105,10 +105,12 @@ Default org and prints it to stdout.
 
 ### Task LLM settings
 
-Administrators can open **Settings → Tasks** to select and configure one of these providers:
-Anthropic API, a host command, Google Gemini, OpenAI, or OpenRouter. The provider begins blank —
-Argus Hub makes no implicit LLM call — and settings, along with encrypted API keys, are scoped to the
-current organization. Provider environment variables such as `OPENAI_API_KEY` are not read.
+Administrators can open **Settings → General** to select and configure one of these providers:
+Anthropic API, a host command, Google Gemini, OpenAI, or OpenRouter. This connection is reserved for
+future organization task-labeling features — nothing in Argus Hub calls it yet beyond the Settings
+page's own "Test connection" check. The provider begins blank, and settings, along with encrypted
+API keys, are scoped to the current organization. Provider environment variables such as
+`OPENAI_API_KEY` are not read.
 
 API keys entered in Settings are encrypted in SQLite with AES-256-GCM using `HUB_SECRET_KEY`.
 Back that key up separately from `hub.db`: changing or losing it makes existing provider keys
