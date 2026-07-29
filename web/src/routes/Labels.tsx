@@ -1,5 +1,5 @@
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Modal } from "../components/Modal";
 import {
   useCreateLabel, useDeleteLabel, useLabelPreview, useLabels, useUpdateLabel,
@@ -13,6 +13,7 @@ export function Labels() {
   const labelsQuery = useLabels();
   const deleteLabel = useDeleteLabel();
   const [creating, setCreating] = useState(false);
+  const [creatingManual, setCreatingManual] = useState(false);
   const [editing, setEditing] = useState<HubLabel | null>(null);
   const [deleting, setDeleting] = useState<HubLabel | null>(null);
   const [reviewing, setReviewing] = useState<ReviewState | null>(null);
@@ -81,21 +82,26 @@ export function Labels() {
       )}
 
       {creating && (
-        <CreateLabelDialog
+        <ChooseLabelTypeDialog
           onClose={() => setCreating(false)}
-          onReview={(name, description) => {
+          onManual={() => {
             setCreating(false);
-            setReviewing({ mode: "create", name, description, tasks: null });
+            setCreatingManual(true);
+          }}
+          onAutomatic={() => {
+            setCreating(false);
+            setReviewing({ mode: "create", name: "", description: "" });
           }}
         />
       )}
+      {creatingManual && <ManualLabelDialog onClose={() => setCreatingManual(false)} />}
       {editing && (
         <EditLabelDialog
           label={editing}
           onClose={() => setEditing(null)}
           onReview={(name, description) => {
             setEditing(null);
-            setReviewing({ mode: "edit", labelId: editing.labelId, name, description, tasks: null });
+            setReviewing({ mode: "edit", labelId: editing.labelId, name, description });
           }}
         />
       )}
@@ -112,35 +118,48 @@ export function Labels() {
   );
 }
 
-// ---- Create / Edit ----------------------------------------------------------------------
+// ---- Create ------------------------------------------------------------------------------
 //
-// Both dialogs share the same fields (name, description, "Apply automatically" toggle). With
-// the toggle off, submitting saves immediately. With it on, the submit button reads "Review"
-// and hands off to the full-page ReviewLabelPage instead of saving directly — see AUTO_LABEL_PLAN.md.
+// "New label" first asks manual vs. automatic. Manual goes to a plain name/description dialog
+// that saves immediately. Automatic hands off straight to the full-page ReviewLabelPage, which
+// collects name/description itself and drives the classifier — see AUTO_LABEL_PLAN.md.
 
-function CreateLabelDialog({
-  onClose, onReview,
+function ChooseLabelTypeDialog({
+  onClose, onManual, onAutomatic,
 }: {
   onClose: () => void;
-  onReview: (name: string, description: string) => void;
+  onManual: () => void;
+  onAutomatic: () => void;
 }) {
+  return (
+    <Modal title="New label" onClose={onClose} size="wide">
+      <div className="label-type-cards">
+        <button type="button" className="label-type-card" onClick={onManual}>
+          <h3>Manual label</h3>
+          <p>You apply it yourself, task by task, from the Tasks page.</p>
+        </button>
+        <button type="button" className="label-type-card" onClick={onAutomatic}>
+          <h3>Automatic label</h3>
+          <p>An LLM classifies tasks for you. You review its judgment before anything is saved.</p>
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function ManualLabelDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [autoApply, setAutoApply] = useState(false);
   const createLabel = useCreateLabel();
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    if (autoApply) {
-      onReview(name.trim(), description.trim());
-      return;
-    }
     createLabel.mutate({ name: name.trim(), description: description.trim() }, { onSuccess: onClose });
   };
 
   return (
-    <Modal title="New label" onClose={onClose}>
+    <Modal title="New manual label" onClose={onClose}>
       <form className="modal-form" onSubmit={onSubmit}>
         <label className="modal-field">
           <span>Name</span>
@@ -158,22 +177,23 @@ function CreateLabelDialog({
             className="filter-input filter-textarea"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="What this label means. A few example tasks helps the classifier if you turn on Apply automatically below."
+            placeholder="What this label means."
             rows={3}
           />
         </label>
-        <AutoApplyToggle checked={autoApply} onChange={setAutoApply} />
         {createLabel.isError && <p className="modal-error">{(createLabel.error as Error).message}</p>}
         <div className="modal-actions">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn-primary" disabled={!name.trim() || createLabel.isPending}>
-            {createLabel.isPending ? "Creating…" : autoApply ? "Review" : "Create label"}
+            {createLabel.isPending ? "Saving…" : "Save"}
           </button>
         </div>
       </form>
     </Modal>
   );
 }
+
+// ---- Edit ----------------------------------------------------------------------------------
 
 function EditLabelDialog({
   label, onClose, onReview,
@@ -258,30 +278,16 @@ interface ReviewState {
   labelId?: string;
   name: string;
   description: string;
-  tasks: LabelPreviewTask[] | null;
 }
 
 function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () => void }) {
   const preview = useLabelPreview();
   const createLabel = useCreateLabel();
   const updateLabel = useUpdateLabel();
-  const [tasks, setTasks] = useState<LabelPreviewTask[] | null>(state.tasks);
+  const [name, setName] = useState(state.name);
+  const [description, setDescription] = useState(state.description);
+  const [tasks, setTasks] = useState<LabelPreviewTask[] | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
-  const { mutate: runPreview } = preview;
-
-  useEffect(() => {
-    runPreview(
-      { name: state.name, description: state.description },
-      {
-        onSuccess: (result) => {
-          setTasks(result);
-          setChecked(new Set(result.filter((t) => t.matched).map(taskKey)));
-        },
-      },
-    );
-    // Runs once when the wizard opens for this name/description — re-running on every
-    // keystroke isn't wanted, and the dialog is remounted fresh each time it's opened anyway.
-  }, []);
 
   const toggle = (key: string) => {
     setChecked((prev) => {
@@ -294,6 +300,19 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
   const confirming = createLabel.isPending || updateLabel.isPending;
   const confirmError = (createLabel.error ?? updateLabel.error) as Error | null;
 
+  const onReview = () => {
+    if (!name.trim()) return;
+    preview.mutate(
+      { name: name.trim(), description: description.trim() },
+      {
+        onSuccess: (result) => {
+          setTasks(result);
+          setChecked(new Set(result.filter((t) => t.matched).map(taskKey)));
+        },
+      },
+    );
+  };
+
   const onConfirm = () => {
     const taskRefs: TaskRef[] = (tasks ?? [])
       .filter((t) => checked.has(taskKey(t)))
@@ -301,12 +320,12 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
 
     if (state.mode === "create") {
       createLabel.mutate(
-        { name: state.name, description: state.description, autoApply: true, taskRefs },
+        { name: name.trim(), description: description.trim(), autoApply: true, taskRefs },
         { onSuccess: onClose },
       );
     } else {
       updateLabel.mutate(
-        { labelId: state.labelId!, name: state.name, description: state.description, autoApply: true, taskRefs },
+        { labelId: state.labelId!, name: name.trim(), description: description.trim(), autoApply: true, taskRefs },
         { onSuccess: onClose },
       );
     }
@@ -315,24 +334,45 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
   return (
     <>
       <div className="page-head">
-        <h1>Review "{state.name}"</h1>
+        <h1>{state.mode === "create" ? "New automatic label" : `Edit "${state.name}"`}</h1>
         <div className="modal-actions">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={!tasks || confirming}
-            onClick={onConfirm}
-          >
-            {confirming ? "Saving…" : "Confirm"}
-          </button>
+          {tasks ? (
+            <button type="button" className="btn-primary" disabled={confirming} onClick={onConfirm}>
+              {confirming ? "Saving…" : "Confirm"}
+            </button>
+          ) : (
+            <button type="button" className="btn-primary" disabled={!name.trim() || preview.isPending} onClick={onReview}>
+              {preview.isPending ? "Reviewing…" : "Review"}
+            </button>
+          )}
         </div>
       </div>
 
-      {preview.isPending && <p className="modal-copy">Classifying the last 10 tasks…</p>}
-      {preview.isError && (
-        <p className="modal-error">{(preview.error as Error).message}</p>
-      )}
+      <div className="modal-form review-fields">
+        <label className="modal-field">
+          <span>Name</span>
+          <input
+            className="filter-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Needs review"
+            autoFocus
+          />
+        </label>
+        <label className="modal-field">
+          <span>Description (optional)</span>
+          <textarea
+            className="filter-input filter-textarea"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="What this label means. A few example tasks helps the classifier."
+            rows={3}
+          />
+        </label>
+      </div>
+
+      {preview.isError && <p className="modal-error">{(preview.error as Error).message}</p>}
       {confirmError && <p className="modal-error">{confirmError.message}</p>}
       {tasks && (
         <>
