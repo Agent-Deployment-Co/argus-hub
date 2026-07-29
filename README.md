@@ -67,7 +67,11 @@ Argus Hub's dashboard runs in your browser at `http://hub.internal:4343`, the sa
 - **Team** is a per-user summary — sessions, total tokens, estimated cost, last-sync time — with
   optional grouping for reporting.
 - **Labels** manages hub-level task labels — distinct from any labels an Argus client applies
-  itself — and applies them to tasks from the Tasks tab.
+  itself — and applies them to tasks from the Tasks tab. A label can also be set to "Apply
+  automatically": given a name and description, an LLM (using the org's configured provider)
+  classifies the org's most recent tasks and a review wizard lets you confirm its judgment
+  before anything is saved. Auto-apply currently covers only that reviewed set — it doesn't yet
+  backfill a label across full task history or reclassify new tasks as they arrive.
 - **[Export](docs/export.md)** downloads the full dataset as a Snowflake-ready zip.
 - **[MCP](docs/MCP.md)** lets an agent query pooled usage data and manage task labels directly.
 
