@@ -19,6 +19,10 @@ export function Labels() {
 
   const labels = labelsQuery.data ?? [];
 
+  if (reviewing) {
+    return <ReviewLabelPage state={reviewing} onClose={() => setReviewing(null)} />;
+  }
+
   return (
     <>
       <div className="page-head">
@@ -95,12 +99,6 @@ export function Labels() {
           }}
         />
       )}
-      {reviewing && (
-        <ReviewLabelDialog
-          state={reviewing}
-          onClose={() => setReviewing(null)}
-        />
-      )}
       {deleting && (
         <DeleteLabelDialog
           label={deleting}
@@ -118,7 +116,7 @@ export function Labels() {
 //
 // Both dialogs share the same fields (name, description, "Apply automatically" toggle). With
 // the toggle off, submitting saves immediately. With it on, the submit button reads "Review"
-// and hands off to ReviewLabelDialog instead of saving directly — see AUTO_LABEL_PLAN.md.
+// and hands off to the full-page ReviewLabelPage instead of saving directly — see AUTO_LABEL_PLAN.md.
 
 function CreateLabelDialog({
   onClose, onReview,
@@ -263,7 +261,7 @@ interface ReviewState {
   tasks: LabelPreviewTask[] | null;
 }
 
-function ReviewLabelDialog({ state, onClose }: { state: ReviewState; onClose: () => void }) {
+function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () => void }) {
   const preview = useLabelPreview();
   const createLabel = useCreateLabel();
   const updateLabel = useUpdateLabel();
@@ -315,39 +313,9 @@ function ReviewLabelDialog({ state, onClose }: { state: ReviewState; onClose: ()
   };
 
   return (
-    <Modal title={`Review "${state.name}"`} onClose={onClose} size="wide">
-      <div className="modal-form">
-        {preview.isPending && <p className="modal-copy">Classifying the last 10 tasks…</p>}
-        {preview.isError && (
-          <p className="modal-error">{(preview.error as Error).message}</p>
-        )}
-        {tasks && (
-          <>
-            <p className="modal-copy">
-              The classifier's judgment on your org's last {tasks.length} tasks. Uncheck any it
-              got wrong, or check ones it missed — only checked tasks get the label.
-            </p>
-            <ul className="review-task-list">
-              {tasks.map((task) => {
-                const key = taskKey(task);
-                return (
-                  <li key={key} className="review-task-row">
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={checked.has(key)}
-                        onChange={() => toggle(key)}
-                      />
-                      <span className="review-task-description">{task.description}</span>
-                    </label>
-                    {task.reasoning && <p className="review-task-reasoning">{task.reasoning}</p>}
-                  </li>
-                );
-              })}
-            </ul>
-          </>
-        )}
-        {confirmError && <p className="modal-error">{confirmError.message}</p>}
+    <>
+      <div className="page-head">
+        <h1>Review "{state.name}"</h1>
         <div className="modal-actions">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
           <button
@@ -360,7 +328,39 @@ function ReviewLabelDialog({ state, onClose }: { state: ReviewState; onClose: ()
           </button>
         </div>
       </div>
-    </Modal>
+
+      {preview.isPending && <p className="modal-copy">Classifying the last 10 tasks…</p>}
+      {preview.isError && (
+        <p className="modal-error">{(preview.error as Error).message}</p>
+      )}
+      {confirmError && <p className="modal-error">{confirmError.message}</p>}
+      {tasks && (
+        <>
+          <p className="modal-copy">
+            The classifier's judgment on your org's last {tasks.length} tasks. Uncheck any it
+            got wrong, or check ones it missed — only checked tasks get the label.
+          </p>
+          <ul className="review-task-list review-task-list-page">
+            {tasks.map((task) => {
+              const key = taskKey(task);
+              return (
+                <li key={key} className="review-task-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={checked.has(key)}
+                      onChange={() => toggle(key)}
+                    />
+                    <span className="review-task-description">{task.description}</span>
+                  </label>
+                  {task.reasoning && <p className="review-task-reasoning">{task.reasoning}</p>}
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+    </>
   );
 }
 
