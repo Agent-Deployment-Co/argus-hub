@@ -973,6 +973,161 @@ describe("Hub labels", () => {
       await env.store.close();
     }
   });
+
+  test("POST /api/labels with autoApply + taskRefs creates the label auto-applied to those tasks", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncWithTask(env, "alice@example.com", "auto-sess", { description: "Fix the login bug" });
+      const clientId = env.clientFor("alice@example.com");
+
+      const create = await app.request("/api/labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Bug fix", autoApply: true,
+          taskRefs: [{ clientId, sessionId: "auto-sess", taskSeq: 0 }],
+        }),
+      });
+      expect(create.status).toBe(201);
+      const created = (await create.json()) as { label: { labelId: string; autoApply: boolean } };
+      expect(created.label.autoApply).toBe(true);
+
+      const tasks = (await (await app.request("/api/tasks")).json()) as {
+        rows: Array<{ labels: Array<{ labelId: string; name: string }> }>;
+      };
+      expect(tasks.rows[0]!.labels).toEqual([{ labelId: created.label.labelId, name: "Bug fix" }]);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("POST /api/labels rejects a malformed taskRefs entry with 400", async () => {
+    const { store } = await openTestEnv();
+    const app = createHubApp(store);
+    try {
+      const res = await app.request("/api/labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Bug fix", taskRefs: [{ clientId: "c1" }] }),
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("PUT /api/labels/:labelId renames, redescribes, and flips autoApply", async () => {
+    const { store } = await openTestEnv();
+    const app = createHubApp(store);
+    try {
+      const create = await app.request("/api/labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Bug fix" }),
+      });
+      const { label } = (await create.json()) as { label: { labelId: string } };
+
+      const update = await app.request(`/api/labels/${label.labelId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Bug Fix", description: "Fixing a reported defect", autoApply: true }),
+      });
+      expect(update.status).toBe(200);
+      const updated = (await update.json()) as { label: { name: string; description: string | null; autoApply: boolean } };
+      expect(updated.label).toMatchObject({
+        name: "Bug Fix", description: "Fixing a reported defect", autoApply: true,
+      });
+
+      const list = (await (await app.request("/api/labels")).json()) as { labels: Array<{ name: string }> };
+      expect(list.labels.map((l) => l.name)).toEqual(["Bug Fix"]);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("PUT /api/labels/:labelId returns 404 for an unknown labelId", async () => {
+    const { store } = await openTestEnv();
+    const app = createHubApp(store);
+    try {
+      const res = await app.request("/api/labels/label-nope", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "New name" }),
+      });
+      expect(res.status).toBe(404);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("POST /api/labels/preview classifies the org's most recent tasks via the configured LLM provider", async () => {
+    const env = await openTestEnv();
+    const orgId = (await env.store.getDefaultOrgId())!;
+    await env.store.setTaskLlmProvider(orgId, "command", 1);
+    await env.store.setTaskLlmProviderField(orgId, "command", "command", "fake-classifier", 1);
+
+    await syncWithTask(env, "alice@example.com", "preview-sess-1", { description: "Fix the login bug" });
+    await syncWithTask(env, "alice@example.com", "preview-sess-2", { description: "Write the onboarding docs" });
+
+    const app = createHubApp(env.store, undefined, {
+      executeCommand: async (_command, input) => (
+        input.includes("Task: Fix the login bug")
+          ? { ok: true, text: "yes: fixes a reported bug" }
+          : { ok: true, text: "no: not a bug fix" }
+      ),
+    });
+    try {
+      const res = await app.request("/api/labels/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Bug fix", description: "Diagnosing and correcting a defect" }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        tasks: Array<{ description: string; matched: boolean; reasoning?: string }>;
+      };
+      expect(body.tasks).toHaveLength(2);
+      const bug = body.tasks.find((t) => t.description === "Fix the login bug");
+      const docs = body.tasks.find((t) => t.description === "Write the onboarding docs");
+      expect(bug).toMatchObject({ matched: true, reasoning: "fixes a reported bug" });
+      expect(docs).toMatchObject({ matched: false, reasoning: "not a bug fix" });
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("POST /api/labels/preview fails when no LLM provider is configured", async () => {
+    const { store } = await openTestEnv();
+    const app = createHubApp(store);
+    try {
+      const res = await app.request("/api/labels/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Bug fix" }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("Choose and save an LLM provider");
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("POST /api/labels/preview requires a name", async () => {
+    const { store } = await openTestEnv();
+    const app = createHubApp(store);
+    try {
+      const res = await app.request("/api/labels/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: "no name given" }),
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      await store.close();
+    }
+  });
 });
 
 // ---- GET /api/activity ------------------------------------------------------------------

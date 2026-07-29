@@ -8,6 +8,7 @@ import {
   DuplicateLabelNameError,
   GroupNotFoundError,
   LabelNotFoundError,
+  taskLabelKey,
   type HubStore,
 } from "../store/hub-store.ts";
 import { syncHandler, unknownSessionsHandler } from "./sync.ts";
@@ -19,7 +20,8 @@ import { openSnowflakeZipStream } from "../export/snowflake.ts";
 import { computeRecommendations } from "./recommendations.ts";
 import { buildSessionList, buildSessionDetail, type SessionListParams } from "./session-list.ts";
 import { buildTaskList, type TaskListParams } from "./task-list.ts";
-import { attachLabels, parseTaskRef } from "./task-labels.ts";
+import { attachLabels, parseTaskRef, parseTaskRefs } from "./task-labels.ts";
+import { classifyTasksForLabel } from "../llm/classify-label.ts";
 import type { SessionSort } from "./session-list.ts";
 import {
   parseResolvedQuery as parseResolvedQueryFrom,
@@ -58,6 +60,12 @@ const parseUserScope = (c: Context) => parseUserScopeFrom((k) => c.req.query(k))
 const parseGroupScope = (c: Context) => parseGroupScopeFrom((k) => c.req.query(k));
 const parseGroupIdScope = (c: Context) => parseGroupIdScopeFrom((k) => c.req.query(k));
 const parseOutcomeFilter = (c: Context) => parseOutcomeFilterFrom((k) => c.req.query(k));
+
+// How many of the org's most recent tasks the auto-apply review wizard previews against.
+const PREVIEW_TASK_LIMIT = 10;
+// Classifying up to PREVIEW_TASK_LIMIT tasks (chunked, not all at once) can take longer than a
+// single connection-test call — budget generously rather than tuning after the fact.
+const LABEL_PREVIEW_TIMEOUT_MS = 40_000;
 
 function requestHost(c: Context): string | undefined {
   return c.req.header("Host") ?? new URL(c.req.url).host;
@@ -418,15 +426,56 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
 
-    const body = await c.req.json().catch(() => null) as { name?: unknown; description?: unknown } | null;
+    const body = await c.req.json().catch(() => null) as {
+      name?: unknown; description?: unknown; autoApply?: unknown; taskRefs?: unknown;
+    } | null;
     const name = typeof body?.name === "string" ? body.name.trim() : "";
     if (!name) return c.json({ error: 'Missing required "name".' }, 400);
     const description = typeof body?.description === "string" && body.description.trim() ? body.description.trim() : null;
+    const autoApply = body?.autoApply === true;
+    const taskRefs = parseTaskRefs(body?.taskRefs);
+    if (taskRefs === null) return c.json({ error: 'Invalid "taskRefs".' }, 400);
 
     try {
-      const label = await store.createLabel(orgId, name, description);
+      const label = await store.createLabel(orgId, name, description, autoApply);
+      for (const ref of taskRefs) await store.setTaskLabel(orgId, ref, label.labelId, true);
+      // Reflects the just-applied set; GET /api/labels is the source of truth for later reads.
+      if (taskRefs.length) label.taskCount = taskRefs.length;
       return c.json({ label }, 201);
     } catch (err) {
+      if (err instanceof DuplicateLabelNameError) return c.json({ error: err.message }, 409);
+      throw err;
+    }
+  });
+
+  app.put("/api/labels/:labelId", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+    const labelId = c.req.param("labelId").trim();
+
+    const body = await c.req.json().catch(() => null) as {
+      name?: unknown; description?: unknown; autoApply?: unknown; taskRefs?: unknown;
+    } | null;
+    const fields: { name?: string; description?: string | null; autoApply?: boolean } = {};
+    if (typeof body?.name === "string") {
+      const name = body.name.trim();
+      if (!name) return c.json({ error: '"name" cannot be blank.' }, 400);
+      fields.name = name;
+    }
+    if (body && Object.hasOwn(body, "description")) {
+      fields.description = typeof body.description === "string" && body.description.trim()
+        ? body.description.trim() : null;
+    }
+    if (typeof body?.autoApply === "boolean") fields.autoApply = body.autoApply;
+    const taskRefs = parseTaskRefs(body?.taskRefs);
+    if (taskRefs === null) return c.json({ error: 'Invalid "taskRefs".' }, 400);
+
+    try {
+      const label = await store.updateLabel(orgId, labelId, fields);
+      for (const ref of taskRefs) await store.setTaskLabel(orgId, ref, label.labelId, true);
+      return c.json({ label });
+    } catch (err) {
+      if (err instanceof LabelNotFoundError) return c.json({ error: err.message }, 404);
       if (err instanceof DuplicateLabelNameError) return c.json({ error: err.message }, 409);
       throw err;
     }
@@ -440,6 +489,58 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     if (!(await store.labelExists(orgId, labelId))) return c.json({ error: "Label not found." }, 404);
     await store.deleteLabel(orgId, labelId);
     return c.json({ ok: true });
+  });
+
+  // Preview which of the org's last PREVIEW_TASK_LIMIT tasks an LLM would match against a
+  // candidate label name/description — no DB writes, safe to call repeatedly while iterating
+  // on a description. Backs the "Apply automatically" review wizard.
+  app.post("/api/labels/preview", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+
+    const body = await c.req.json().catch(() => null) as { name?: unknown; description?: unknown } | null;
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    if (!name) return c.json({ error: 'Missing required "name".' }, 400);
+    const description = typeof body?.description === "string" && body.description.trim() ? body.description.trim() : null;
+
+    let config;
+    try {
+      config = await resolveTaskLlmConfig(store, orgId, options.secretCipher);
+    } catch (error) {
+      if (error instanceof LlmConfigurationError) return c.json({ error: error.message }, error.status);
+      throw error;
+    }
+
+    const taskRows = await store.readTaskFacts({ orgId }, {});
+    const preview = buildTaskList(taskRows, { limit: PREVIEW_TASK_LIMIT, offset: 0 });
+    const labelsByKey = await store.listLabelsForTasks(
+      orgId,
+      preview.rows.map((r) => ({ clientId: r.clientId, sessionId: r.sessionId, taskSeq: r.taskSeq })),
+    );
+    attachLabels(preview.rows, labelsByKey);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), options.connectionTimeoutMs ?? LABEL_PREVIEW_TIMEOUT_MS);
+    try {
+      const classifications = await classifyTasksForLabel(
+        { name, description },
+        preview.rows.map((r) => ({
+          ref: { clientId: r.clientId, sessionId: r.sessionId, taskSeq: r.taskSeq },
+          description: r.description,
+        })),
+        config,
+        { fetch: options.fetch, executeCommand: options.executeCommand },
+        controller.signal,
+      );
+      const byKey = new Map(classifications.map((cl) => [taskLabelKey(cl.ref), cl]));
+      const tasks = preview.rows.map((r) => {
+        const classification = byKey.get(taskLabelKey(r));
+        return { ...r, matched: classification?.matched ?? false, reasoning: classification?.reasoning };
+      });
+      return c.json({ tasks });
+    } finally {
+      clearTimeout(timeout);
+    }
   });
 
   // Apply or remove one label on one task.

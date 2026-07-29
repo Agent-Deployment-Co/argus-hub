@@ -32,3 +32,19 @@ export function parseTaskRef(input: TaskRefInput): TaskLabelRef | null {
   }
   return { clientId: input.clientId, sessionId: input.sessionId, taskSeq: input.taskSeq };
 }
+
+/** Validate a wire-provided array of task refs (the auto-apply review wizard's confirmed set).
+ *  `undefined`/absent means "no refs" (`[]`), not invalid. Returns null if `input` is present
+ *  but not an array, or any element fails `parseTaskRef`. */
+export function parseTaskRefs(input: unknown): TaskLabelRef[] | null {
+  if (input === undefined) return [];
+  if (!Array.isArray(input)) return null;
+  const refs: TaskLabelRef[] = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") return null;
+    const ref = parseTaskRef(item as TaskRefInput);
+    if (!ref) return null;
+    refs.push(ref);
+  }
+  return refs;
+}
