@@ -398,7 +398,6 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
                 <tr>
                   <th></th>
                   <th>Task</th>
-                  <th>Match</th>
                   <th>Reasoning</th>
                 </tr>
               </thead>
@@ -408,23 +407,17 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
                   return (
                     <tr key={key}>
                       <td>
-                        <input
-                          type="checkbox"
-                          checked={checked.has(key)}
-                          disabled={task.pending}
-                          onChange={() => toggle(key)}
-                        />
-                      </td>
-                      <td className="review-task-description">{task.description}</td>
-                      <td>
                         {task.pending ? (
                           <LoaderCircle size={14} className="spin" aria-label="Classifying" />
                         ) : (
-                          <span className={task.matched ? "review-task-match-yes" : "review-task-match-no"}>
-                            {task.matched ? "Yes" : "No"}
-                          </span>
+                          <input
+                            type="checkbox"
+                            checked={checked.has(key)}
+                            onChange={() => toggle(key)}
+                          />
                         )}
                       </td>
+                      <td className="review-task-description">{task.description}</td>
                       <td className="review-task-reasoning">{task.pending ? "" : (task.reasoning ?? "—")}</td>
                     </tr>
                   );
