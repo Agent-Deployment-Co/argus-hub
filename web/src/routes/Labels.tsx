@@ -60,7 +60,18 @@ export function Labels() {
                     <button
                       type="button"
                       className="icon-btn"
-                      onClick={() => setEditing(label)}
+                      onClick={() => {
+                        if (label.autoApply) {
+                          setReviewing({
+                            mode: "edit",
+                            labelId: label.labelId,
+                            name: label.name,
+                            description: label.description ?? "",
+                          });
+                        } else {
+                          setEditing(label);
+                        }
+                      }}
                       aria-label={`Edit ${label.name}`}
                     >
                       <Pencil size={14} strokeWidth={2} aria-hidden />
@@ -358,7 +369,7 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
             disabled={hasRun ? !isDirty || preview.isPending : !name.trim() || preview.isPending}
             onClick={runPreview}
           >
-            {preview.isPending ? "Running label preview…" : hasRun ? "Rerun label preview" : "Run label preview"}
+            {preview.isPending ? "Running preview…" : hasRun ? "Rerun Preview" : "Preview"}
           </button>
           {tasks && (
             <button type="button" className="btn-primary" disabled={confirming || preview.isPending} onClick={onConfirm}>
