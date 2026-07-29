@@ -1,0 +1,81 @@
+{
+  "labels": [
+    {
+      "name": "Code Review",
+      "description": "Running or acting on a code review pass, e.g. \"Run code review on PR\", \"Fix code review findings\", \"Code review at medium effort with inline comments\"."
+    },
+    {
+      "name": "Bug Fix",
+      "description": "Diagnosing and correcting a specific reported defect, e.g. \"Fix is_hidden flag materialization bug\", \"Fix bulk selection bug where cmd-click doesn't trigger overlay\", \"Investigate and fix cold first launch onboarding race condition\"."
+    },
+    {
+      "name": "Planning & Design Docs",
+      "description": "Creating or refining a spec/plan document ahead of implementation, e.g. \"Create SCHEMA_DOC.md\", \"Write BULK_MODE.md with design decisions\", \"Create MCP_PLAN.md\", \"Add checklist to PLAN.md\"."
+    },
+    {
+      "name": "Feature Implementation",
+      "description": "Building new functionality from a plan or checklist, e.g. \"Implement user group movement feature\", \"Implement bulk session selection checklist\", \"Add search functionality to /sessions page\", \"Implement REST API routes for group management\"."
+    },
+    {
+      "name": "Git/PR Workflow",
+      "description": "Mechanical repo hygiene such as committing, pushing, and managing pull requests, e.g. \"Commit the changes\", \"Create pull request\", \"Update PR description to reflect actual changes\", \"Squash commits and update PR description\"."
+    },
+    {
+      "name": "GitHub Issue Management",
+      "description": "Reading, creating, or refining GitHub issues, e.g. \"Create GitHub issue for user group functionalities\", \"Read GitHub issue #235 and create CLEANUP_PLAN.md\", \"Improve GitHub issue #247 title and description with problem/solution breakdown\"."
+    }
+  ],
+  "tasks": [
+    {
+      "description": "Fix is_hidden flag materialization bug",
+      "expectedLabel": "Bug Fix"
+    },
+    {
+      "description": "Run code review on PR #142 and leave inline comments",
+      "expectedLabel": "Code Review"
+    },
+    {
+      "description": "Write BULK_MODE.md with design decisions for bulk selection",
+      "expectedLabel": "Planning & Design Docs"
+    },
+    {
+      "description": "Implement bulk session selection checklist",
+      "expectedLabel": "Feature Implementation"
+    },
+    {
+      "description": "Commit the changes and push to origin",
+      "expectedLabel": "Git/PR Workflow"
+    },
+    {
+      "description": "Improve GitHub issue #247 title and description with problem/solution breakdown",
+      "expectedLabel": "GitHub Issue Management"
+    },
+    {
+      "description": "Investigate and fix cold first launch onboarding race condition",
+      "expectedLabel": "Bug Fix"
+    },
+    {
+      "description": "Fix code review findings on the auth bugfix PR",
+      "expectedLabel": "Bug Fix",
+      "ambiguousWith": "Code Review",
+      "note": "Overlap stress case: a fix that only exists because of a review pass. Exercises whether the classifier fixates on the review trigger or the actual work (fixing)."
+    },
+    {
+      "description": "Create a pull request that closes issue #90",
+      "expectedLabel": "Git/PR Workflow",
+      "ambiguousWith": "GitHub Issue Management",
+      "note": "Overlap stress case: mentions an issue number but the task itself is PR mechanics, not issue authoring/triage."
+    },
+    {
+      "description": "Read GitHub issue #235 and create CLEANUP_PLAN.md",
+      "expectedLabel": "GitHub Issue Management",
+      "ambiguousWith": "Planning & Design Docs",
+      "note": "Overlap stress case: issue-driven but produces a plan doc. Useful to see whether the classifier fires on the issue trigger, the doc output, or both."
+    },
+    {
+      "description": "Refill the office coffee machine and reboot the router",
+      "expectedLabel": null,
+      "note": "True negative: should not match any of the six labels. Sanity check that the classifier can say no to everything rather than defaulting to a match."
+    }
+  ]
+}
