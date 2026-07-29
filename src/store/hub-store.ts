@@ -19,7 +19,7 @@ import { emptyFrictionTotals, foldFriction, HIGH_TOKEN_GROWTH_RATIO } from "../h
 import type { LlmConfigField, LlmProvider } from "../llm/types.ts";
 import type { EncryptedSecret } from "../secrets.ts";
 
-export const HUB_SCHEMA_VERSION = 5;
+export const HUB_SCHEMA_VERSION = 6;
 export const HUB_APPLICATION_ID = 0x48554200; // "HUB\0"
 
 // ---- Raw row types (mirrors client argus.db resolved_* column shapes) -------------------
@@ -203,6 +203,7 @@ export interface LabelInfo {
   orgId: string;
   name: string;
   description: string | null;
+  autoApply: boolean;
   createdAt: number;
   taskCount: number;
 }
@@ -360,6 +361,12 @@ const HUB_LABELS_DDL = `
     FOREIGN KEY (org_id, client_id, session_id) REFERENCES resolved_sessions(org_id, client_id, session_id) ON DELETE CASCADE
   );
   CREATE INDEX hub_task_labels_label ON hub_task_labels(org_id, label_id);
+`;
+
+// Auto-apply flag on hub_labels (added in schema v6): whether the label was created/edited
+// through the LLM-classification review wizard rather than applied purely by hand.
+const HUB_LABELS_AUTO_APPLY_DDL = `
+  ALTER TABLE hub_labels ADD COLUMN auto_apply INTEGER NOT NULL DEFAULT 0;
 `;
 
 const ORGANIZATION_LLM_SETTINGS_DDL = `
@@ -578,6 +585,7 @@ const CREATE_HUB_SCHEMA_SQL = `
   CREATE INDEX resolved_invocations_skill      ON resolved_invocations(skill) WHERE skill IS NOT NULL;
   ${RESOLVED_SESSION_LABELS_DDL}
   ${HUB_LABELS_DDL}
+  ${HUB_LABELS_AUTO_APPLY_DDL}
   ${ORGANIZATION_LLM_SETTINGS_DDL}
 `;
 
@@ -608,6 +616,8 @@ const HUB_MIGRATIONS: Record<number, string> = {
   3: HUB_LABELS_DDL,
   // v4 → v5: organization-scoped task LLM settings and encrypted secrets.
   4: ORGANIZATION_LLM_SETTINGS_DDL,
+  // v5 → v6: auto-apply flag on hub labels.
+  5: HUB_LABELS_AUTO_APPLY_DDL,
 };
 
 // ---- DB open / init ---------------------------------------------------------------------
@@ -2246,7 +2256,13 @@ export class HubStore {
   // that's scoped out of this pass).
 
   /** Create a label. Throws DuplicateLabelNameError if the name is already taken in this org. */
-  createLabel(orgId: string, name: string, description: string | null = null, now = Date.now()): Promise<LabelInfo> {
+  createLabel(
+    orgId: string,
+    name: string,
+    description: string | null = null,
+    autoApply = false,
+    now = Date.now(),
+  ): Promise<LabelInfo> {
     return this.schedule(async () => {
       const existing = await get<{ label_id: string }>(
         this.db,
@@ -2258,19 +2274,62 @@ export class HubStore {
       const labelId = `label-${randomUUID()}`;
       await run(
         this.db,
-        "INSERT INTO hub_labels(label_id, org_id, name, description, created_at) VALUES (?, ?, ?, ?, ?)",
-        [labelId, orgId, name, description, now],
+        "INSERT INTO hub_labels(label_id, org_id, name, description, auto_apply, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [labelId, orgId, name, description, autoApply ? 1 : 0, now],
       );
-      return { labelId, orgId, name, description, createdAt: now, taskCount: 0 };
+      return { labelId, orgId, name, description, autoApply, createdAt: now, taskCount: 0 };
+    });
+  }
+
+  /** Update a label's name/description/auto-apply flag. Throws LabelNotFoundError if `labelId`
+   *  doesn't exist in the org, or DuplicateLabelNameError if `name` collides with another label. */
+  updateLabel(
+    orgId: string,
+    labelId: string,
+    fields: { name?: string; description?: string | null; autoApply?: boolean },
+  ): Promise<LabelInfo> {
+    return this.schedule(async () => {
+      const existing = await get<{ label_id: string; name: string; description: string | null; auto_apply: number; created_at: number }>(
+        this.db,
+        "SELECT label_id, name, description, auto_apply, created_at FROM hub_labels WHERE org_id = ? AND label_id = ?",
+        [orgId, labelId],
+      );
+      if (!existing) throw new LabelNotFoundError(labelId);
+
+      const name = fields.name ?? existing.name;
+      const description = fields.description !== undefined ? fields.description : existing.description;
+      const autoApply = fields.autoApply ?? !!existing.auto_apply;
+
+      if (name.toLowerCase() !== existing.name.toLowerCase()) {
+        const collision = await get<{ label_id: string }>(
+          this.db,
+          "SELECT label_id FROM hub_labels WHERE org_id = ? AND name = ? COLLATE NOCASE AND label_id != ?",
+          [orgId, name, labelId],
+        );
+        if (collision) throw new DuplicateLabelNameError(name);
+      }
+
+      await run(
+        this.db,
+        "UPDATE hub_labels SET name = ?, description = ?, auto_apply = ? WHERE org_id = ? AND label_id = ?",
+        [name, description, autoApply ? 1 : 0, orgId, labelId],
+      );
+
+      const taskCount = await get<{ n: number }>(
+        this.db,
+        "SELECT COUNT(*) AS n FROM hub_task_labels WHERE org_id = ? AND label_id = ?",
+        [orgId, labelId],
+      );
+      return { labelId, orgId, name, description, autoApply, createdAt: existing.created_at, taskCount: taskCount?.n ?? 0 };
     });
   }
 
   /** Every label in an org with its current applied-task count, ordered by name. */
   listLabels(orgId: string): Promise<LabelInfo[]> {
     return this.schedule(async () => {
-      const rows = await all<{ label_id: string; name: string; description: string | null; created_at: number; task_count: number }>(
+      const rows = await all<{ label_id: string; name: string; description: string | null; auto_apply: number; created_at: number; task_count: number }>(
         this.db,
-        `SELECT l.label_id, l.name, l.description, l.created_at, COUNT(tl.label_id) AS task_count
+        `SELECT l.label_id, l.name, l.description, l.auto_apply, l.created_at, COUNT(tl.label_id) AS task_count
          FROM hub_labels l
          LEFT JOIN hub_task_labels tl ON tl.org_id = l.org_id AND tl.label_id = l.label_id
          WHERE l.org_id = ?
@@ -2279,7 +2338,8 @@ export class HubStore {
         [orgId],
       );
       return rows.map((r) => ({
-        labelId: r.label_id, orgId, name: r.name, description: r.description, createdAt: r.created_at, taskCount: r.task_count,
+        labelId: r.label_id, orgId, name: r.name, description: r.description, autoApply: !!r.auto_apply,
+        createdAt: r.created_at, taskCount: r.task_count,
       }));
     });
   }

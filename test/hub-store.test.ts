@@ -348,6 +348,8 @@ describe("schema", () => {
       const hubTaskLabelsTable = await rawGet<{ name: string }>(
         db, "SELECT name FROM sqlite_schema WHERE type='table' AND name='hub_task_labels'");
       expect(hubTaskLabelsTable?.name).toBe("hub_task_labels");
+      const hubLabelsCols = (await rawAll<{ name: string }>(db, "PRAGMA table_info(hub_labels)")).map((c) => c.name);
+      expect(hubLabelsCols).toContain("auto_apply");
 
       const userCols = (await rawAll<{ name: string }>(db, "PRAGMA table_info(users)")).map((c) => c.name);
       expect(userCols).toContain("group_id");
@@ -387,6 +389,7 @@ describe("schema", () => {
       DROP TABLE organization_llm_secrets;
       DROP TABLE organization_llm_provider_configs;
       DROP TABLE organization_task_llm;
+      ALTER TABLE hub_labels DROP COLUMN auto_apply;
       PRAGMA user_version = 4;
     `);
     await closeRaw(before);
@@ -1329,6 +1332,74 @@ describe("hub labels", () => {
     expect(listed.find((l) => l.labelId === label.labelId)).toBeUndefined();
     const byTasks = await store.listLabelsForTasks(orgId, [{ clientId, sessionId: "sess-del", taskSeq: 0 }]);
     expect(byTasks.size).toBe(0);
+
+    await store.close();
+  });
+
+  test("createLabel defaults autoApply to false, and threads a true value through", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const manual = await store.createLabel(orgId, "Manual label");
+    expect(manual.autoApply).toBe(false);
+
+    const auto = await store.createLabel(orgId, "Auto label", "Applied by an LLM", true);
+    expect(auto.autoApply).toBe(true);
+
+    const listed = await store.listLabels(orgId);
+    expect(listed.find((l) => l.labelId === manual.labelId)?.autoApply).toBe(false);
+    expect(listed.find((l) => l.labelId === auto.labelId)?.autoApply).toBe(true);
+
+    await store.close();
+  });
+
+  test("updateLabel renames, redescribes, and flips autoApply", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    const label = await store.createLabel(orgId, "Bug fix", "old description");
+    const updated = await store.updateLabel(orgId, label.labelId, {
+      name: "Bug Fix", description: "new description", autoApply: true,
+    });
+    expect(updated).toEqual({
+      labelId: label.labelId, orgId, name: "Bug Fix", description: "new description",
+      autoApply: true, createdAt: label.createdAt, taskCount: 0,
+    });
+
+    const listed = await store.listLabels(orgId);
+    const persisted = listed.find((l) => l.labelId === label.labelId);
+    expect(persisted?.name).toBe("Bug Fix");
+    expect(persisted?.description).toBe("new description");
+    expect(persisted?.autoApply).toBe(true);
+
+    await store.close();
+  });
+
+  test("updateLabel throws LabelNotFoundError for an unknown labelId", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    await expect(
+      store.updateLabel(orgId, "label-nope", { name: "New name" }),
+    ).rejects.toBeInstanceOf(LabelNotFoundError);
+
+    await store.close();
+  });
+
+  test("updateLabel rejects renaming into another label's name (case-insensitive)", async () => {
+    const dataDir = tempDataDir();
+    const store = await openHubStore(dataDir, 1_000_000);
+    const orgId = (await store.getDefaultOrgId())!;
+
+    await store.createLabel(orgId, "Bug fix");
+    const other = await store.createLabel(orgId, "Docs");
+
+    await expect(
+      store.updateLabel(orgId, other.labelId, { name: "bug fix" }),
+    ).rejects.toBeInstanceOf(DuplicateLabelNameError);
 
     await store.close();
   });
