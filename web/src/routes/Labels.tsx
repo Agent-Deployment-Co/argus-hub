@@ -294,6 +294,9 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
   // Tracks which rows' checked state has already been seeded from a resolved verdict, so a
   // later re-render doesn't stomp on a manual uncheck/check once a row has settled.
   const seeded = useRef<Set<string>>(new Set());
+  // The name/description the last review/rerun was classified against — lets "Rerun label"
+  // enable only once the fields have actually drifted from what's on screen.
+  const [lastReviewed, setLastReviewed] = useState<{ name: string; description: string } | null>(null);
 
   const { tasks } = preview;
 
@@ -337,8 +340,12 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
     seeded.current = new Set();
     setChecked(new Set());
     setChanged(new Set());
+    setLastReviewed({ name: name.trim(), description: description.trim() });
     preview.run({ name: name.trim(), description: description.trim() });
   };
+
+  const isDirty = lastReviewed !== null
+    && (name.trim() !== lastReviewed.name || description.trim() !== lastReviewed.description);
 
   const onRefine = () => {
     if (!tasks || changed.size === 0) return;
@@ -423,6 +430,14 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
               onClick={onRefine}
             >
               {refineDescription.isPending ? "Refining…" : "Refine description"}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={!isDirty || preview.isPending}
+              onClick={onReview}
+            >
+              {preview.isPending ? "Reviewing…" : "Rerun label"}
             </button>
             {changed.size > 0 && !refineDescription.isPending && (
               <span className="review-refine-hint">
