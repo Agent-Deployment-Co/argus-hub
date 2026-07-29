@@ -398,7 +398,6 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
                 <tr>
                   <th></th>
                   <th>Task</th>
-                  <th>Reasoning</th>
                 </tr>
               </thead>
               <tbody>
@@ -417,8 +416,14 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
                           />
                         )}
                       </td>
-                      <td className="review-task-description">{task.description}</td>
-                      <td className="review-task-reasoning">{task.pending ? "" : (task.reasoning ?? "—")}</td>
+                      <td>
+                        <div className="review-task-description">{task.description}</div>
+                        {task.pending ? (
+                          <div className="review-task-reasoning review-task-reasoning-placeholder" aria-hidden />
+                        ) : (
+                          <div className="review-task-reasoning">{task.reasoning ?? "—"}</div>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}

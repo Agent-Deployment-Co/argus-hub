@@ -493,7 +493,12 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 .review-task-table th:first-child, .review-task-table td:first-child { width: 32px; }
 .review-task-table td input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--accent); }
 .review-task-description { color: var(--text); }
-.review-task-reasoning { color: var(--muted); font-size: 12px; font-style: italic; }
+.review-task-reasoning { margin-top: 3px; color: var(--muted); font-size: 12px; font-style: italic; }
+.review-task-reasoning-placeholder {
+  width: 60%; height: 11px; border-radius: 4px; background: var(--line);
+  animation: review-reasoning-pulse 1.2s ease-in-out infinite;
+}
+@keyframes review-reasoning-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 @media (max-width: 640px) {
   /* Force the rail to its icon-only width on narrow screens. */
   .app-shell { --rail-w: 60px; }
