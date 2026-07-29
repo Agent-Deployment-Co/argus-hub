@@ -96,17 +96,24 @@ function chunk<T>(items: T[], size: number): T[][] {
 /** Classify each of `tasks` against `label`, one `complete()` call per task, with bounded
  *  concurrency. A single task's provider failure or malformed reply degrades to
  *  `matched: false` with an explanatory `reasoning` — it never throws, so one flaky task can't
- *  fail the whole preview. */
+ *  fail the whole preview. If `onResult` is given, it fires as each task's classification
+ *  resolves (not per-chunk) so a caller can stream results out incrementally. */
 export async function classifyTasksForLabel(
   label: ClassifyLabelDescriptor,
   tasks: ClassifiableTask[],
   config: ResolvedLlmConfig,
   deps: LlmClientDeps = {},
   signal?: AbortSignal,
+  onResult?: (result: LabelClassification) => void,
 ): Promise<LabelClassification[]> {
   const out: LabelClassification[] = [];
   for (const part of chunk(tasks, CLASSIFY_CONCURRENCY)) {
-    out.push(...(await Promise.all(part.map((task) => classifyOne(label, task, config, deps, signal)))));
+    const results = await Promise.all(part.map(async (task) => {
+      const result = await classifyOne(label, task, config, deps, signal);
+      onResult?.(result);
+      return result;
+    }));
+    out.push(...results);
   }
   return out;
 }

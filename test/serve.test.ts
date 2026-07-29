@@ -800,6 +800,32 @@ async function syncWithTask(
   return body.userId;
 }
 
+/** Parses the newline-delimited JSON streamed by POST /api/labels/preview, merging the initial
+ *  "tasks" line with each per-task "result" line into the flat shape the old single-JSON
+ *  response used to return. */
+async function readLabelPreview(res: Response): Promise<{
+  tasks: Array<{ clientId: string; sessionId: string; taskSeq: number; description: string; matched: boolean; reasoning?: string }>;
+}> {
+  const text = await res.text();
+  const lines = text.split("\n").filter((l) => l.trim());
+  let tasks: Array<{ clientId: string; sessionId: string; taskSeq: number; description: string }> = [];
+  const results = new Map<string, { matched: boolean; reasoning?: string }>();
+  for (const line of lines) {
+    const msg = JSON.parse(line) as
+      | { type: "tasks"; tasks: typeof tasks }
+      | { type: "result"; clientId: string; sessionId: string; taskSeq: number; matched: boolean; reasoning?: string }
+      | { type: "error"; error: string };
+    if (msg.type === "tasks") tasks = msg.tasks;
+    else if (msg.type === "result") results.set(`${msg.clientId}:${msg.sessionId}:${msg.taskSeq}`, msg);
+  }
+  return {
+    tasks: tasks.map((t) => {
+      const result = results.get(`${t.clientId}:${t.sessionId}:${t.taskSeq}`);
+      return { ...t, matched: result?.matched ?? false, reasoning: result?.reasoning };
+    }),
+  };
+}
+
 describe("GET /api/tasks", () => {
   test("returns empty list when no data has been synced", async () => {
     const { store } = await openTestEnv();
@@ -1084,9 +1110,7 @@ describe("Hub labels", () => {
         body: JSON.stringify({ name: "Bug fix", description: "Diagnosing and correcting a defect" }),
       });
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        tasks: Array<{ description: string; matched: boolean; reasoning?: string }>;
-      };
+      const body = await readLabelPreview(res);
       expect(body.tasks).toHaveLength(2);
       const bug = body.tasks.find((t) => t.description === "Fix the login bug");
       const docs = body.tasks.find((t) => t.description === "Write the onboarding docs");

@@ -1,9 +1,9 @@
-import { Pencil, Plus, Trash2 } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { LoaderCircle, Pencil, Plus, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Modal } from "../components/Modal";
 import {
-  useCreateLabel, useDeleteLabel, useLabelPreview, useLabels, useUpdateLabel,
-  type HubLabel, type LabelPreviewTask, type TaskRef,
+  useCreateLabel, useDeleteLabel, useLabelPreviewStream, useLabels, useUpdateLabel,
+  type HubLabel, type TaskRef,
 } from "../lib/labels";
 
 /** Hub-level task labels: created and applied directly by a hub admin, or auto-applied via an
@@ -281,13 +281,31 @@ interface ReviewState {
 }
 
 function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () => void }) {
-  const preview = useLabelPreview();
+  const preview = useLabelPreviewStream();
   const createLabel = useCreateLabel();
   const updateLabel = useUpdateLabel();
   const [name, setName] = useState(state.name);
   const [description, setDescription] = useState(state.description);
-  const [tasks, setTasks] = useState<LabelPreviewTask[] | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  // Tracks which rows' checked state has already been seeded from a resolved verdict, so a
+  // later re-render doesn't stomp on a manual uncheck/check once a row has settled.
+  const seeded = useRef<Set<string>>(new Set());
+
+  const { tasks } = preview;
+
+  useEffect(() => {
+    if (!tasks) return;
+    const newlyMatched = tasks.filter((t) => !t.pending && t.matched && !seeded.current.has(taskKey(t)));
+    for (const t of tasks) {
+      if (!t.pending) seeded.current.add(taskKey(t));
+    }
+    if (newlyMatched.length === 0) return;
+    setChecked((prev) => {
+      const next = new Set(prev);
+      for (const t of newlyMatched) next.add(taskKey(t));
+      return next;
+    });
+  }, [tasks]);
 
   const toggle = (key: string) => {
     setChecked((prev) => {
@@ -302,15 +320,9 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
 
   const onReview = () => {
     if (!name.trim()) return;
-    preview.mutate(
-      { name: name.trim(), description: description.trim() },
-      {
-        onSuccess: (result) => {
-          setTasks(result);
-          setChecked(new Set(result.filter((t) => t.matched).map(taskKey)));
-        },
-      },
-    );
+    seeded.current = new Set();
+    setChecked(new Set());
+    preview.run({ name: name.trim(), description: description.trim() });
   };
 
   const onConfirm = () => {
@@ -338,7 +350,7 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
         <div className="modal-actions">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
           {tasks ? (
-            <button type="button" className="btn-primary" disabled={confirming} onClick={onConfirm}>
+            <button type="button" className="btn-primary" disabled={confirming || preview.isPending} onClick={onConfirm}>
               {confirming ? "Saving…" : "Confirm"}
             </button>
           ) : (
@@ -372,7 +384,7 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
         </label>
       </div>
 
-      {preview.isError && <p className="modal-error">{(preview.error as Error).message}</p>}
+      {preview.error && <p className="modal-error">{preview.error.message}</p>}
       {confirmError && <p className="modal-error">{confirmError.message}</p>}
       {tasks && (
         <>
@@ -380,24 +392,46 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
             The classifier's judgment on your org's last {tasks.length} tasks. Uncheck any it
             got wrong, or check ones it missed — only checked tasks get the label.
           </p>
-          <ul className="review-task-list review-task-list-page">
-            {tasks.map((task) => {
-              const key = taskKey(task);
-              return (
-                <li key={key} className="review-task-row">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={checked.has(key)}
-                      onChange={() => toggle(key)}
-                    />
-                    <span className="review-task-description">{task.description}</span>
-                  </label>
-                  {task.reasoning && <p className="review-task-reasoning">{task.reasoning}</p>}
-                </li>
-              );
-            })}
-          </ul>
+          <div className="scroll review-task-table-wrap">
+            <table className="review-task-table">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Task</th>
+                  <th>Match</th>
+                  <th>Reasoning</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tasks.map((task) => {
+                  const key = taskKey(task);
+                  return (
+                    <tr key={key}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={checked.has(key)}
+                          disabled={task.pending}
+                          onChange={() => toggle(key)}
+                        />
+                      </td>
+                      <td className="review-task-description">{task.description}</td>
+                      <td>
+                        {task.pending ? (
+                          <LoaderCircle size={14} className="spin" aria-label="Classifying" />
+                        ) : (
+                          <span className={task.matched ? "review-task-match-yes" : "review-task-match-no"}>
+                            {task.matched ? "Yes" : "No"}
+                          </span>
+                        )}
+                      </td>
+                      <td className="review-task-reasoning">{task.pending ? "" : (task.reasoning ?? "—")}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </>

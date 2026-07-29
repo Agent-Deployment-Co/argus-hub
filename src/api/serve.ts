@@ -8,7 +8,6 @@ import {
   DuplicateLabelNameError,
   GroupNotFoundError,
   LabelNotFoundError,
-  taskLabelKey,
   type HubStore,
 } from "../store/hub-store.ts";
 import { syncHandler, unknownSessionsHandler } from "./sync.ts";
@@ -493,7 +492,9 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
 
   // Preview which of the org's last PREVIEW_TASK_LIMIT tasks an LLM would match against a
   // candidate label name/description — no DB writes, safe to call repeatedly while iterating
-  // on a description. Backs the "Apply automatically" review wizard.
+  // on a description. Backs the "Apply automatically" review wizard. Streamed as newline-
+  // delimited JSON so the wizard can render the task table immediately and fill in each
+  // classification as it completes, instead of waiting on all PREVIEW_TASK_LIMIT LLM calls.
   app.post("/api/labels/preview", async (c) => {
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
@@ -519,28 +520,42 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     );
     attachLabels(preview.rows, labelsByKey);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), options.connectionTimeoutMs ?? LABEL_PREVIEW_TIMEOUT_MS);
-    try {
-      const classifications = await classifyTasksForLabel(
-        { name, description },
-        preview.rows.map((r) => ({
-          ref: { clientId: r.clientId, sessionId: r.sessionId, taskSeq: r.taskSeq },
-          description: r.description,
-        })),
-        config,
-        { fetch: options.fetch, executeCommand: options.executeCommand },
-        controller.signal,
-      );
-      const byKey = new Map(classifications.map((cl) => [taskLabelKey(cl.ref), cl]));
-      const tasks = preview.rows.map((r) => {
-        const classification = byKey.get(taskLabelKey(r));
-        return { ...r, matched: classification?.matched ?? false, reasoning: classification?.reasoning };
-      });
-      return c.json({ tasks });
-    } finally {
-      clearTimeout(timeout);
-    }
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(streamController) {
+        const writeLine = (line: unknown) => streamController.enqueue(encoder.encode(`${JSON.stringify(line)}\n`));
+        writeLine({ type: "tasks", tasks: preview.rows });
+
+        const abortController = new AbortController();
+        const timeout = setTimeout(
+          () => abortController.abort(),
+          options.connectionTimeoutMs ?? LABEL_PREVIEW_TIMEOUT_MS,
+        );
+        try {
+          await classifyTasksForLabel(
+            { name, description },
+            preview.rows.map((r) => ({
+              ref: { clientId: r.clientId, sessionId: r.sessionId, taskSeq: r.taskSeq },
+              description: r.description,
+            })),
+            config,
+            { fetch: options.fetch, executeCommand: options.executeCommand },
+            abortController.signal,
+            (result) => writeLine({ type: "result", ...result.ref, matched: result.matched, reasoning: result.reasoning }),
+          );
+        } catch (error) {
+          writeLine({ type: "error", error: error instanceof Error ? error.message : "Classification failed." });
+        } finally {
+          clearTimeout(timeout);
+          streamController.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      status: 200,
+      headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store" },
+    });
   });
 
   // Apply or remove one label on one task.

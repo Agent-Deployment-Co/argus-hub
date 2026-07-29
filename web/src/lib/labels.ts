@@ -1,3 +1,4 @@
+import { useCallback, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 export interface HubLabel {
@@ -102,20 +103,87 @@ export function useDeleteLabel() {
   });
 }
 
-/** Preview which of the org's last 10 tasks an LLM would match against a candidate label
- *  name/description. No DB writes — backs the "Apply automatically" review wizard. */
-export function useLabelPreview() {
-  return useMutation({
-    mutationFn: async ({ name, description }: { name: string; description?: string }) => {
-      const res = await fetch("/api/labels/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, description }),
-      });
-      if (!res.ok) throw await readError(res, `Failed to preview label matches (${res.status})`);
-      return (await res.json() as { tasks: LabelPreviewTask[] }).tasks;
-    },
-  });
+/** One row of the auto-apply review wizard's preview table. `pending` is true until the
+ *  classifier's verdict for this task has arrived. */
+export interface LabelPreviewRow extends LabelPreviewTask {
+  pending: boolean;
+}
+
+type PreviewLine =
+  | { type: "tasks"; tasks: LabelPreviewTask[] }
+  | { type: "result"; clientId: string; sessionId: string; taskSeq: number; matched: boolean; reasoning?: string }
+  | { type: "error"; error: string };
+
+function previewRowKey(ref: TaskRef): string {
+  return `${ref.clientId}:${ref.sessionId}:${ref.taskSeq}`;
+}
+
+/** Streams which of the org's last 10 tasks an LLM would match against a candidate label
+ *  name/description. No DB writes — backs the "Apply automatically" review wizard. The task
+ *  table populates immediately (all rows `pending: true`), then each row's verdict fills in as
+ *  its classification completes, since POST /api/labels/preview streams newline-delimited JSON
+ *  rather than waiting for every task to finish. */
+export function useLabelPreviewStream(): {
+  tasks: LabelPreviewRow[] | null;
+  isPending: boolean;
+  error: Error | null;
+  run: (input: { name: string; description?: string }) => void;
+} {
+  const [tasks, setTasks] = useState<LabelPreviewRow[] | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [isPending, setIsPending] = useState(false);
+  const runId = useRef(0);
+
+  const run = useCallback((input: { name: string; description?: string }) => {
+    const thisRun = ++runId.current;
+    setTasks(null);
+    setError(null);
+    setIsPending(true);
+
+    const handleLine = (line: string) => {
+      if (!line.trim() || thisRun !== runId.current) return;
+      const msg = JSON.parse(line) as PreviewLine;
+      if (msg.type === "tasks") {
+        setTasks(msg.tasks.map((t) => ({ ...t, matched: false, reasoning: undefined, pending: true })));
+      } else if (msg.type === "result") {
+        const key = previewRowKey(msg);
+        setTasks((prev) => prev?.map((t) => (
+          previewRowKey(t) === key ? { ...t, matched: msg.matched, reasoning: msg.reasoning, pending: false } : t
+        )) ?? prev);
+      } else {
+        setError(new Error(msg.error));
+      }
+    };
+
+    (async () => {
+      try {
+        const res = await fetch("/api/labels/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        });
+        if (!res.ok || !res.body) throw await readError(res, `Failed to preview label matches (${res.status})`);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) handleLine(line);
+        }
+        handleLine(buffer);
+      } catch (err) {
+        if (thisRun === runId.current) setError(err instanceof Error ? err : new Error("Failed to preview label matches"));
+      } finally {
+        if (thisRun === runId.current) setIsPending(false);
+      }
+    })();
+  }, []);
+
+  return { tasks, isPending, error, run };
 }
 
 /** Apply (applied: true) or remove (applied: false) one label on one task. */
