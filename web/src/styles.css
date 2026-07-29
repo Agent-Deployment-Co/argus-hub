@@ -489,6 +489,8 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 .label-type-card p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.4; }
 
 .review-fields { max-width: 520px; margin-bottom: 18px; }
+.review-refine-row { display: flex; align-items: center; gap: 10px; margin-top: -4px; }
+.review-refine-hint { color: var(--muted); font-size: 11.5px; }
 .review-task-table-wrap { max-width: 960px; }
 .review-task-table th:first-child, .review-task-table td:first-child { width: 32px; }
 .review-task-table td input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--accent); }

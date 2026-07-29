@@ -2,8 +2,8 @@ import { LoaderCircle, Pencil, Plus, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Modal } from "../components/Modal";
 import {
-  useCreateLabel, useDeleteLabel, useLabelPreviewStream, useLabels, useUpdateLabel,
-  type HubLabel, type TaskRef,
+  useCreateLabel, useDeleteLabel, useLabelPreviewStream, useLabels, useRefineLabelDescription, useUpdateLabel,
+  type HubLabel, type LabelPreviewRow, type TaskRef,
 } from "../lib/labels";
 
 /** Hub-level task labels: created and applied directly by a hub admin, or auto-applied via an
@@ -284,9 +284,13 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
   const preview = useLabelPreviewStream();
   const createLabel = useCreateLabel();
   const updateLabel = useUpdateLabel();
+  const refineDescription = useRefineLabelDescription();
   const [name, setName] = useState(state.name);
   const [description, setDescription] = useState(state.description);
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  // Rows the reviewer has overridden away from the classifier's own verdict since the last
+  // review/refine run — the training signal handed to "Refine description".
+  const [changed, setChanged] = useState<Set<string>>(new Set());
   // Tracks which rows' checked state has already been seeded from a resolved verdict, so a
   // later re-render doesn't stomp on a manual uncheck/check once a row has settled.
   const seeded = useRef<Set<string>>(new Set());
@@ -308,9 +312,19 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
   }, [tasks]);
 
   const toggle = (key: string) => {
+    const task = tasks?.find((t) => taskKey(t) === key);
     setChecked((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
+      const willCheck = !next.has(key);
+      if (willCheck) next.add(key); else next.delete(key);
+
+      if (task && !task.pending) {
+        setChanged((prevChanged) => {
+          const nextChanged = new Set(prevChanged);
+          if (willCheck !== task.matched) nextChanged.add(key); else nextChanged.delete(key);
+          return nextChanged;
+        });
+      }
       return next;
     });
   };
@@ -322,7 +336,25 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
     if (!name.trim()) return;
     seeded.current = new Set();
     setChecked(new Set());
+    setChanged(new Set());
     preview.run({ name: name.trim(), description: description.trim() });
+  };
+
+  const onRefine = () => {
+    if (!tasks || changed.size === 0) return;
+    const corrections = [...changed].map((key) => {
+      const task = tasks.find((t) => taskKey(t) === key) as LabelPreviewRow;
+      return {
+        description: task.description,
+        classifierMatched: task.matched,
+        correctedMatched: checked.has(key),
+        reasoning: task.reasoning,
+      };
+    });
+    refineDescription.mutate(
+      { name: name.trim(), description: description.trim(), corrections },
+      { onSuccess: (newDescription) => { setDescription(newDescription); setChanged(new Set()); } },
+    );
   };
 
   const onConfirm = () => {
@@ -382,9 +414,27 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
             rows={3}
           />
         </label>
+        {tasks && (
+          <div className="review-refine-row">
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={changed.size === 0 || refineDescription.isPending}
+              onClick={onRefine}
+            >
+              {refineDescription.isPending ? "Refining…" : "Refine description"}
+            </button>
+            {changed.size > 0 && !refineDescription.isPending && (
+              <span className="review-refine-hint">
+                {changed.size} correction{changed.size === 1 ? "" : "s"} since the last review
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {preview.error && <p className="modal-error">{preview.error.message}</p>}
+      {refineDescription.isError && <p className="modal-error">{(refineDescription.error as Error).message}</p>}
       {confirmError && <p className="modal-error">{confirmError.message}</p>}
       {tasks && (
         <>

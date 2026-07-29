@@ -19,8 +19,9 @@ import { openSnowflakeZipStream } from "../export/snowflake.ts";
 import { computeRecommendations } from "./recommendations.ts";
 import { buildSessionList, buildSessionDetail, type SessionListParams } from "./session-list.ts";
 import { buildTaskList, type TaskListParams } from "./task-list.ts";
-import { attachLabels, parseTaskRef, parseTaskRefs } from "./task-labels.ts";
+import { attachLabels, parseLabelCorrections, parseTaskRef, parseTaskRefs } from "./task-labels.ts";
 import { classifyTasksForLabel } from "../llm/classify-label.ts";
+import { refineLabelDescription } from "../llm/refine-label.ts";
 import type { SessionSort } from "./session-list.ts";
 import {
   parseResolvedQuery as parseResolvedQueryFrom,
@@ -556,6 +557,50 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
       status: 200,
       headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store" },
     });
+  });
+
+  // Rewrite a candidate label's description from the reviewer's checked/unchecked overrides of
+  // the classifier's preview verdicts. No DB writes — the wizard applies the result by hand
+  // (editing the description field) before confirming.
+  app.post("/api/labels/refine-description", async (c) => {
+    const orgId = await store.getDefaultOrgId();
+    if (!orgId) return c.json({ error: "No org configured." }, 503);
+
+    const body = await c.req.json().catch(() => null) as {
+      name?: unknown; description?: unknown; corrections?: unknown;
+    } | null;
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    if (!name) return c.json({ error: 'Missing required "name".' }, 400);
+    const description = typeof body?.description === "string" && body.description.trim() ? body.description.trim() : null;
+    const corrections = parseLabelCorrections(body?.corrections);
+    if (!corrections) return c.json({ error: "Missing or invalid \"corrections\"." }, 400);
+
+    let config;
+    try {
+      config = await resolveTaskLlmConfig(store, orgId, options.secretCipher);
+    } catch (error) {
+      if (error instanceof LlmConfigurationError) return c.json({ error: error.message }, error.status);
+      throw error;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      options.connectionTimeoutMs ?? LABEL_PREVIEW_TIMEOUT_MS,
+    );
+    try {
+      const result = await refineLabelDescription(
+        { name, description },
+        corrections,
+        config,
+        { fetch: options.fetch, executeCommand: options.executeCommand },
+        controller.signal,
+      );
+      if (!result.ok) return c.json({ error: result.error }, 502);
+      return c.json({ description: result.description });
+    } finally {
+      clearTimeout(timeout);
+    }
   });
 
   // Apply or remove one label on one task.

@@ -4,6 +4,7 @@
 
 import { taskLabelKey, type TaskLabelRef, type TaskLabelRow } from "../store/hub-store.ts";
 import type { TaskListItem } from "./task-list.ts";
+import type { LabelCorrection } from "../llm/refine-label.ts";
 
 /** Mutate `rows` in place, filling each item's `labels` from a previously-fetched lookup map. */
 export function attachLabels(rows: TaskListItem[], labelsByKey: Map<string, TaskLabelRow[]>): void {
@@ -47,4 +48,26 @@ export function parseTaskRefs(input: unknown): TaskLabelRef[] | null {
     refs.push(ref);
   }
   return refs;
+}
+
+/** Validate a wire-provided array of review corrections (the review wizard's checked/unchecked
+ *  overrides of the classifier's verdict on a task) — backs POST /api/labels/refine-description.
+ *  Returns null if `input` isn't an array, is empty, or any element is malformed. */
+export function parseLabelCorrections(input: unknown): LabelCorrection[] | null {
+  if (!Array.isArray(input) || input.length === 0) return null;
+  const corrections: LabelCorrection[] = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") return null;
+    const { description, classifierMatched, correctedMatched, reasoning } = item as Record<string, unknown>;
+    if (
+      typeof description !== "string" || !description ||
+      typeof classifierMatched !== "boolean" ||
+      typeof correctedMatched !== "boolean" ||
+      (reasoning !== undefined && typeof reasoning !== "string")
+    ) {
+      return null;
+    }
+    corrections.push({ description, classifierMatched, correctedMatched, reasoning });
+  }
+  return corrections;
 }
