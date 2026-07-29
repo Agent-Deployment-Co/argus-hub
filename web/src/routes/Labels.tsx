@@ -1,9 +1,9 @@
 import { LoaderCircle, Pencil, Plus, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { Modal } from "../components/Modal";
 import {
-  useCreateLabel, useDeleteLabel, useLabelPreviewStream, useLabels, useRefineLabelDescription, useUpdateLabel,
-  type HubLabel, type LabelPreviewRow, type TaskRef,
+  useCreateLabel, useDeleteLabel, useLabelPreviewStream, useLabels, useUpdateLabel,
+  type HubLabel, type TaskRef,
 } from "../lib/labels";
 
 /** Hub-level task labels: created and applied directly by a hub admin, or auto-applied via an
@@ -284,89 +284,30 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
   const preview = useLabelPreviewStream();
   const createLabel = useCreateLabel();
   const updateLabel = useUpdateLabel();
-  const refineDescription = useRefineLabelDescription();
   const [name, setName] = useState(state.name);
   const [description, setDescription] = useState(state.description);
-  const [checked, setChecked] = useState<Set<string>>(new Set());
-  // Rows the reviewer has overridden away from the classifier's own verdict since the last
-  // review/refine run — the training signal handed to "Refine description".
-  const [changed, setChanged] = useState<Set<string>>(new Set());
-  // Tracks which rows' checked state has already been seeded from a resolved verdict, so a
-  // later re-render doesn't stomp on a manual uncheck/check once a row has settled.
-  const seeded = useRef<Set<string>>(new Set());
-  // The name/description the last review/rerun was classified against — lets "Rerun label"
+  // The name/description the last preview/rerun was classified against — lets the rerun action
   // enable only once the fields have actually drifted from what's on screen.
   const [lastReviewed, setLastReviewed] = useState<{ name: string; description: string } | null>(null);
 
   const { tasks } = preview;
 
-  useEffect(() => {
-    if (!tasks) return;
-    const newlyMatched = tasks.filter((t) => !t.pending && t.matched && !seeded.current.has(taskKey(t)));
-    for (const t of tasks) {
-      if (!t.pending) seeded.current.add(taskKey(t));
-    }
-    if (newlyMatched.length === 0) return;
-    setChecked((prev) => {
-      const next = new Set(prev);
-      for (const t of newlyMatched) next.add(taskKey(t));
-      return next;
-    });
-  }, [tasks]);
-
-  const toggle = (key: string) => {
-    const task = tasks?.find((t) => taskKey(t) === key);
-    setChecked((prev) => {
-      const next = new Set(prev);
-      const willCheck = !next.has(key);
-      if (willCheck) next.add(key); else next.delete(key);
-
-      if (task && !task.pending) {
-        setChanged((prevChanged) => {
-          const nextChanged = new Set(prevChanged);
-          if (willCheck !== task.matched) nextChanged.add(key); else nextChanged.delete(key);
-          return nextChanged;
-        });
-      }
-      return next;
-    });
-  };
-
   const confirming = createLabel.isPending || updateLabel.isPending;
   const confirmError = (createLabel.error ?? updateLabel.error) as Error | null;
 
-  const onReview = () => {
+  const runPreview = () => {
     if (!name.trim()) return;
-    seeded.current = new Set();
-    setChecked(new Set());
-    setChanged(new Set());
     setLastReviewed({ name: name.trim(), description: description.trim() });
     preview.run({ name: name.trim(), description: description.trim() });
   };
 
   const isDirty = lastReviewed !== null
     && (name.trim() !== lastReviewed.name || description.trim() !== lastReviewed.description);
-
-  const onRefine = () => {
-    if (!tasks || changed.size === 0) return;
-    const corrections = [...changed].map((key) => {
-      const task = tasks.find((t) => taskKey(t) === key) as LabelPreviewRow;
-      return {
-        description: task.description,
-        classifierMatched: task.matched,
-        correctedMatched: checked.has(key),
-        reasoning: task.reasoning,
-      };
-    });
-    refineDescription.mutate(
-      { name: name.trim(), description: description.trim(), corrections },
-      { onSuccess: (newDescription) => { setDescription(newDescription); setChanged(new Set()); } },
-    );
-  };
+  const hasRun = lastReviewed !== null;
 
   const onConfirm = () => {
     const taskRefs: TaskRef[] = (tasks ?? [])
-      .filter((t) => checked.has(taskKey(t)))
+      .filter((t) => t.matched)
       .map((t) => ({ clientId: t.clientId, sessionId: t.sessionId, taskSeq: t.taskSeq }));
 
     if (state.mode === "create") {
@@ -386,18 +327,6 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
     <>
       <div className="page-head">
         <h1>{state.mode === "create" ? "New automatic label" : `Edit "${state.name}"`}</h1>
-        <div className="modal-actions">
-          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-          {tasks ? (
-            <button type="button" className="btn-primary" disabled={confirming || preview.isPending} onClick={onConfirm}>
-              {confirming ? "Saving…" : "Confirm"}
-            </button>
-          ) : (
-            <button type="button" className="btn-primary" disabled={!name.trim() || preview.isPending} onClick={onReview}>
-              {preview.isPending ? "Reviewing…" : "Review"}
-            </button>
-          )}
-        </div>
       </div>
 
       <div className="modal-form review-fields">
@@ -421,41 +350,31 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
             rows={3}
           />
         </label>
-        {tasks && (
-          <div className="review-refine-row">
-            <button
-              type="button"
-              className="btn-secondary"
-              disabled={changed.size === 0 || refineDescription.isPending}
-              onClick={onRefine}
-            >
-              {refineDescription.isPending ? "Refining…" : "Refine description"}
+        <div className="review-action-row">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            type="button"
+            className={hasRun ? "btn-secondary" : "btn-primary"}
+            disabled={hasRun ? !isDirty || preview.isPending : !name.trim() || preview.isPending}
+            onClick={runPreview}
+          >
+            {preview.isPending ? "Running label preview…" : hasRun ? "Rerun label preview" : "Run label preview"}
+          </button>
+          {tasks && (
+            <button type="button" className="btn-primary" disabled={confirming || preview.isPending} onClick={onConfirm}>
+              {confirming ? "Saving…" : "Save"}
             </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              disabled={!isDirty || preview.isPending}
-              onClick={onReview}
-            >
-              {preview.isPending ? "Reviewing…" : "Rerun label"}
-            </button>
-            {changed.size > 0 && !refineDescription.isPending && (
-              <span className="review-refine-hint">
-                {changed.size} correction{changed.size === 1 ? "" : "s"} since the last review
-              </span>
-            )}
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {preview.error && <p className="modal-error">{preview.error.message}</p>}
-      {refineDescription.isError && <p className="modal-error">{(refineDescription.error as Error).message}</p>}
       {confirmError && <p className="modal-error">{confirmError.message}</p>}
       {tasks && (
         <>
           <p className="modal-copy">
-            The classifier's judgment on your org's last {tasks.length} tasks. Uncheck any it
-            got wrong, or check ones it missed — only checked tasks get the label.
+            The classifier's judgment on your org's last {tasks.length} tasks. Matching tasks will
+            receive the label when you save.
           </p>
           <div className="scroll review-task-table-wrap">
             <table className="review-task-table">
@@ -476,8 +395,9 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
                         ) : (
                           <input
                             type="checkbox"
-                            checked={checked.has(key)}
-                            onChange={() => toggle(key)}
+                            checked={task.matched}
+                            disabled
+                            aria-label={task.matched ? "Label will be applied" : "Label will not be applied"}
                           />
                         )}
                       </td>

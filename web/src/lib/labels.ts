@@ -186,34 +186,6 @@ export function useLabelPreviewStream(): {
   return { tasks, isPending, error, run };
 }
 
-/** One reviewer override of the classifier's preview verdict, sent to
- *  POST /api/labels/refine-description as training signal for a better description. */
-export interface LabelCorrection {
-  description: string;
-  classifierMatched: boolean;
-  correctedMatched: boolean;
-  reasoning?: string;
-}
-
-/** Ask an LLM to rewrite a candidate label's description from a set of reviewer corrections to
- *  the classifier's preview verdicts. No DB writes — the wizard's Refine button hands the
- *  result to the description field for the reviewer to accept/edit before confirming. */
-export function useRefineLabelDescription() {
-  return useMutation({
-    mutationFn: async (
-      { name, description, corrections }: { name: string; description?: string; corrections: LabelCorrection[] },
-    ) => {
-      const res = await fetch("/api/labels/refine-description", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, description, corrections }),
-      });
-      if (!res.ok) throw await readError(res, `Failed to refine description (${res.status})`);
-      return (await res.json() as { description: string }).description;
-    },
-  });
-}
-
 /** Apply (applied: true) or remove (applied: false) one label on one task. */
 export function useSetTaskLabel() {
   const queryClient = useQueryClient();

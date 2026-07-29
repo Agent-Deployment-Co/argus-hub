@@ -1153,61 +1153,6 @@ describe("Hub labels", () => {
     }
   });
 
-  test("POST /api/labels/refine-description rewrites the description from reviewer corrections", async () => {
-    const { store } = await openTestEnv();
-    const orgId = (await store.getDefaultOrgId())!;
-    await store.setTaskLlmProvider(orgId, "command", 1);
-    await store.setTaskLlmProviderField(orgId, "command", "command", "fake-classifier", 1);
-
-    const app = createHubApp(store, undefined, {
-      executeCommand: async (_command, input) => (
-        input.includes("Corrections a human reviewer made")
-          ? { ok: true, text: "Tasks that fix a reported defect, including flaky test repairs." }
-          : { ok: true, text: "no: unused" }
-      ),
-    });
-    try {
-      const res = await app.request("/api/labels/refine-description", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "Bug fix",
-          description: "Diagnosing and correcting a defect",
-          corrections: [
-            {
-              description: "Stabilize the flaky login test",
-              classifierMatched: false,
-              correctedMatched: true,
-              reasoning: "not about a user-facing bug",
-            },
-          ],
-        }),
-      });
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as { description: string };
-      expect(body.description).toBe("Tasks that fix a reported defect, including flaky test repairs.");
-    } finally {
-      await store.close();
-    }
-  });
-
-  test("POST /api/labels/refine-description requires at least one correction", async () => {
-    const { store } = await openTestEnv();
-    const orgId = (await store.getDefaultOrgId())!;
-    await store.setTaskLlmProvider(orgId, "command", 1);
-    await store.setTaskLlmProviderField(orgId, "command", "command", "fake-classifier", 1);
-    const app = createHubApp(store, undefined, { executeCommand: async () => ({ ok: true, text: "unused" }) });
-    try {
-      const res = await app.request("/api/labels/refine-description", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Bug fix", corrections: [] }),
-      });
-      expect(res.status).toBe(400);
-    } finally {
-      await store.close();
-    }
-  });
 });
 
 // ---- GET /api/activity ------------------------------------------------------------------
