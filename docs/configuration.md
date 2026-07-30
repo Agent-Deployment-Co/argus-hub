@@ -10,8 +10,12 @@ precedence last.
 | —        | `HUB_SECRET_KEY` | — | _(optional)_ | Base64 encoding of 32 random bytes; enables and encrypts API-key-based task providers |
 | —        | `ADMIN_PASSWORD` | —     | _(random)_ | Dashboard login password (pinned across restarts when set) |
 | —        | `HUB_INSECURE_COOKIE_HOSTS` | — | _(none)_ | Comma-separated hostnames (no port) that get a non-`Secure` session cookie, for plain-HTTP-only internal deployments. **Never** list a host reachable from the public internet |
+| `--read-only` | `HUB_READ_ONLY` | — | `false` | Disable all writes (settings, groups, labels, task-labels, user updates) for a shareable read-only instance. MCP stays mounted, but its write tools are hidden/rejected too |
+| `--no-password` | — | — | _(enabled)_ | Disable the admin-password login entirely — every route is open, no login/logout. Can only be disabled via CLI flag or `HUB_NO_PASSWORD`, never via `hub.json`'s `password` key |
+| `--no-mcp` | `HUB_NO_MCP` | — | _(enabled)_ | Disable the MCP server entirely — `/mcp` is not mounted at all, independent of `--read-only` |
+| `--no-export` | `HUB_NO_EXPORT` | — | _(enabled)_ | Disable the dataset export surface — `/api/export` is not mounted and the Export nav item is hidden |
 
-`GET /healthz` always returns `200 ok` unauthenticated, for load balancer / orchestrator health checks.
+`GET /healthz` always returns `{"ok": true, "readOnly": ..., "noPassword": ..., "noExport": ...}` unauthenticated, for load balancer / orchestrator health checks and for the dashboard to detect its own mode at startup.
 
 **Client compatibility:** Argus Hub ingests client store schema versions v10–v23
 (`HUB_MIN_CLIENT_SCHEMA_VERSION` / `HUB_MAX_CLIENT_SCHEMA_VERSION`). A client outside that range

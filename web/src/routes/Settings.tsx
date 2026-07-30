@@ -5,6 +5,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useSettingsBackHref } from "../components/Layout";
 import { Modal } from "../components/Modal";
+import { useReadOnly } from "../lib/read-only";
 import {
   useDeleteSecretMutation,
   useSaveSecretMutation,
@@ -470,6 +471,7 @@ export function Settings() {
   const router = useRouter();
   const backHref = useSettingsBackHref();
   const goBack = () => router.history.push(backHref);
+  const readOnly = useReadOnly();
 
   return (
     <div className="settings-shell">
@@ -492,7 +494,15 @@ export function Settings() {
         </nav>
       </aside>
       <main className="settings-main">
-        {category === "general" ? (
+        {readOnly ? (
+          <div className="settings-pane">
+            <div className="settings-content">
+              <div className="settings-not-found" role="status">
+                <h2>Settings are unavailable in read-only mode</h2>
+              </div>
+            </div>
+          </div>
+        ) : category === "general" ? (
           <GeneralSettingsPane />
         ) : (
           <div className="settings-not-found" role="status">
