@@ -21,6 +21,7 @@ import { join, resolve } from "node:path";
 import { openHubStore } from "../src/store/hub-store.ts";
 import { createAdminAuth } from "../src/admin-auth.ts";
 import { generateDemoData } from "./demo/generate.ts";
+import { seedDemoLabels } from "./demo/seed-labels.ts";
 
 /** The real server's data dir (src/cli.ts's own default) — refuse to seed/wipe here. */
 const REAL_DATA_DIR = resolve(process.env.HUB_DATA_DIR ?? "./data");
@@ -81,6 +82,7 @@ const demo = defineCommand({
       await store.upsertClientSessions(orgId, dm.clientId, dm.rows, asOfMs);
     }
 
+    const labelStats = await seedDemoLabels(store, orgId, data, asOfMs);
     const users = await store.listUsers(orgId);
     await store.close();
 
@@ -93,6 +95,9 @@ const demo = defineCommand({
       process.stdout.write(`  • ${u.displayName}${email} — ${u.sessionCount} sessions\n`);
     }
     process.stdout.write(`Sessions by source: ${JSON.stringify(data.stats.bySource)}\n`);
+    process.stdout.write(
+      `Labels: ${labelStats.labels} created, applied to ${labelStats.applications} tasks\n`,
+    );
 
     const cliPath = join(import.meta.dir, "../src/cli.ts");
     if (!args.serve) {

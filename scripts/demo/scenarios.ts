@@ -774,3 +774,31 @@ export const PLUGIN_CATALOG: PluginCatalogEntry[] = [
   { name: "seo-optimizer", enabled: true, version: "0.8.1", installedDaysAgo: 45 },
   { name: "legacy-crm", enabled: false, version: "1.0.0", installedDaysAgo: 300 },
 ];
+
+// ---- Hub labels ----------------------------------------------------------------------------------
+// Hub-level task labels (#26): a hub admin creates these and applies them directly to tasks from the
+// Tasks page — distinct from the client-synced `resolved_session_labels` the generator doesn't emit
+// (Hub's demo has no story for those yet). `generate.ts` assigns these deterministically off each
+// task's authored `outcome`/`frustration`/`signals`, so `/labels` and the Tasks label filter aren't
+// empty in the demo. Order here is the review priority a GTM lead would actually work top-down.
+
+export interface HubLabelSeed {
+  name: string;
+  description: string;
+}
+
+export const HUB_LABELS: HubLabelSeed[] = [
+  { name: "Escalate", description: "Task failed outright — needs a human to pick it back up." },
+  {
+    name: "Needs follow-up",
+    description: "Outcome was unclear or the session ran into heavy friction before wrapping.",
+  },
+  {
+    name: "Blocked on write access",
+    description: "The agent declined a write (CRM, calendar, etc.) and needs a permission decision.",
+  },
+  {
+    name: "Good recovery",
+    description: "Hit friction mid-session but the person still got a usable result.",
+  },
+];

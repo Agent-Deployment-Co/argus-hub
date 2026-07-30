@@ -65,10 +65,14 @@ POST them to a running server, and we do **not** commit a prebuilt `.db`.
 - **`scenarios.ts`** — the authored, reviewable data: `DEMO_TEAM` (each person's GTM projects, session
   templates, and task pools) and `PLUGIN_CATALOG`. Edit this to change *what* the demo shows.
 - **`generate.ts`** — the deterministic expander: turns the team scenarios into per-member
-  `HubUploadRows` + fingerprint observations (the `Uploaded*` shapes a client uploads). Edit this to
-  change *how* sessions are shaped. Holds the invariants below.
+  `HubUploadRows` + fingerprint observations (the `Uploaded*` shapes a client uploads), plus which
+  hub labels apply to which tasks (`labelsForTask`). Edit this to change *how* sessions are shaped.
+  Holds the invariants below.
+- **`seed-labels.ts`** — creates `HUB_LABELS` in the store and applies them to the tasks
+  `generate.ts` picked out (`createLabel`/`setTaskLabel`). Shared by `demo.ts` and `test/demo.test.ts`
+  so both seed labels the same way.
 - **`../demo.ts`** — orchestration: opens the sandbox store, seeds each person through the client seams,
-  prints the summary + credentials, spawns `serve`.
+  seeds hub labels, prints the summary + credentials, spawns `serve`.
 
 ## How to tweak
 
@@ -81,6 +85,12 @@ POST them to a running server, and we do **not** commit a prebuilt `.db`.
   `skills`, `files`, `turns`, `friction`, `tasks`, optional `instances` to repeat it across dates).
 - **Add tasks:** each template's `tasks` is a **pool**; the generator takes 1-3 by session size. Author
   the pool oldest-first; put the messiest/least-resolved task last.
+- **Add/change a hub label:** edit `HUB_LABELS` in `scenarios.ts` (name + description) and
+  `labelsForTask` in `generate.ts` (the rule deciding which label(s), if any, a task gets — driven by
+  the task's own `outcome`/`frustration`/`signals`, not a separate RNG draw). These are the hub-admin
+  labels on `/labels` and the Tasks label filter (`hub_labels`/`hub_task_labels` — distinct from the
+  client-synced `resolved_session_labels`, which this demo does not seed). Keep every label applied to
+  at least one task (`test/demo.test.ts` checks this) — an unused label is a dead row in the demo.
 
 ## Invariants the generator guarantees (don't break these)
 

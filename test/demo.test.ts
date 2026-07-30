@@ -14,7 +14,8 @@ import { computeRecommendations } from "../src/api/recommendations.ts";
 import { cost } from "../src/pricing.ts";
 import { emptyUsage } from "../src/types.ts";
 import { generateDemoData } from "../scripts/demo/generate.ts";
-import { DEMO_TEAM } from "../scripts/demo/scenarios.ts";
+import { seedDemoLabels } from "../scripts/demo/seed-labels.ts";
+import { DEMO_TEAM, HUB_LABELS } from "../scripts/demo/scenarios.ts";
 
 const ANCHOR = Date.parse("2026-07-15T00:00:00Z");
 const DAY_MS = 86_400_000;
@@ -38,6 +39,8 @@ async function seedAndRead(seed = 42) {
     await store.resolveUserForClient(orgId, dm.clientId, ANCHOR);
     await store.upsertClientSessions(orgId, dm.clientId, dm.rows, ANCHOR);
   }
+
+  const labelStats = await seedDemoLabels(store, orgId, data, ANCHOR);
 
   try {
     // /api/snapshot: dashboard + recommendations over the full window.
@@ -69,7 +72,8 @@ async function seedAndRead(seed = 42) {
 
     const users = await store.listUsers(orgId);
     const clients = await store.listClients(orgId);
-    return { data, dashboard, recommendations, activity, users, clients };
+    const labels = await store.listLabels(orgId);
+    return { data, dashboard, recommendations, activity, users, clients, labels, labelStats };
   } finally {
     await store.close();
   }
@@ -178,6 +182,15 @@ test("task outcomes span success, failure, and unclear for view variety", async 
     for (const t of m.rows.tasks) outcomes.add((JSON.parse(t.task_json) as { outcome?: string }).outcome ?? "");
   }
   for (const o of ["success", "failure", "unclear"]) expect(outcomes.has(o)).toBe(true);
+});
+
+test("hub labels are created and every one is applied to at least one task, so /labels isn't empty", async () => {
+  const { labels, labelStats } = await seedAndRead();
+  expect(labels.length).toBe(HUB_LABELS.length);
+  expect(new Set(labels.map((l) => l.name))).toEqual(new Set(HUB_LABELS.map((l) => l.name)));
+  for (const label of labels) expect(label.taskCount).toBeGreaterThan(0);
+  expect(labelStats.labels).toBe(HUB_LABELS.length);
+  expect(labelStats.applications).toBe(labels.reduce((n, l) => n + l.taskCount, 0));
 });
 
 test("every session carries a non-empty title and summary", () => {
