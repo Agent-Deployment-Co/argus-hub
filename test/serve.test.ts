@@ -1250,6 +1250,68 @@ describe("read-only mode", () => {
     }
   });
 
+  // /api/sync stays registered (it has its own API-key auth, unrelated to the admin-session
+  // `writes` gate), but is rejected at the handler level — see the readOnly check in sync.ts.
+  test("POST /api/sync returns 403 and does not ingest", async () => {
+    const env = await openTestEnv();
+    try {
+      const app = createHubApp(env.store, undefined, { readOnly: true });
+      const clientId = env.clientFor("alice@example.com");
+      const res = await app.request("/api/sync", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.apiKey}`,
+          "X-Argus-Client": clientId,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(buildUploadPayload([{ id: "s1" }])),
+      });
+      expect(res.status).toBe(403);
+      expect(await env.store.countUsers(env.orgId)).toBe(0);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("POST /api/sync/unknown-sessions returns 403 in read-only mode", async () => {
+    const env = await openTestEnv();
+    try {
+      const app = createHubApp(env.store, undefined, { readOnly: true });
+      const clientId = env.clientFor("alice@example.com");
+      const res = await app.request("/api/sync/unknown-sessions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.apiKey}`,
+          "X-Argus-Client": clientId,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ sessionIds: ["s1"] }),
+      });
+      expect(res.status).toBe(403);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("POST /api/sync with a bad API key still returns 401 (not 403) in read-only mode", async () => {
+    const env = await openTestEnv();
+    try {
+      const app = createHubApp(env.store, undefined, { readOnly: true });
+      const res = await app.request("/api/sync", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer not-a-real-key",
+          "X-Argus-Client": env.clientFor("alice@example.com"),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(buildUploadPayload([{ id: "s1" }])),
+      });
+      expect(res.status).toBe(401);
+    } finally {
+      await env.store.close();
+    }
+  });
+
   // Structural backstop (mirrors Argus's #281 test): introspect the route table directly so a
   // new write route added without going onto `writes` fails automatically, rather than relying
   // on the enumerated list above staying in sync.

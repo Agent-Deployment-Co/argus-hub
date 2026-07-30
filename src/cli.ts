@@ -30,7 +30,7 @@ const serve = defineCommand({
     },
     "read-only": {
       type: "boolean",
-      description: "Read-only mode: disables all writes and hides editing UI (env HUB_READ_ONLY)",
+      description: "Read-only mode: disables all writes (including /api/sync ingest) and hides editing UI (env HUB_READ_ONLY)",
       default: process.env.HUB_READ_ONLY === "true",
     },
     // These are boolean flags in their *positive* form (default true), toggled off with
