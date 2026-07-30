@@ -1,6 +1,17 @@
+const argv = new Set(process.argv.slice(2));
+
+// Boolean serve flags this dev script knows how to toggle, either via `bun run dev --flag` or
+// the matching env var (see src/cli.ts's `serve` command for the canonical list).
+const SERVE_FLAGS = ["--read-only", "--no-password", "--no-mcp", "--no-export"] as const;
+const ENV_VARS: Record<(typeof SERVE_FLAGS)[number], string> = {
+  "--read-only": "HUB_READ_ONLY",
+  "--no-password": "HUB_NO_PASSWORD",
+  "--no-mcp": "HUB_NO_MCP",
+  "--no-export": "HUB_NO_EXPORT",
+};
+const activeFlags = SERVE_FLAGS.filter((flag) => argv.has(flag) || process.env[ENV_VARS[flag]] === "true");
+
 const port = process.env.HUB_PORT ?? "4343";
-const readOnly = process.env.HUB_READ_ONLY === "true";
-const noPassword = process.env.HUB_NO_PASSWORD === "true";
 
 function command(args: string[]) {
   return Bun.spawn({
@@ -16,7 +27,7 @@ const initialBuild = command(["bun", "run", "build:web"]);
 if (await initialBuild.exited) process.exitCode = 1;
 if (process.exitCode) process.exit();
 
-const modes = [readOnly && "read-only", noPassword && "no-password"].filter(Boolean).join(", ");
+const modes = activeFlags.map((flag) => flag.slice(2)).join(", ");
 process.stdout.write(`Hub → http://localhost:${port}/${modes ? ` (${modes})` : ""}\n`);
 
 const server = command([
@@ -27,8 +38,7 @@ const server = command([
   "serve",
   "--port",
   port,
-  ...(readOnly ? ["--read-only"] : []),
-  ...(noPassword ? ["--no-password"] : []),
+  ...activeFlags,
 ]);
 const webBuilder = command(["bun", "run", "build:web", "--", "--watch"]);
 

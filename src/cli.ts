@@ -33,20 +33,25 @@ const serve = defineCommand({
       description: "Read-only mode: disables all writes and hides editing UI (env HUB_READ_ONLY)",
       default: process.env.HUB_READ_ONLY === "true",
     },
-    "no-password": {
+    // These are boolean flags in their *positive* form (default true), toggled off with
+    // citty's built-in `--no-<name>` negation — citty's parser treats any `--no-X` argument as
+    // setting `X` to false before option resolution even runs, so a flag actually *named*
+    // `no-password` (etc.) can never be set from the command line: `--no-password` would just
+    // set a nonexistent `password` key to false and leave `no-password` untouched.
+    password: {
       type: "boolean",
-      description: "Disable the admin password entirely: every route is open, no login/logout (env HUB_NO_PASSWORD)",
-      default: process.env.HUB_NO_PASSWORD === "true",
+      description: "Require the admin password (disable with --no-password: every route is open, no login/logout; env HUB_NO_PASSWORD)",
+      default: process.env.HUB_NO_PASSWORD !== "true",
     },
-    "no-mcp": {
+    mcp: {
       type: "boolean",
-      description: "Disable the MCP server: /mcp is not mounted (env HUB_NO_MCP)",
-      default: process.env.HUB_NO_MCP === "true",
+      description: "Mount the MCP server (disable with --no-mcp: /mcp is not mounted; env HUB_NO_MCP)",
+      default: process.env.HUB_NO_MCP !== "true",
     },
-    "no-export": {
+    export: {
       type: "boolean",
-      description: "Disable the dataset export surface: /api/export is not mounted and the Export nav item is hidden (env HUB_NO_EXPORT)",
-      default: process.env.HUB_NO_EXPORT === "true",
+      description: "Mount the dataset export surface (disable with --no-export: /api/export is not mounted and the Export nav item is hidden; env HUB_NO_EXPORT)",
+      default: process.env.HUB_NO_EXPORT !== "true",
     },
   },
   async run({ args }) {
@@ -62,7 +67,7 @@ const serve = defineCommand({
       ?.split(",")
       .map((h) => h.trim().toLowerCase())
       .filter(Boolean);
-    const noPassword = args["no-password"];
+    const noPassword = !args.password;
     const auth = noPassword ? undefined : createAdminAuth(process.env.ADMIN_PASSWORD, insecureCookieHosts);
     const store = await openHubStore(args["data-dir"]);
 
@@ -86,8 +91,8 @@ const serve = defineCommand({
       auth,
       secretCipher,
       readOnly: args["read-only"],
-      noMcp: args["no-mcp"],
-      noExport: args["no-export"],
+      noMcp: !args.mcp,
+      noExport: !args.export,
       signal: ac.signal,
     });
     store.close();
