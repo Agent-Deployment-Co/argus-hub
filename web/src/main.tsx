@@ -4,6 +4,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { router } from "./router";
 import { ThemeProvider } from "./lib/theme";
+import { ReadOnlyProvider } from "./lib/read-only";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -14,7 +15,9 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <RouterProvider router={router} />
+        <ReadOnlyProvider>
+          <RouterProvider router={router} />
+        </ReadOnlyProvider>
       </ThemeProvider>
     </QueryClientProvider>
   </StrictMode>,

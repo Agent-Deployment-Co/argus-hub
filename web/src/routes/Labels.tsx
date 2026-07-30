@@ -2,10 +2,12 @@ import { Plus, Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Modal } from "../components/Modal";
 import { useCreateLabel, useDeleteLabel, useLabels, type HubLabel } from "../lib/labels";
+import { useReadOnly } from "../lib/read-only";
 
 /** Hub-level task labels: created and applied directly by a hub admin. Distinct from Argus
  *  client task labels — see ARGUS_HUB_LABELS_PLAN.md. */
 export function Labels() {
+  const readOnly = useReadOnly();
   const labelsQuery = useLabels();
   const deleteLabel = useDeleteLabel();
   const [creating, setCreating] = useState(false);
@@ -17,9 +19,11 @@ export function Labels() {
     <>
       <div className="page-head">
         <h1>Labels</h1>
-        <button type="button" className="btn-primary" onClick={() => setCreating(true)}>
-          <Plus size={14} strokeWidth={2.5} aria-hidden /> New label
-        </button>
+        {!readOnly && (
+          <button type="button" className="btn-primary" onClick={() => setCreating(true)}>
+            <Plus size={14} strokeWidth={2.5} aria-hidden /> New label
+          </button>
+        )}
       </div>
 
       {labelsQuery.isPending ? (
@@ -36,23 +40,25 @@ export function Labels() {
             <thead>
               <tr>
                 <th>Name</th>
-                <th className="right">Actions</th>
+                {!readOnly && <th className="right">Actions</th>}
               </tr>
             </thead>
             <tbody>
               {labels.map((label) => (
                 <tr key={label.labelId}>
                   <td>{label.name}</td>
-                  <td className="right">
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => setDeleting(label)}
-                      aria-label={`Delete ${label.name}`}
-                    >
-                      <Trash2 size={14} strokeWidth={2} aria-hidden />
-                    </button>
-                  </td>
+                  {!readOnly && (
+                    <td className="right">
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => setDeleting(label)}
+                        aria-label={`Delete ${label.name}`}
+                      >
+                        <Trash2 size={14} strokeWidth={2} aria-hidden />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

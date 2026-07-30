@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import { GroupPicker } from "../components/GroupPicker";
 import { Modal } from "../components/Modal";
 import { fmt, usd } from "../lib/format";
+import { useReadOnly } from "../lib/read-only";
 import { useUsers, type HubUser } from "../lib/users";
 import {
   useCreateGroup, useDeleteGroup, useGroups, useRenameGroup, useSetUsersGroup,
@@ -17,6 +18,7 @@ const UNGROUPED = "__ungrouped__";
 /** Every team member the Hub has heard from, organized by group, with group management (create/
  *  rename/delete) and single/bulk group assignment. */
 export function Team() {
+  const readOnly = useReadOnly();
   const usersQuery = useUsers();
   const groupsQuery = useGroups();
   const setUsersGroup = useSetUsersGroup();
@@ -51,9 +53,11 @@ export function Team() {
     <>
       <div className="page-head">
         <h1>Team</h1>
-        <button type="button" className="btn-primary" onClick={() => setCreating(true)}>
-          <Plus size={14} strokeWidth={2.5} aria-hidden /> New group
-        </button>
+        {!readOnly && (
+          <button type="button" className="btn-primary" onClick={() => setCreating(true)}>
+            <Plus size={14} strokeWidth={2.5} aria-hidden /> New group
+          </button>
+        )}
       </div>
       {isPending ? (
         <div className="center-state">Loading…</div>
@@ -63,7 +67,7 @@ export function Team() {
         <p className="muted">No users yet. Run <code>argus sync</code> from a client to ingest data.</p>
       ) : (
         <>
-          {selected.size > 0 && (
+          {!readOnly && selected.size > 0 && (
             <div className="bulk-toolbar">
               <span>{selected.size} selected</span>
               <select
@@ -100,8 +104,9 @@ export function Team() {
               section={section}
               selected={selected}
               onToggle={toggleSelected}
-              onRename={section.group ? () => setRenaming(section.group) : undefined}
-              onDelete={section.group ? () => setDeleting(section.group) : undefined}
+              readOnly={readOnly}
+              onRename={!readOnly && section.group ? () => setRenaming(section.group) : undefined}
+              onDelete={!readOnly && section.group ? () => setDeleting(section.group) : undefined}
             />
           ))}
         </>
@@ -143,11 +148,12 @@ function buildSections(users: HubUser[], groups: HubGroup[]): GroupSectionData[]
 }
 
 function GroupSection({
-  section, selected, onToggle, onRename, onDelete,
+  section, selected, onToggle, readOnly, onRename, onDelete,
 }: {
   section: GroupSectionData;
   selected: Set<string>;
   onToggle: (userId: string) => void;
+  readOnly: boolean;
   onRename?: () => void;
   onDelete?: () => void;
 }) {
@@ -175,26 +181,28 @@ function GroupSection({
           <table>
             <thead>
               <tr>
-                <th className="checkbox-col" aria-hidden />
+                {!readOnly && <th className="checkbox-col" aria-hidden />}
                 <th>User</th>
                 <th className="num">Sessions</th>
                 <th className="num">Tokens</th>
                 <th className="num">Cost</th>
                 <th>Last synced</th>
-                <th>Actions</th>
+                {!readOnly && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
               {section.users.map((u) => (
                 <tr key={u.userId}>
-                  <td className="checkbox-col">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(u.userId)}
-                      onChange={() => onToggle(u.userId)}
-                      aria-label={`Select ${u.displayName}`}
-                    />
-                  </td>
+                  {!readOnly && (
+                    <td className="checkbox-col">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(u.userId)}
+                        onChange={() => onToggle(u.userId)}
+                        aria-label={`Select ${u.displayName}`}
+                      />
+                    </td>
+                  )}
                   <td>
                     <Link to="/users/$userId" params={{ userId: u.userId }} className="table-link">
                       {u.displayName}
@@ -204,14 +212,16 @@ function GroupSection({
                   <td className="num">{fmt(u.totalTokens)}</td>
                   <td className="num">{usd(u.cost)}</td>
                   <td className="nowrap">{new Date(u.lastSyncMs).toLocaleDateString()}</td>
-                  <td>
-                    <GroupPicker
-                      userId={u.userId}
-                      userLabel={u.displayName}
-                      groupId={u.groupId}
-                      groupName={u.groupName}
-                    />
-                  </td>
+                  {!readOnly && (
+                    <td>
+                      <GroupPicker
+                        userId={u.userId}
+                        userLabel={u.displayName}
+                        groupId={u.groupId}
+                        groupName={u.groupName}
+                      />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

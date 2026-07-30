@@ -2,6 +2,7 @@ import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { Activity, Download, ListTodo, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Settings as SettingsIcon, Sun, Tag, Users, Wrench, type LucideIcon } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../lib/theme";
+import { useReadOnly } from "../lib/read-only";
 import { useUserInfo } from "../lib/users";
 import { Modal } from "./Modal";
 import archMarkUrl from "../assets/arch-mark.svg";
@@ -103,6 +104,7 @@ function LogoutDialog({ onClose }: { onClose: () => void }) {
 }
 
 export function Layout() {
+  const readOnly = useReadOnly();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const href = useRouterState({ select: (s) => s.location.href });
   useDocumentTitle();
@@ -158,15 +160,17 @@ export function Layout() {
         </nav>
         <div className="rail-footer">
           <ThemeToggle />
-          <Link
-            to="/settings/$category"
-            params={{ category: "general" }}
-            className="rail-icon-btn"
-            title="Settings"
-            aria-label="Settings"
-          >
-            <SettingsIcon size={16} strokeWidth={1.75} aria-hidden />
-          </Link>
+          {!readOnly && (
+            <Link
+              to="/settings/$category"
+              params={{ category: "general" }}
+              className="rail-icon-btn"
+              title="Settings"
+              aria-label="Settings"
+            >
+              <SettingsIcon size={16} strokeWidth={1.75} aria-hidden />
+            </Link>
+          )}
           <button
             type="button"
             className="rail-icon-btn"
