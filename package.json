@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit && tsc -p web --noEmit",
     "dev": "bun run scripts/dev.ts",
     "dev:read-only": "HUB_READ_ONLY=true bun run scripts/dev.ts",
+    "dev:read-only:no-password": "HUB_READ_ONLY=true HUB_NO_PASSWORD=true bun run scripts/dev.ts",
     "demo": "bun run scripts/demo.ts",
     "dev:web": "vite --config web/vite.config.ts",
     "build:web": "vite build --config web/vite.config.ts",
