@@ -2,7 +2,7 @@ import { openaiCompatibleComplete } from "./openai-compatible.ts";
 import type { ProviderDescriptor } from "../types.ts";
 
 export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
-export const DEFAULT_OPENAI_MODEL = "gpt-5.4-nano";
+export const DEFAULT_OPENAI_MODEL = "gpt-5.6-luna";
 
 export const openaiProvider: ProviderDescriptor = {
   name: "openai",

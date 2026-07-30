@@ -25,7 +25,7 @@ describe("Hub settings descriptors", () => {
     const model = section.settings.find((setting) => setting.field === "model");
     expect(command?.visibleWhen?.in).toEqual(["command"]);
     expect(command?.description).toContain("Hub host");
-    expect(model?.placeholderByProvider?.openai).toBe("gpt-5.4-nano");
+    expect(model?.placeholderByProvider?.openai).toBe("gpt-5.6-luna");
     expect(section.secretField.providers).toEqual(["claude-api", "gemini", "openai", "openrouter"]);
   });
 

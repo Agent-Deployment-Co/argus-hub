@@ -13,7 +13,7 @@ describe("LLM provider registry", () => {
   test("is the source of config fields and model defaults", () => {
     expect(PROVIDERS.find((provider) => provider.name === "openai")?.configFields)
       .toEqual(["model", "baseUrl", "effort"]);
-    expect(defaultModelByProvider().openai).toBe("gpt-5.4-nano");
+    expect(defaultModelByProvider().openai).toBe("gpt-5.6-luna");
     expect(defaultModelByProvider().openrouter).toBeUndefined();
   });
 
@@ -60,7 +60,7 @@ describe("LLM provider registry", () => {
     );
     expect(result.ok).toBe(true);
     expect((request?.headers as Record<string, string>).authorization).toBe("Bearer test-key");
-    expect(JSON.parse(String(request?.body)).model).toBe("gpt-5.4-nano");
+    expect(JSON.parse(String(request?.body)).model).toBe("gpt-5.6-luna");
   });
 });
 
