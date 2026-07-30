@@ -29,14 +29,20 @@ const CLIENT_ID_HEADER = "X-Argus-Client";
 
 // ---- Hono handler factory ---------------------------------------------------------------
 
-/** Returns a Hono handler for `POST /api/sync`. Auth is checked before the body is buffered. */
-export function syncHandler(store: HubStore) {
+/**
+ * Returns a Hono handler for `POST /api/sync`. Auth is checked before the body is buffered.
+ * `readOnly` mirrors the `writes` sub-router gate in serve.ts: sync mutates the store, so it's
+ * rejected too, but sync has its own API-key auth (not the admin session `writes` sits behind),
+ * so it's checked explicitly here rather than by structurally dropping the route.
+ */
+export function syncHandler(store: HubStore, readOnly: boolean) {
   return async (c: Context): Promise<Response> => {
-    // Auth before body — avoid processing the upload on a bad key.
+    // Auth before read-only — don't leak the read-only flag to an unauthenticated caller.
     const token = parseBearerToken(c.req.header("Authorization"));
     if (!token) return c.json({ error: "Missing or malformed Authorization header." }, 401);
     const key = await store.lookupApiKey(token);
     if (!key || !key.isEnabled) return c.json({ error: "Invalid or disabled API key." }, 401);
+    if (readOnly) return c.json({ error: "This Hub instance is read-only; sync is disabled." }, 403);
 
     const clientId = c.req.header(CLIENT_ID_HEADER)?.trim() ?? "";
     if (!clientId) return c.json({ error: `Missing ${CLIENT_ID_HEADER} header.` }, 400);
@@ -76,13 +82,16 @@ export const MAX_SESSION_IDS_PER_REQUEST = 10_000;
  * Returns a Hono handler for `POST /api/sync/unknown-sessions`. The client posts
  * `{ sessionIds: string[] }`; the response lists the IDs the Hub does NOT yet have for
  * this client. Uses the same API-key + X-Argus-Client auth as `POST /api/sync`.
+ * This is a probe, not a write, but it's only ever called as the first step of a sync — reject
+ * it in read-only mode too so a client doesn't probe successfully and then fail the real upload.
  */
-export function unknownSessionsHandler(store: HubStore) {
+export function unknownSessionsHandler(store: HubStore, readOnly: boolean) {
   return async (c: Context): Promise<Response> => {
     const token = parseBearerToken(c.req.header("Authorization"));
     if (!token) return c.json({ error: "Missing or malformed Authorization header." }, 401);
     const key = await store.lookupApiKey(token);
     if (!key || !key.isEnabled) return c.json({ error: "Invalid or disabled API key." }, 401);
+    if (readOnly) return c.json({ error: "This Hub instance is read-only; sync is disabled." }, 403);
 
     const clientId = c.req.header(CLIENT_ID_HEADER)?.trim() ?? "";
     if (!clientId) return c.json({ error: `Missing ${CLIENT_ID_HEADER} header.` }, 400);

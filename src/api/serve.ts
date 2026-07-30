@@ -151,10 +151,10 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     });
   }
 
-  // ---- Ingest (API-key auth handled inside syncHandler) -------------------------
+  // ---- Ingest (API-key auth handled inside syncHandler; readOnly rejects with 403) ----
 
-  app.post("/api/sync", syncHandler(store));
-  app.post("/api/sync/unknown-sessions", unknownSessionsHandler(store));
+  app.post("/api/sync", syncHandler(store, readOnly));
+  app.post("/api/sync/unknown-sessions", unknownSessionsHandler(store, readOnly));
 
   // ---- MCP (mostly read-only query tools for external agents) -------------------
   //
