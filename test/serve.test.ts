@@ -1161,3 +1161,213 @@ describe("GET /api/tasks/report", () => {
     }
   });
 });
+
+describe("read-only mode", () => {
+  test("GET /healthz reports readOnly", async () => {
+    const { store } = await openTestEnv();
+    try {
+      expect(await (await createHubApp(store).request("/healthz")).json())
+        .toEqual({ ok: true, readOnly: false, noPassword: true, noExport: false });
+      expect(await (await createHubApp(store, undefined, { readOnly: true }).request("/healthz")).json())
+        .toEqual({ ok: true, readOnly: true, noPassword: true, noExport: false });
+    } finally {
+      await store.close();
+    }
+  });
+
+  // One representative request per mutating route family (settings, secrets, users, groups,
+  // labels, task-labels) — each must 404 once read-only mode drops the `writes` sub-app.
+  // (Tuples are all length-3 — a shorter tuple makes bun's test.each treat the unused trailing
+  // parameter as an async "done" callback and hang until timeout.)
+  const writeRequests: Array<[string, string, string]> = [
+    ["PUT", "/api/settings/taskLlm.provider", JSON.stringify({ value: "openai" })],
+    ["POST", "/api/settings/secrets/openai", JSON.stringify({ value: "sk-x" })],
+    ["DELETE", "/api/settings/secrets/openai", ""],
+    ["POST", "/api/settings/test-connection", ""],
+    ["PATCH", "/api/users/some-user", JSON.stringify({ groupId: null })],
+    ["POST", "/api/groups", JSON.stringify({ name: "Eng" })],
+    ["PATCH", "/api/groups/some-group", JSON.stringify({ name: "Eng2" })],
+    ["DELETE", "/api/groups/some-group", ""],
+    ["POST", "/api/groups/some-group/members", JSON.stringify({ userIds: ["u1"] })],
+    ["DELETE", "/api/groups/some-group/members", JSON.stringify({ userIds: ["u1"] })],
+    ["POST", "/api/labels", JSON.stringify({ name: "Bug" })],
+    ["DELETE", "/api/labels/some-label", ""],
+    ["POST", "/api/task-labels", JSON.stringify({ labelId: "l1", clientId: "c", sessionId: "s", taskSeq: 0 })],
+  ];
+
+  test.each(writeRequests)("%s %s is dropped entirely (404)", async (method, path, body) => {
+    const { store } = await openTestEnv();
+    try {
+      const app = createHubApp(store, undefined, { readOnly: true });
+      const res = await app.request(path, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        ...(body ? { body } : {}),
+      });
+      expect(res.status).toBe(404);
+    } finally {
+      await store.close();
+    }
+  });
+
+  // GET /api/settings/secrets/:provider also moves onto `writes` (it's part of the
+  // settings-editing surface), but a dropped GET route has no analogous "gone" status of its
+  // own — it just falls through to the SPA's GET "*" catch-all, same as any other unmatched GET
+  // path (Argus's #281 test documents the identical behavior for its own writes-only GETs).
+  test("GET /api/settings/secrets/:provider falls through to the SPA shell, not JSON", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const app = createHubApp(store, undefined, { readOnly: true });
+      const res = await app.request("/api/settings/secrets/openai");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toMatch(/html/);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("reads stay mounted", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const app = createHubApp(store, undefined, { readOnly: true });
+      const res = await app.request("/api/labels");
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ labels: [] });
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("MCP stays mounted in read-only mode", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const on = await createHubApp(store).request("/mcp", { method: "POST" });
+      expect(on.status).not.toBe(404);
+      const stillOn = await createHubApp(store, undefined, { readOnly: true }).request("/mcp", { method: "POST" });
+      expect(stillOn.status).not.toBe(404);
+    } finally {
+      await store.close();
+    }
+  });
+
+  // Structural backstop (mirrors Argus's #281 test): introspect the route table directly so a
+  // new write route added without going onto `writes` fails automatically, rather than relying
+  // on the enumerated list above staying in sync.
+  test("no non-GET app route survives in read-only mode", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const app = createHubApp(store, undefined, { readOnly: true }) as Hono;
+      const exempt = new Set(["POST /login", "GET /logout", "POST /api/sync", "POST /api/sync/unknown-sessions"]);
+      const offenders = app.routes
+        .filter((r) => r.method !== "GET" && r.method !== "ALL")
+        .map((r) => `${r.method} ${r.path}`)
+        .filter((key) => !exempt.has(key));
+      expect(offenders).toEqual([]);
+    } finally {
+      await store.close();
+    }
+  });
+});
+
+describe("no-mcp mode", () => {
+  test("disables MCP entirely, independent of readOnly", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const on = await createHubApp(store).request("/mcp", { method: "POST" });
+      expect(on.status).not.toBe(404);
+      const off = await createHubApp(store, undefined, { noMcp: true }).request("/mcp", { method: "POST" });
+      expect(off.status).toBe(404);
+      const offAndReadOnly = await createHubApp(store, undefined, { noMcp: true, readOnly: true })
+        .request("/mcp", { method: "POST" });
+      expect(offAndReadOnly.status).toBe(404);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("no /mcp route survives with --no-mcp", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const app = createHubApp(store, undefined, { noMcp: true }) as Hono;
+      expect(app.routes.some((r) => r.path === "/mcp" || r.path.startsWith("/mcp/"))).toBe(false);
+    } finally {
+      await store.close();
+    }
+  });
+});
+
+describe("no-export mode", () => {
+  // /api/export has no file extension, so a dropped route falls through to the SPA's GET "*"
+  // catch-all rather than 404ing directly — same as the settings/secrets GET route above.
+  test("falls through to the SPA shell, not the export stream", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const on = await createHubApp(store).request("/api/export");
+      expect(on.headers.get("content-type")).toMatch(/zip/);
+      const off = await createHubApp(store, undefined, { noExport: true }).request("/api/export");
+      expect(off.status).toBe(200);
+      expect(off.headers.get("content-type")).toMatch(/html/);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("GET /healthz reports noExport", async () => {
+    const { store } = await openTestEnv();
+    try {
+      expect(await (await createHubApp(store, undefined, { noExport: true }).request("/healthz")).json())
+        .toEqual({ ok: true, readOnly: false, noPassword: true, noExport: true });
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("no /api/export route survives with --no-export", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const app = createHubApp(store, undefined, { noExport: true }) as Hono;
+      expect(app.routes.some((r) => r.path === "/api/export")).toBe(false);
+    } finally {
+      await store.close();
+    }
+  });
+});
+
+describe("no-password mode", () => {
+  test("GET /healthz reports noPassword based on whether auth is configured", async () => {
+    const { store } = await openTestEnv();
+    try {
+      expect(await (await createHubApp(store).request("/healthz")).json())
+        .toEqual({ ok: true, readOnly: false, noPassword: true, noExport: false });
+      expect(await (await createHubApp(store, createAdminAuth("secret")).request("/healthz")).json())
+        .toEqual({ ok: true, readOnly: false, noPassword: false, noExport: false });
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("no /login, /logout, or session gate is mounted without auth", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const app = createHubApp(store) as Hono;
+      expect(app.routes.some((r) => r.path === "/login")).toBe(false);
+      expect(app.routes.some((r) => r.path === "/logout")).toBe(false);
+
+      const res = await app.request("/api/users");
+      expect(res.status).toBe(200);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("SPA shell is served without a session cookie when auth is undefined", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const app = createHubApp(store);
+      const res = await app.request("/");
+      expect(res.status).not.toBe(302);
+    } finally {
+      await store.close();
+    }
+  });
+});

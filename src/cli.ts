@@ -28,6 +28,31 @@ const serve = defineCommand({
       description: "Directory for hub.db",
       default: process.env.HUB_DATA_DIR ?? "./data",
     },
+    "read-only": {
+      type: "boolean",
+      description: "Read-only mode: disables all writes and hides editing UI (env HUB_READ_ONLY)",
+      default: process.env.HUB_READ_ONLY === "true",
+    },
+    // These are boolean flags in their *positive* form (default true), toggled off with
+    // citty's built-in `--no-<name>` negation — citty's parser treats any `--no-X` argument as
+    // setting `X` to false before option resolution even runs, so a flag actually *named*
+    // `no-password` (etc.) can never be set from the command line: `--no-password` would just
+    // set a nonexistent `password` key to false and leave `no-password` untouched.
+    password: {
+      type: "boolean",
+      description: "Require the admin password (disable with --no-password: every route is open, no login/logout; env HUB_NO_PASSWORD)",
+      default: process.env.HUB_NO_PASSWORD !== "true",
+    },
+    mcp: {
+      type: "boolean",
+      description: "Mount the MCP server (disable with --no-mcp: /mcp is not mounted; env HUB_NO_MCP)",
+      default: process.env.HUB_NO_MCP !== "true",
+    },
+    export: {
+      type: "boolean",
+      description: "Mount the dataset export surface (disable with --no-export: /api/export is not mounted and the Export nav item is hidden; env HUB_NO_EXPORT)",
+      default: process.env.HUB_NO_EXPORT !== "true",
+    },
   },
   async run({ args }) {
     const secretKey = parseHubSecretKey(process.env.HUB_SECRET_KEY);
@@ -42,11 +67,17 @@ const serve = defineCommand({
       ?.split(",")
       .map((h) => h.trim().toLowerCase())
       .filter(Boolean);
-    const auth = createAdminAuth(process.env.ADMIN_PASSWORD, insecureCookieHosts);
+    const noPassword = !args.password;
+    const auth = noPassword ? undefined : createAdminAuth(process.env.ADMIN_PASSWORD, insecureCookieHosts);
     const store = await openHubStore(args["data-dir"]);
 
-    if (!process.env.ADMIN_PASSWORD) {
-      process.stdout.write(`Admin password: ${auth.password}\n`);
+    if (noPassword) {
+      process.stderr.write(
+        "WARNING: --no-password is set. The Hub is running with no login required — anyone who can " +
+          "reach this server can view and change all data. Only use this on a network you trust.\n",
+      );
+    } else if (!process.env.ADMIN_PASSWORD) {
+      process.stdout.write(`Admin password: ${auth!.password}\n`);
     }
 
     const ac = new AbortController();
@@ -54,7 +85,16 @@ const serve = defineCommand({
       process.once(sig, () => ac.abort());
     }
 
-    await startHubServer({ port, store, auth, secretCipher, signal: ac.signal });
+    await startHubServer({
+      port,
+      store,
+      auth,
+      secretCipher,
+      readOnly: args["read-only"],
+      noMcp: !args.mcp,
+      noExport: !args.export,
+      signal: ac.signal,
+    });
     store.close();
   },
 });

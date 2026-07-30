@@ -176,6 +176,55 @@ describe("tools/list", () => {
   });
 });
 
+describe("read-only mode hides/rejects MCP write tools", () => {
+  test("tools/list omits create_label and set_task_label when readOnly", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store, undefined, { readOnly: true });
+    try {
+      const { body } = await rpc(app, "tools/list");
+      const tools = (body as { result: { tools: Array<{ name: string }> } }).result.tools;
+      expect(tools.map((t) => t.name)).toEqual([
+        "query_activity", "query_tasks", "query_task_quality", "query_tool_usage", "query_users",
+        "list_labels",
+      ]);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("create_label and set_task_label return a tool error when readOnly", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store, undefined, { readOnly: true });
+    try {
+      const { body: createBody } = await callTool(app, "create_label", { name: "Bug fix" });
+      const createResult = (createBody as { result: { isError?: boolean; content: Array<{ text: string }> } }).result;
+      expect(createResult.isError).toBe(true);
+      expect(createResult.content[0]!.text).toContain("read-only");
+
+      const { body: setBody } = await callTool(app, "set_task_label", {
+        labelId: "l1", clientId: "c", sessionId: "s", taskSeq: 0,
+      });
+      const setResult = (setBody as { result: { isError?: boolean; content: Array<{ text: string }> } }).result;
+      expect(setResult.isError).toBe(true);
+      expect(setResult.content[0]!.text).toContain("read-only");
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("read-only tools still work (list_labels, query_activity)", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store, undefined, { readOnly: true });
+    try {
+      const { body } = await callTool(app, "list_labels");
+      const result = (body as { result: { content: Array<{ text: string }> } }).result;
+      expect(JSON.parse(result.content[0]!.text)).toEqual({ labels: [] });
+    } finally {
+      await env.store.close();
+    }
+  });
+});
+
 describe("tools/call query_activity", () => {
   test("returns 'No data yet.' as a tool error when the org has no sessions", async () => {
     const env = await openTestEnv();

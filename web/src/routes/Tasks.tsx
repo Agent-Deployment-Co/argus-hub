@@ -9,6 +9,7 @@ import { TaskSuccessTrend } from "../components/TaskSuccessTrend";
 import { TaskQualityByUser, TaskQualityBySource, TaskQualityByProject } from "../components/TaskQuality";
 import { TaskSignalsAndFriction } from "../components/TaskSignalsAndFriction";
 import { TaskLabelPicker } from "../components/TaskLabelPicker";
+import { useReadOnly } from "../lib/read-only";
 import { useTaskReportQuery } from "../lib/tasks-report";
 import { DEFAULT_SINCE, DEFAULT_UNTIL, isFilterActive, sanitizedSource } from "../lib/filters";
 import type { TaskListResponse } from "../types";
@@ -78,6 +79,7 @@ function reportErrorMessage(err: Error): ReactNode {
 const routeApi = getRouteApi("/tasks");
 
 export function Tasks() {
+  const readOnly = useReadOnly();
   const search = routeApi.useSearch();
   const navigate = routeApi.useNavigate();
   const q = search.q ?? "";
@@ -268,15 +270,17 @@ export function Tasks() {
                           {t.source} · {t.project} · {t.sessionId}
                         </span>
                       </div>
-                      <div className="task-panel-field">
-                        <span className="task-panel-label">Labels</span>
-                        <span className="task-panel-value">
-                          <TaskLabelPicker
-                            taskRef={{ clientId: t.clientId, sessionId: t.sessionId, taskSeq: t.taskSeq }}
-                            applied={t.labels}
-                          />
-                        </span>
-                      </div>
+                      {!readOnly && (
+                        <div className="task-panel-field">
+                          <span className="task-panel-label">Labels</span>
+                          <span className="task-panel-value">
+                            <TaskLabelPicker
+                              taskRef={{ clientId: t.clientId, sessionId: t.sessionId, taskSeq: t.taskSeq }}
+                              applied={t.labels}
+                            />
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

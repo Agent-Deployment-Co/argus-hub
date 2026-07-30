@@ -74,3 +74,42 @@ Save as `~/Library/LaunchAgents/co.agentdeployment.argus-hub.plist`:
 ```bash
 launchctl load ~/Library/LaunchAgents/co.agentdeployment.argus-hub.plist
 ```
+
+---
+
+## Read-only mode
+
+Add `--read-only` to `ExecStart`/`ProgramArguments` (or set `HUB_READ_ONLY=true` in the unit's
+environment) to disable every write — settings, secrets, groups, labels, task-labels, user
+updates — for a shared/demo instance that should only be viewed. MCP stays mounted, but its two
+write tools (`create_label`, `set_task_label`) are hidden/rejected too; use `--no-mcp` below to
+disable MCP entirely instead. This doesn't change the admin-password login requirement: if
+`ADMIN_PASSWORD` is set, reads still require it exactly as they do today.
+
+---
+
+## No-password mode
+
+Add `--no-password` (or set `HUB_NO_PASSWORD=true`) to remove the admin-password login
+requirement entirely: `/login` and `/logout` aren't mounted, every route is open, and the SPA
+hides the sign-out button. The server prints a warning to stderr at startup as a reminder. Only
+use this on a network you trust (e.g. behind a VPN/Tailscale, or `localhost`-only) — anyone who
+can reach the port can view and change all data. It composes with `--read-only` if you want an
+open, view-only instance.
+
+---
+
+## Disabling MCP
+
+Add `--no-mcp` (or set `HUB_NO_MCP=true`) to turn off the MCP server entirely — `/mcp` is not
+mounted at all. This is independent of `--read-only`, which only hides MCP's two write tools
+rather than disabling the whole surface; use `--no-mcp` for deployments that want to remove
+programmatic access entirely regardless of whether writes are otherwise enabled.
+
+---
+
+## Disabling export
+
+Add `--no-export` (or set `HUB_NO_EXPORT=true`) to turn off the dataset export surface —
+`GET /api/export` is not mounted and the SPA hides the Export nav item. Independent of
+`--read-only` and `--no-mcp`.

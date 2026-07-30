@@ -2,6 +2,7 @@ import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { Activity, Download, ListTodo, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Settings as SettingsIcon, Sun, Tag, Users, Wrench, type LucideIcon } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useTheme } from "../lib/theme";
+import { useNoExport, useNoPassword, useReadOnly } from "../lib/read-only";
 import { useUserInfo } from "../lib/users";
 import { Modal } from "./Modal";
 import archMarkUrl from "../assets/arch-mark.svg";
@@ -103,6 +104,10 @@ function LogoutDialog({ onClose }: { onClose: () => void }) {
 }
 
 export function Layout() {
+  const readOnly = useReadOnly();
+  const noPassword = useNoPassword();
+  const noExport = useNoExport();
+  const nav = noExport ? NAV.filter((item) => item.to !== "/export") : NAV;
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const href = useRouterState({ select: (s) => s.location.href });
   useDocumentTitle();
@@ -135,7 +140,7 @@ export function Layout() {
           <Wordmark />
         </div>
         <nav className="rail-nav" aria-label="Hub sections">
-          {NAV.map((item) => {
+          {nav.map((item) => {
             const Ico = item.icon;
             return (
               <Link
@@ -158,24 +163,28 @@ export function Layout() {
         </nav>
         <div className="rail-footer">
           <ThemeToggle />
-          <Link
-            to="/settings/$category"
-            params={{ category: "general" }}
-            className="rail-icon-btn"
-            title="Settings"
-            aria-label="Settings"
-          >
-            <SettingsIcon size={16} strokeWidth={1.75} aria-hidden />
-          </Link>
-          <button
-            type="button"
-            className="rail-icon-btn"
-            title="Sign out"
-            aria-label="Sign out"
-            onClick={() => setConfirmingLogout(true)}
-          >
-            <LogOut size={16} strokeWidth={1.75} />
-          </button>
+          {!readOnly && (
+            <Link
+              to="/settings/$category"
+              params={{ category: "general" }}
+              className="rail-icon-btn"
+              title="Settings"
+              aria-label="Settings"
+            >
+              <SettingsIcon size={16} strokeWidth={1.75} aria-hidden />
+            </Link>
+          )}
+          {!noPassword && (
+            <button
+              type="button"
+              className="rail-icon-btn"
+              title="Sign out"
+              aria-label="Sign out"
+              onClick={() => setConfirmingLogout(true)}
+            >
+              <LogOut size={16} strokeWidth={1.75} />
+            </button>
+          )}
           <button
             className="rail-icon-btn rail-toggle"
             type="button"
