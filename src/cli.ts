@@ -28,6 +28,11 @@ const serve = defineCommand({
       description: "Directory for hub.db",
       default: process.env.HUB_DATA_DIR ?? "./data",
     },
+    "read-only": {
+      type: "boolean",
+      description: "Read-only mode: disables all writes and MCP, and hides editing UI (env HUB_READ_ONLY)",
+      default: process.env.HUB_READ_ONLY === "true",
+    },
   },
   async run({ args }) {
     const secretKey = parseHubSecretKey(process.env.HUB_SECRET_KEY);
@@ -54,7 +59,7 @@ const serve = defineCommand({
       process.once(sig, () => ac.abort());
     }
 
-    await startHubServer({ port, store, auth, secretCipher, signal: ac.signal });
+    await startHubServer({ port, store, auth, secretCipher, readOnly: args["read-only"], signal: ac.signal });
     store.close();
   },
 });

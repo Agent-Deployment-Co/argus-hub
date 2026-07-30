@@ -74,14 +74,26 @@ export interface HubAppOptions {
   fetch?: typeof fetch;
   executeCommand?: ExecuteCommand;
   connectionTimeoutMs?: number;
+  /** Deployment-level switch: drops every mutating route (settings, secrets, groups, labels,
+   *  task-labels, user updates) and disables MCP entirely, for a shareable read-only instance.
+   *  Does not relax the existing admin-password gate on reads. Default false. */
+  readOnly?: boolean;
 }
 
 export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppOptions = {}): Hono {
   const app = new Hono();
+  const readOnly = options.readOnly ?? false;
+  // Every route registered on `writes` (rather than `app` directly) is dropped entirely in
+  // read-only mode by the single `app.route("/", writes)` mount below — one decision point
+  // instead of a per-handler check scattered across every mutating route.
+  const writes = new Hono();
 
   // ---- Health check (no auth) ---------------------------------------------------
+  //
+  // Always mounted, even in read-only mode — it's the one route the SPA can reliably call at
+  // startup to learn its own mode (see web/src/lib/read-only.tsx).
 
-  app.get("/healthz", (c) => c.text("ok"));
+  app.get("/healthz", (c) => c.json({ ok: true, readOnly }));
 
   // ---- Auth (login / logout / dashboard) — only wired when auth is configured ----
 
@@ -133,8 +145,12 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
   app.post("/api/sync/unknown-sessions", unknownSessionsHandler(store));
 
   // ---- MCP (read-only query tools for external agents) --------------------------
+  //
+  // Disabled entirely in read-only mode: it's a separate programmatic-access surface from the
+  // dashboard UI, and a shared/demo read-only deployment shouldn't hand it out just because its
+  // tools happen to be read-only themselves.
 
-  mountMcp(app, store, auth);
+  if (!readOnly) mountMcp(app, store, auth);
 
   // ---- Task LLM settings -------------------------------------------------------
 
@@ -153,7 +169,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     return c.json(await taskSettingsResponse(orgId));
   });
 
-  app.put("/api/settings/:path", async (c) => {
+  writes.put("/api/settings/:path", async (c) => {
     const orgId = await currentOrgId();
     if (!orgId) return c.json({ error: "No organization configured." }, 503);
     const body = await c.req.json().catch(() => null) as { value?: unknown } | null;
@@ -182,7 +198,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     }
   });
 
-  app.get("/api/settings/secrets/:provider", async (c) => {
+  writes.get("/api/settings/secrets/:provider", async (c) => {
     const providerName = c.req.param("provider");
     const provider = getProvider(providerName);
     if (!provider || !provider.requiresApiKey) return c.json({ error: "Unknown API-key provider." }, 404);
@@ -191,7 +207,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     return c.json(await store.readLlmSecretStatus(orgId, provider.name));
   });
 
-  app.post("/api/settings/secrets/:provider", async (c) => {
+  writes.post("/api/settings/secrets/:provider", async (c) => {
     const providerName = c.req.param("provider");
     const provider = getProvider(providerName);
     if (!provider || !provider.requiresApiKey) return c.json({ error: "Unknown API-key provider." }, 404);
@@ -213,7 +229,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     return c.json(await store.readLlmSecretStatus(orgId, provider.name));
   });
 
-  app.delete("/api/settings/secrets/:provider", async (c) => {
+  writes.delete("/api/settings/secrets/:provider", async (c) => {
     const providerName = c.req.param("provider");
     if (!isLlmProvider(providerName) || !getProvider(providerName)?.requiresApiKey) {
       return c.json({ error: "Unknown API-key provider." }, 404);
@@ -224,7 +240,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     return c.json({ configured: false });
   });
 
-  app.post("/api/settings/test-connection", async (c) => {
+  writes.post("/api/settings/test-connection", async (c) => {
     const orgId = await currentOrgId();
     if (!orgId) return c.json({ error: "No organization configured." }, 503);
     let config;
@@ -288,7 +304,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
   });
 
   // Set (or clear, with `groupId: null`) a single user's group.
-  app.patch("/api/users/:userId", async (c) => {
+  writes.patch("/api/users/:userId", async (c) => {
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
     const userId = c.req.param("userId").trim();
@@ -319,7 +335,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     return c.json({ groups });
   });
 
-  app.post("/api/groups", async (c) => {
+  writes.post("/api/groups", async (c) => {
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
 
@@ -336,7 +352,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     }
   });
 
-  app.patch("/api/groups/:groupId", async (c) => {
+  writes.patch("/api/groups/:groupId", async (c) => {
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
     const groupId = c.req.param("groupId").trim();
@@ -356,7 +372,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     return c.json({ ok: true });
   });
 
-  app.delete("/api/groups/:groupId", async (c) => {
+  writes.delete("/api/groups/:groupId", async (c) => {
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
     const groupId = c.req.param("groupId").trim();
@@ -369,7 +385,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
   });
 
   // Bulk membership changes for the row-selection toolbar in the UI.
-  app.post("/api/groups/:groupId/members", async (c) => {
+  writes.post("/api/groups/:groupId/members", async (c) => {
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
     const groupId = c.req.param("groupId").trim();
@@ -387,7 +403,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     return c.json({ ok: true });
   });
 
-  app.delete("/api/groups/:groupId/members", async (c) => {
+  writes.delete("/api/groups/:groupId/members", async (c) => {
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
     const groupId = c.req.param("groupId").trim();
@@ -414,7 +430,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     return c.json({ labels });
   });
 
-  app.post("/api/labels", async (c) => {
+  writes.post("/api/labels", async (c) => {
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
 
@@ -432,7 +448,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     }
   });
 
-  app.delete("/api/labels/:labelId", async (c) => {
+  writes.delete("/api/labels/:labelId", async (c) => {
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
     const labelId = c.req.param("labelId").trim();
@@ -443,7 +459,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
   });
 
   // Apply or remove one label on one task.
-  app.post("/api/task-labels", async (c) => {
+  writes.post("/api/task-labels", async (c) => {
     const orgId = await store.getDefaultOrgId();
     if (!orgId) return c.json({ error: "No org configured." }, 503);
 
@@ -646,6 +662,10 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
     });
   });
 
+  // ---- Mount writes (skipped entirely in read-only mode) -------------------------
+
+  if (!readOnly) app.route("/", writes);
+
   // ---- SPA ------------------------------------------------------------------------
   //
   // The React SPA built from hub/web is a client-routed app (side nav: team-wide Activity at
@@ -735,6 +755,8 @@ export interface HubServeOptions {
   store: HubStore;
   auth: AdminAuth;
   secretCipher?: SecretCipher;
+  /** See `HubAppOptions.readOnly`. Default false. */
+  readOnly?: boolean;
   /** Aborting this signal stops the server gracefully. */
   signal?: AbortSignal;
 }
@@ -742,7 +764,10 @@ export interface HubServeOptions {
 /** Start listening. Resolves once the server has fully shut down (after `signal` fires or
  *  the process exits). Call site is responsible for opening and closing the store. */
 export function startHubServer(opts: HubServeOptions): Promise<void> {
-  const app = createHubApp(opts.store, opts.auth, { secretCipher: opts.secretCipher });
+  const app = createHubApp(opts.store, opts.auth, {
+    secretCipher: opts.secretCipher,
+    readOnly: opts.readOnly,
+  });
 
   return new Promise((resolve, reject) => {
     const server = serve(
