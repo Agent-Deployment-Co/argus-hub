@@ -116,6 +116,7 @@ environment variables → CLI flags. In a container, environment variables are t
 | `HUB_SECRET_KEY` | _(required)_ | Canonical base64 encoding of exactly 32 random bytes. Encrypts task-provider API keys stored in SQLite |
 | `ADMIN_PASSWORD` | _(generated)_ | Pins the dashboard login password across container restarts. Without it, a new random password is generated — and printed — every time the container starts |
 | `HUB_INSECURE_COOKIE_HOSTS` | _(none)_ | Comma-separated hostnames (no port) that receive a non-`Secure` session cookie, for plain-HTTP-only deployments (e.g. a cluster-internal address reachable only over a private network/VPN). **Never** list a host reachable from the public internet |
+| `HUB_READ_ONLY` | `false` | Set to `true` to disable every write (settings, secrets, groups, labels, task-labels, user updates) and MCP entirely, and to hide the corresponding editing UI in the dashboard. A deployment-level switch — it does not change the admin-password login requirement for reads |
 
 Pass variables with `-e NAME=value` per flag, or collect them in a file and use `--env-file`:
 
@@ -187,7 +188,8 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:4343/healthz || exit 1
 ```
 
-`GET /healthz` returns a plain `200 ok` with no auth required. Use the same path for Kubernetes
+`GET /healthz` returns `{"ok": true, "readOnly": false}` with no auth required — the dashboard
+uses the `readOnly` field to detect read-only mode at startup. Use the same path for Kubernetes
 liveness/readiness probes:
 
 ```yaml

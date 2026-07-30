@@ -74,3 +74,13 @@ Save as `~/Library/LaunchAgents/co.agentdeployment.argus-hub.plist`:
 ```bash
 launchctl load ~/Library/LaunchAgents/co.agentdeployment.argus-hub.plist
 ```
+
+---
+
+## Read-only mode
+
+Add `--read-only` to `ExecStart`/`ProgramArguments` (or set `HUB_READ_ONLY=true` in the unit's
+environment) to disable every write — settings, secrets, groups, labels, task-labels, user
+updates — and MCP entirely, for a shared/demo instance that should only be viewed. This doesn't
+change the admin-password login requirement: if `ADMIN_PASSWORD` is set, reads still require it
+exactly as they do today.
