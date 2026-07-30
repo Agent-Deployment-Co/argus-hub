@@ -75,8 +75,9 @@ export interface HubAppOptions {
   executeCommand?: ExecuteCommand;
   connectionTimeoutMs?: number;
   /** Deployment-level switch: drops every mutating route (settings, secrets, groups, labels,
-   *  task-labels, user updates) and disables MCP entirely, for a shareable read-only instance.
-   *  Does not relax the existing admin-password gate on reads. Default false. */
+   *  task-labels, user updates), for a shareable read-only instance. MCP stays mounted — its
+   *  tools are already read-only. Does not relax the existing admin-password gate on reads.
+   *  Default false. */
   readOnly?: boolean;
 }
 
@@ -148,11 +149,10 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
 
   // ---- MCP (read-only query tools for external agents) --------------------------
   //
-  // Disabled entirely in read-only mode: it's a separate programmatic-access surface from the
-  // dashboard UI, and a shared/demo read-only deployment shouldn't hand it out just because its
-  // tools happen to be read-only themselves.
+  // Stays mounted in read-only mode: its tools are already read-only, so read-only mode (which
+  // only drops mutating routes) doesn't affect it.
 
-  if (!readOnly) mountMcp(app, store, auth);
+  mountMcp(app, store, auth);
 
   // ---- Task LLM settings -------------------------------------------------------
 
