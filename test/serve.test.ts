@@ -1238,13 +1238,13 @@ describe("read-only mode", () => {
     }
   });
 
-  test("MCP is disabled entirely", async () => {
+  test("MCP stays mounted in read-only mode", async () => {
     const { store } = await openTestEnv();
     try {
       const on = await createHubApp(store).request("/mcp", { method: "POST" });
       expect(on.status).not.toBe(404);
-      const off = await createHubApp(store, undefined, { readOnly: true }).request("/mcp", { method: "POST" });
-      expect(off.status).toBe(404);
+      const stillOn = await createHubApp(store, undefined, { readOnly: true }).request("/mcp", { method: "POST" });
+      expect(stillOn.status).not.toBe(404);
     } finally {
       await store.close();
     }
@@ -1253,7 +1253,7 @@ describe("read-only mode", () => {
   // Structural backstop (mirrors Argus's #281 test): introspect the route table directly so a
   // new write route added without going onto `writes` fails automatically, rather than relying
   // on the enumerated list above staying in sync.
-  test("no non-GET app route and no /mcp route survive in read-only mode", async () => {
+  test("no non-GET app route survives in read-only mode", async () => {
     const { store } = await openTestEnv();
     try {
       const app = createHubApp(store, undefined, { readOnly: true }) as Hono;
@@ -1263,6 +1263,32 @@ describe("read-only mode", () => {
         .map((r) => `${r.method} ${r.path}`)
         .filter((key) => !exempt.has(key));
       expect(offenders).toEqual([]);
+    } finally {
+      await store.close();
+    }
+  });
+});
+
+describe("no-mcp mode", () => {
+  test("disables MCP entirely, independent of readOnly", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const on = await createHubApp(store).request("/mcp", { method: "POST" });
+      expect(on.status).not.toBe(404);
+      const off = await createHubApp(store, undefined, { noMcp: true }).request("/mcp", { method: "POST" });
+      expect(off.status).toBe(404);
+      const offAndReadOnly = await createHubApp(store, undefined, { noMcp: true, readOnly: true })
+        .request("/mcp", { method: "POST" });
+      expect(offAndReadOnly.status).toBe(404);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("no /mcp route survives with --no-mcp", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const app = createHubApp(store, undefined, { noMcp: true }) as Hono;
       expect(app.routes.some((r) => r.path === "/mcp" || r.path.startsWith("/mcp/"))).toBe(false);
     } finally {
       await store.close();

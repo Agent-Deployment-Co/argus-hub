@@ -116,8 +116,9 @@ environment variables → CLI flags. In a container, environment variables are t
 | `HUB_SECRET_KEY` | _(required)_ | Canonical base64 encoding of exactly 32 random bytes. Encrypts task-provider API keys stored in SQLite |
 | `ADMIN_PASSWORD` | _(generated)_ | Pins the dashboard login password across container restarts. Without it, a new random password is generated — and printed — every time the container starts |
 | `HUB_INSECURE_COOKIE_HOSTS` | _(none)_ | Comma-separated hostnames (no port) that receive a non-`Secure` session cookie, for plain-HTTP-only deployments (e.g. a cluster-internal address reachable only over a private network/VPN). **Never** list a host reachable from the public internet |
-| `HUB_READ_ONLY` | `false` | Set to `true` to disable every write (settings, secrets, groups, labels, task-labels, user updates) and MCP entirely, and to hide the corresponding editing UI in the dashboard. A deployment-level switch — it does not change the admin-password login requirement for reads |
+| `HUB_READ_ONLY` | `false` | Set to `true` to disable every write (settings, secrets, groups, labels, task-labels, user updates) and hide the corresponding editing UI in the dashboard. MCP stays available (its tools are already read-only) — see `HUB_NO_MCP` to disable it too. A deployment-level switch — it does not change the admin-password login requirement for reads |
 | `HUB_NO_PASSWORD` | `false` | Set to `true` to remove the admin-password login requirement entirely: every route is open, `/login`/`/logout` aren't mounted, and the SPA hides the sign-out button. Hub prints a warning at startup. Only use this on a network you trust |
+| `HUB_NO_MCP` | `false` | Set to `true` to disable the MCP server entirely (`/mcp` is not mounted). Independent of `HUB_READ_ONLY` |
 
 Pass variables with `-e NAME=value` per flag, or collect them in a file and use `--env-file`:
 

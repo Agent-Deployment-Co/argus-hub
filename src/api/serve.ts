@@ -79,11 +79,16 @@ export interface HubAppOptions {
    *  tools are already read-only. Does not relax the existing admin-password gate on reads.
    *  Default false. */
   readOnly?: boolean;
+  /** Disable the MCP server (`/mcp` isn't mounted at all). Independent of `readOnly` — MCP's
+   *  tools are already read-only, so this is for deployments that want to turn off programmatic
+   *  access regardless of read-only status. Default false. */
+  noMcp?: boolean;
 }
 
 export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppOptions = {}): Hono {
   const app = new Hono();
   const readOnly = options.readOnly ?? false;
+  const noMcp = options.noMcp ?? false;
   // Every route registered on `writes` (rather than `app` directly) is dropped entirely in
   // read-only mode by the single `app.route("/", writes)` mount below — one decision point
   // instead of a per-handler check scattered across every mutating route.
@@ -150,9 +155,10 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
   // ---- MCP (read-only query tools for external agents) --------------------------
   //
   // Stays mounted in read-only mode: its tools are already read-only, so read-only mode (which
-  // only drops mutating routes) doesn't affect it.
+  // only drops mutating routes) doesn't affect it. Gated separately by `noMcp`, for deployments
+  // that want to disable this programmatic-access surface regardless of read-only status.
 
-  mountMcp(app, store, auth);
+  if (!noMcp) mountMcp(app, store, auth);
 
   // ---- Task LLM settings -------------------------------------------------------
 
@@ -760,6 +766,8 @@ export interface HubServeOptions {
   secretCipher?: SecretCipher;
   /** See `HubAppOptions.readOnly`. Default false. */
   readOnly?: boolean;
+  /** See `HubAppOptions.noMcp`. Default false. */
+  noMcp?: boolean;
   /** Aborting this signal stops the server gracefully. */
   signal?: AbortSignal;
 }
@@ -770,6 +778,7 @@ export function startHubServer(opts: HubServeOptions): Promise<void> {
   const app = createHubApp(opts.store, opts.auth, {
     secretCipher: opts.secretCipher,
     readOnly: opts.readOnly,
+    noMcp: opts.noMcp,
   });
 
   return new Promise((resolve, reject) => {

@@ -81,9 +81,10 @@ launchctl load ~/Library/LaunchAgents/co.agentdeployment.argus-hub.plist
 
 Add `--read-only` to `ExecStart`/`ProgramArguments` (or set `HUB_READ_ONLY=true` in the unit's
 environment) to disable every write — settings, secrets, groups, labels, task-labels, user
-updates — and MCP entirely, for a shared/demo instance that should only be viewed. This doesn't
-change the admin-password login requirement: if `ADMIN_PASSWORD` is set, reads still require it
-exactly as they do today.
+updates — for a shared/demo instance that should only be viewed. MCP stays available (its tools
+are already read-only); use `--no-mcp` below to disable it too. This doesn't change the
+admin-password login requirement: if `ADMIN_PASSWORD` is set, reads still require it exactly as
+they do today.
 
 ---
 
@@ -95,3 +96,12 @@ hides the sign-out button. The server prints a warning to stderr at startup as a
 use this on a network you trust (e.g. behind a VPN/Tailscale, or `localhost`-only) — anyone who
 can reach the port can view and change all data. It composes with `--read-only` if you want an
 open, view-only instance.
+
+---
+
+## Disabling MCP
+
+Add `--no-mcp` (or set `HUB_NO_MCP=true`) to turn off the MCP server entirely — `/mcp` is not
+mounted. This is independent of `--read-only`: MCP's tools are already read-only, so this flag is
+for deployments that want to remove that programmatic-access surface regardless of whether writes
+are otherwise enabled.

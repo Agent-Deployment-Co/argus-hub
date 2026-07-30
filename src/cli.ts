@@ -38,6 +38,11 @@ const serve = defineCommand({
       description: "Disable the admin password entirely: every route is open, no login/logout (env HUB_NO_PASSWORD)",
       default: process.env.HUB_NO_PASSWORD === "true",
     },
+    "no-mcp": {
+      type: "boolean",
+      description: "Disable the MCP server: /mcp is not mounted (env HUB_NO_MCP)",
+      default: process.env.HUB_NO_MCP === "true",
+    },
   },
   async run({ args }) {
     const secretKey = parseHubSecretKey(process.env.HUB_SECRET_KEY);
@@ -70,7 +75,15 @@ const serve = defineCommand({
       process.once(sig, () => ac.abort());
     }
 
-    await startHubServer({ port, store, auth, secretCipher, readOnly: args["read-only"], signal: ac.signal });
+    await startHubServer({
+      port,
+      store,
+      auth,
+      secretCipher,
+      readOnly: args["read-only"],
+      noMcp: args["no-mcp"],
+      signal: ac.signal,
+    });
     store.close();
   },
 });
