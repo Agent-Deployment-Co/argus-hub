@@ -137,7 +137,7 @@ describe("settings API", () => {
       body: JSON.stringify({ value: "sk-test-1234" }),
     });
     const result = await (await app.request("/api/settings/test-connection", { method: "POST" })).json();
-    expect(result).toEqual({ ok: true, provider: "openai", model: "gpt-5.4-nano" });
+    expect(result).toEqual({ ok: true, provider: "openai", model: "gpt-5.6-luna" });
     expect(JSON.stringify(result)).not.toContain("completion");
     await store.close();
   });
