@@ -83,12 +83,16 @@ export interface HubAppOptions {
    *  tools are already read-only, so this is for deployments that want to turn off programmatic
    *  access regardless of read-only status. Default false. */
   noMcp?: boolean;
+  /** Disable the dataset export surface: `GET /api/export` isn't mounted and the SPA hides the
+   *  Export nav item. Independent of `readOnly` and `noMcp`. Default false. */
+  noExport?: boolean;
 }
 
 export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppOptions = {}): Hono {
   const app = new Hono();
   const readOnly = options.readOnly ?? false;
   const noMcp = options.noMcp ?? false;
+  const noExport = options.noExport ?? false;
   // Every route registered on `writes` (rather than `app` directly) is dropped entirely in
   // read-only mode by the single `app.route("/", writes)` mount below — one decision point
   // instead of a per-handler check scattered across every mutating route.
@@ -101,7 +105,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
   // `auth` was configured at all — with no admin auth there's no session to log out of, so the
   // SPA hides the sign-out affordance (see web/src/lib/read-only.tsx / Layout.tsx).
 
-  app.get("/healthz", (c) => c.json({ ok: true, readOnly, noPassword: !auth }));
+  app.get("/healthz", (c) => c.json({ ok: true, readOnly, noPassword: !auth, noExport }));
 
   // ---- Auth (login / logout / dashboard) — only wired when auth is configured ----
 
@@ -649,26 +653,28 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
   // Download the full Hub dataset as a .zip of Snowflake-ready JSONL (one file per table) plus
   // manifest.json and load.sql — the same bundle as `argus-hub export snowflake`, served straight
   // from the browser. api_keys is intentionally excluded (see SNOWFLAKE_EXPORT_TABLES).
-  app.get("/api/export", async (c) => {
-    let result: Awaited<ReturnType<typeof openSnowflakeZipStream>>;
-    try {
-      // Snapshot + open the stream before responding, so a snapshot failure is a clean JSON 500
-      // rather than a truncated download. Streaming errors after this point tear down the response.
-      result = await openSnowflakeZipStream({ dbPath: store.path });
-    } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : "Export failed." }, 500);
-    }
-    const stamp = result.manifest.exportedAt.replace(/[:.]/g, "-");
-    // No Content-Length: the archive is streamed and its final size isn't known up front.
-    return new Response(result.stream, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="argus-hub-export-${stamp}.zip"`,
-        "Cache-Control": "no-store",
-      },
+  if (!noExport) {
+    app.get("/api/export", async (c) => {
+      let result: Awaited<ReturnType<typeof openSnowflakeZipStream>>;
+      try {
+        // Snapshot + open the stream before responding, so a snapshot failure is a clean JSON 500
+        // rather than a truncated download. Streaming errors after this point tear down the response.
+        result = await openSnowflakeZipStream({ dbPath: store.path });
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : "Export failed." }, 500);
+      }
+      const stamp = result.manifest.exportedAt.replace(/[:.]/g, "-");
+      // No Content-Length: the archive is streamed and its final size isn't known up front.
+      return new Response(result.stream, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": `attachment; filename="argus-hub-export-${stamp}.zip"`,
+          "Cache-Control": "no-store",
+        },
+      });
     });
-  });
+  }
 
   // ---- Mount writes (skipped entirely in read-only mode) -------------------------
 
@@ -768,6 +774,8 @@ export interface HubServeOptions {
   readOnly?: boolean;
   /** See `HubAppOptions.noMcp`. Default false. */
   noMcp?: boolean;
+  /** See `HubAppOptions.noExport`. Default false. */
+  noExport?: boolean;
   /** Aborting this signal stops the server gracefully. */
   signal?: AbortSignal;
 }
@@ -779,6 +787,7 @@ export function startHubServer(opts: HubServeOptions): Promise<void> {
     secretCipher: opts.secretCipher,
     readOnly: opts.readOnly,
     noMcp: opts.noMcp,
+    noExport: opts.noExport,
   });
 
   return new Promise((resolve, reject) => {

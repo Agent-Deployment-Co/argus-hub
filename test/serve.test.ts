@@ -1167,9 +1167,9 @@ describe("read-only mode", () => {
     const { store } = await openTestEnv();
     try {
       expect(await (await createHubApp(store).request("/healthz")).json())
-        .toEqual({ ok: true, readOnly: false, noPassword: true });
+        .toEqual({ ok: true, readOnly: false, noPassword: true, noExport: false });
       expect(await (await createHubApp(store, undefined, { readOnly: true }).request("/healthz")).json())
-        .toEqual({ ok: true, readOnly: true, noPassword: true });
+        .toEqual({ ok: true, readOnly: true, noPassword: true, noExport: false });
     } finally {
       await store.close();
     }
@@ -1296,14 +1296,51 @@ describe("no-mcp mode", () => {
   });
 });
 
+describe("no-export mode", () => {
+  // /api/export has no file extension, so a dropped route falls through to the SPA's GET "*"
+  // catch-all rather than 404ing directly — same as the settings/secrets GET route above.
+  test("falls through to the SPA shell, not the export stream", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const on = await createHubApp(store).request("/api/export");
+      expect(on.headers.get("content-type")).toMatch(/zip/);
+      const off = await createHubApp(store, undefined, { noExport: true }).request("/api/export");
+      expect(off.status).toBe(200);
+      expect(off.headers.get("content-type")).toMatch(/html/);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("GET /healthz reports noExport", async () => {
+    const { store } = await openTestEnv();
+    try {
+      expect(await (await createHubApp(store, undefined, { noExport: true }).request("/healthz")).json())
+        .toEqual({ ok: true, readOnly: false, noPassword: true, noExport: true });
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("no /api/export route survives with --no-export", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const app = createHubApp(store, undefined, { noExport: true }) as Hono;
+      expect(app.routes.some((r) => r.path === "/api/export")).toBe(false);
+    } finally {
+      await store.close();
+    }
+  });
+});
+
 describe("no-password mode", () => {
   test("GET /healthz reports noPassword based on whether auth is configured", async () => {
     const { store } = await openTestEnv();
     try {
       expect(await (await createHubApp(store).request("/healthz")).json())
-        .toEqual({ ok: true, readOnly: false, noPassword: true });
+        .toEqual({ ok: true, readOnly: false, noPassword: true, noExport: false });
       expect(await (await createHubApp(store, createAdminAuth("secret")).request("/healthz")).json())
-        .toEqual({ ok: true, readOnly: false, noPassword: false });
+        .toEqual({ ok: true, readOnly: false, noPassword: false, noExport: false });
     } finally {
       await store.close();
     }

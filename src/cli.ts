@@ -43,6 +43,11 @@ const serve = defineCommand({
       description: "Disable the MCP server: /mcp is not mounted (env HUB_NO_MCP)",
       default: process.env.HUB_NO_MCP === "true",
     },
+    "no-export": {
+      type: "boolean",
+      description: "Disable the dataset export surface: /api/export is not mounted and the Export nav item is hidden (env HUB_NO_EXPORT)",
+      default: process.env.HUB_NO_EXPORT === "true",
+    },
   },
   async run({ args }) {
     const secretKey = parseHubSecretKey(process.env.HUB_SECRET_KEY);
@@ -82,6 +87,7 @@ const serve = defineCommand({
       secretCipher,
       readOnly: args["read-only"],
       noMcp: args["no-mcp"],
+      noExport: args["no-export"],
       signal: ac.signal,
     });
     store.close();

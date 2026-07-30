@@ -119,6 +119,7 @@ environment variables → CLI flags. In a container, environment variables are t
 | `HUB_READ_ONLY` | `false` | Set to `true` to disable every write (settings, secrets, groups, labels, task-labels, user updates) and hide the corresponding editing UI in the dashboard. MCP stays available (its tools are already read-only) — see `HUB_NO_MCP` to disable it too. A deployment-level switch — it does not change the admin-password login requirement for reads |
 | `HUB_NO_PASSWORD` | `false` | Set to `true` to remove the admin-password login requirement entirely: every route is open, `/login`/`/logout` aren't mounted, and the SPA hides the sign-out button. Hub prints a warning at startup. Only use this on a network you trust |
 | `HUB_NO_MCP` | `false` | Set to `true` to disable the MCP server entirely (`/mcp` is not mounted). Independent of `HUB_READ_ONLY` |
+| `HUB_NO_EXPORT` | `false` | Set to `true` to disable the dataset export surface: `/api/export` is not mounted and the Export nav item is hidden. Independent of `HUB_READ_ONLY` |
 
 Pass variables with `-e NAME=value` per flag, or collect them in a file and use `--env-file`:
 

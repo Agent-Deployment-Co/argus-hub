@@ -4,24 +4,35 @@
 //   than rendering a button that hits a route the server dropped.
 // - noPassword: the server was started with --no-password, so there's no session to sign out
 //   of — consumers hide the sign-out affordance.
+// - noExport: the server was started with --no-export, so /api/export isn't mounted — consumers
+//   hide the Export nav item rather than linking to a route that would fail.
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
 interface Capabilities {
   readOnly: boolean;
   noPassword: boolean;
+  noExport: boolean;
 }
 
-const Ctx = createContext<Capabilities>({ readOnly: false, noPassword: false });
+const DEFAULT_CAPS: Capabilities = { readOnly: false, noPassword: false, noExport: false };
+
+const Ctx = createContext<Capabilities>(DEFAULT_CAPS);
 
 export function ReadOnlyProvider({ children }: { children: ReactNode }) {
-  const [caps, setCaps] = useState<Capabilities>({ readOnly: false, noPassword: false });
+  const [caps, setCaps] = useState<Capabilities>(DEFAULT_CAPS);
 
   useEffect(() => {
     let cancelled = false;
     fetch("/healthz")
       .then((res) => res.json())
-      .then((body: { readOnly?: boolean; noPassword?: boolean }) => {
-        if (!cancelled) setCaps({ readOnly: Boolean(body.readOnly), noPassword: Boolean(body.noPassword) });
+      .then((body: { readOnly?: boolean; noPassword?: boolean; noExport?: boolean }) => {
+        if (!cancelled) {
+          setCaps({
+            readOnly: Boolean(body.readOnly),
+            noPassword: Boolean(body.noPassword),
+            noExport: Boolean(body.noExport),
+          });
+        }
       })
       .catch(() => {
         // Offline or malformed — stay in the (safer) affordances-shown default rather than blocking render.
@@ -40,3 +51,6 @@ export const useReadOnly = () => useContext(Ctx).readOnly;
 
 /** Whether this server was started with --no-password (no login, no session to sign out of). */
 export const useNoPassword = () => useContext(Ctx).noPassword;
+
+/** Whether this server was started with --no-export (no /api/export, no Export nav item). */
+export const useNoExport = () => useContext(Ctx).noExport;

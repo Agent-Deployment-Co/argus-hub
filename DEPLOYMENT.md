@@ -105,3 +105,11 @@ Add `--no-mcp` (or set `HUB_NO_MCP=true`) to turn off the MCP server entirely â€
 mounted. This is independent of `--read-only`: MCP's tools are already read-only, so this flag is
 for deployments that want to remove that programmatic-access surface regardless of whether writes
 are otherwise enabled.
+
+---
+
+## Disabling export
+
+Add `--no-export` (or set `HUB_NO_EXPORT=true`) to turn off the dataset export surface â€”
+`GET /api/export` is not mounted and the SPA hides the Export nav item. Independent of
+`--read-only` and `--no-mcp`.
