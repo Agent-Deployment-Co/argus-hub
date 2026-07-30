@@ -1,4 +1,4 @@
-import { LoaderCircle, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, LoaderCircle, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Modal } from "../components/Modal";
 import {
@@ -43,47 +43,51 @@ export function Labels() {
         </p>
       ) : (
         <div className="scroll">
-          <table>
+          <table className="labels-table">
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Automated</th>
-                <th className="right">Actions</th>
+                <th className="center">Automated</th>
+                <th className="center">Actions</th>
               </tr>
             </thead>
             <tbody>
               {labels.map((label) => (
                 <tr key={label.labelId}>
                   <td>{label.name}</td>
-                  <td>{label.autoApply ? "Yes" : "No"}</td>
-                  <td className="right">
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => {
-                        if (label.autoApply) {
-                          setReviewing({
-                            mode: "edit",
-                            labelId: label.labelId,
-                            name: label.name,
-                            description: label.description ?? "",
-                          });
-                        } else {
-                          setEditing(label);
-                        }
-                      }}
-                      aria-label={`Edit ${label.name}`}
-                    >
-                      <Pencil size={14} strokeWidth={2} aria-hidden />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      onClick={() => setDeleting(label)}
-                      aria-label={`Delete ${label.name}`}
-                    >
-                      <Trash2 size={14} strokeWidth={2} aria-hidden />
-                    </button>
+                  <td className="center">
+                    {label.autoApply && <Check size={16} strokeWidth={2.5} aria-label="Automated" />}
+                  </td>
+                  <td className="center">
+                    <div className="label-actions">
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => {
+                          if (label.autoApply) {
+                            setReviewing({
+                              mode: "edit",
+                              labelId: label.labelId,
+                              name: label.name,
+                              description: label.description ?? "",
+                            });
+                          } else {
+                            setEditing(label);
+                          }
+                        }}
+                        aria-label={`Edit ${label.name}`}
+                      >
+                        <Pencil size={14} strokeWidth={2} aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => setDeleting(label)}
+                        aria-label={`Delete ${label.name}`}
+                      >
+                        <Trash2 size={14} strokeWidth={2} aria-hidden />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -151,7 +155,7 @@ function ChooseLabelTypeDialog({
         </button>
         <button type="button" className="label-type-card" onClick={onAutomatic}>
           <h3>Automatic label</h3>
-          <p>An LLM classifies tasks for you. You review its judgment before anything is saved.</p>
+          <p>Argus Hub classifies tasks for you as they come in.</p>
         </button>
       </div>
     </Modal>

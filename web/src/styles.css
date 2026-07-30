@@ -351,7 +351,12 @@ th { color: var(--muted); font-family: "Poppins", "Avenir Next", Arial, sans-ser
 th:hover { color: var(--accent); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 td.right, th.right { text-align: right; }
+td.center, th.center { text-align: center; }
 .nowrap { white-space: nowrap; }
+.labels-table { table-layout: fixed; }
+.labels-table th, .labels-table td { vertical-align: middle; }
+.labels-table th:nth-child(2), .labels-table td:nth-child(2),
+.labels-table th:nth-child(3), .labels-table td:nth-child(3) { width: 150px; white-space: nowrap; }
 .session-project { width: clamp(160px, 24vw, 260px); max-width: clamp(160px, 24vw, 260px); }
 .truncate { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 tr:hover td { background: var(--hover); }
@@ -403,6 +408,7 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 }
 .icon-btn:hover { color: var(--heading); border-color: var(--muted); }
 .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.label-actions { display: inline-flex; align-items: center; gap: 8px; }
 
 /* ---- Team: grouped user sections + bulk selection toolbar ------------------------------ */
 .group-section { margin-bottom: 28px; }
