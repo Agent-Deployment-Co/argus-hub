@@ -75,13 +75,13 @@ export interface HubAppOptions {
   executeCommand?: ExecuteCommand;
   connectionTimeoutMs?: number;
   /** Deployment-level switch: drops every mutating route (settings, secrets, groups, labels,
-   *  task-labels, user updates), for a shareable read-only instance. MCP stays mounted — its
-   *  tools are already read-only. Does not relax the existing admin-password gate on reads.
-   *  Default false. */
+   *  task-labels, user updates), for a shareable read-only instance. MCP stays mounted, but its
+   *  two write tools (create_label, set_task_label) are hidden/rejected — see `WRITE_TOOLS` in
+   *  mcp.ts. Does not relax the existing admin-password gate on reads. Default false. */
   readOnly?: boolean;
-  /** Disable the MCP server (`/mcp` isn't mounted at all). Independent of `readOnly` — MCP's
-   *  tools are already read-only, so this is for deployments that want to turn off programmatic
-   *  access regardless of read-only status. Default false. */
+  /** Disable the MCP server entirely (`/mcp` isn't mounted at all). Independent of `readOnly` —
+   *  this is for deployments that want to turn off the whole programmatic-access surface
+   *  regardless of read-only status. Default false. */
   noMcp?: boolean;
   /** Disable the dataset export surface: `GET /api/export` isn't mounted and the SPA hides the
    *  Export nav item. Independent of `readOnly` and `noMcp`. Default false. */
@@ -156,13 +156,14 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
   app.post("/api/sync", syncHandler(store));
   app.post("/api/sync/unknown-sessions", unknownSessionsHandler(store));
 
-  // ---- MCP (read-only query tools for external agents) --------------------------
+  // ---- MCP (mostly read-only query tools for external agents) -------------------
   //
-  // Stays mounted in read-only mode: its tools are already read-only, so read-only mode (which
-  // only drops mutating routes) doesn't affect it. Gated separately by `noMcp`, for deployments
-  // that want to disable this programmatic-access surface regardless of read-only status.
+  // Stays mounted in read-only mode — most of its tools are pure reads, and mountMcp itself
+  // hides/rejects the two that aren't (create_label, set_task_label; see WRITE_TOOLS in mcp.ts).
+  // Gated separately by `noMcp`, for deployments that want to disable this programmatic-access
+  // surface entirely, regardless of read-only status.
 
-  if (!noMcp) mountMcp(app, store, auth);
+  if (!noMcp) mountMcp(app, store, auth, readOnly);
 
   // ---- Task LLM settings -------------------------------------------------------
 

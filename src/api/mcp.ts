@@ -314,7 +314,21 @@ async function handleSetTaskLabel(store: HubStore, args: Record<string, unknown>
   return toolJson({ ok: true });
 }
 
-async function callTool(store: HubStore, name: string, args: Record<string, unknown> | undefined) {
+/** Tool names that mutate the store — excluded from `tools/list` and rejected by name in
+ *  read-only mode, same as the `writes` sub-router does for the HTTP API (see createHubApp in
+ *  serve.ts). MCP's query_* / list_labels tools are pure reads and unaffected. */
+const WRITE_TOOLS = new Set(["create_label", "set_task_label"]);
+
+async function callTool(
+  store: HubStore,
+  name: string,
+  args: Record<string, unknown> | undefined,
+  readOnly: boolean,
+) {
+  if (readOnly && WRITE_TOOLS.has(name)) {
+    return toolError(`Tool "${name}" is unavailable: this Hub instance is read-only.`);
+  }
+
   const invalid = invalidArgShape(args);
   if (invalid) return toolError(invalid);
 
@@ -342,14 +356,15 @@ async function callTool(store: HubStore, name: string, args: Record<string, unkn
 
 // ---- Server + Hono wiring -------------------------------------------------------------------
 
-function buildMcpServer(store: HubStore): Server {
+function buildMcpServer(store: HubStore, readOnly: boolean): Server {
   const server = new Server({ name: "argus-hub", version: VERSION }, { capabilities: { tools: {} } });
+  const tools = readOnly ? TOOLS.filter((t) => !WRITE_TOOLS.has(t.name)) : TOOLS;
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    return callTool(store, name, args as Record<string, unknown> | undefined);
+    return callTool(store, name, args as Record<string, unknown> | undefined, readOnly);
   });
 
   return server;
@@ -359,8 +374,12 @@ function buildMcpServer(store: HubStore): Server {
  *  reads/writes (list_labels, create_label, set_task_label). Stateless Streamable HTTP transport —
  *  one JSON-RPC exchange per HTTP request, no session id. Auth reuses the admin password as a
  *  bearer token (same secret that unlocks the dashboard); the route is open when `auth` is
- *  omitted, matching how `/api/*` behaves without auth configured. */
-export function mountMcp(app: Hono, store: HubStore, auth?: AdminAuth): void {
+ *  omitted, matching how `/api/*` behaves without auth configured.
+ *
+ *  `readOnly` hides/rejects `create_label` and `set_task_label` (see `WRITE_TOOLS`) — the rest of
+ *  MCP's tools are pure reads and stay available, same as read-only mode leaves the rest of the
+ *  HTTP API's reads mounted. */
+export function mountMcp(app: Hono, store: HubStore, auth?: AdminAuth, readOnly = false): void {
   app.use("/mcp", async (c, next) => {
     if (!auth) return next();
     const token = parseBearerToken(c.req.header("Authorization"));
@@ -371,7 +390,7 @@ export function mountMcp(app: Hono, store: HubStore, auth?: AdminAuth): void {
   });
 
   app.all("/mcp", async (c) => {
-    const server = buildMcpServer(store);
+    const server = buildMcpServer(store, readOnly);
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
