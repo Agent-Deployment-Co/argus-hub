@@ -1,4 +1,4 @@
-import { Check, LoaderCircle, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, LoaderCircle, MousePointerClick, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { Modal } from "../components/Modal";
 import {
@@ -147,15 +147,25 @@ function ChooseLabelTypeDialog({
   onAutomatic: () => void;
 }) {
   return (
-    <Modal title="New label" onClose={onClose} size="wide">
+    <Modal title="New label" onClose={onClose}>
       <div className="label-type-cards">
         <button type="button" className="label-type-card" onClick={onManual}>
-          <h3>Manual label</h3>
-          <p>You apply it yourself, task by task, from the Tasks page.</p>
+          <span className="label-type-card-icon">
+            <MousePointerClick size={16} strokeWidth={2} aria-hidden />
+          </span>
+          <span className="label-type-card-body">
+            <h3>Manual label</h3>
+            <p>You apply it yourself, task by task, from the Tasks page.</p>
+          </span>
         </button>
         <button type="button" className="label-type-card" onClick={onAutomatic}>
-          <h3>Automatic label</h3>
-          <p>Argus Hub classifies tasks for you as they come in.</p>
+          <span className="label-type-card-icon">
+            <Sparkles size={16} strokeWidth={2} aria-hidden />
+          </span>
+          <span className="label-type-card-body">
+            <h3>Automatic label</h3>
+            <p>Argus Hub classifies tasks for you as they come in.</p>
+          </span>
         </button>
       </div>
     </Modal>
@@ -367,17 +377,18 @@ function ReviewLabelPage({ state, onClose }: { state: ReviewState; onClose: () =
         </label>
         <div className="review-action-row">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button
-            type="button"
-            className={hasRun ? "btn-secondary" : "btn-primary"}
-            disabled={hasRun ? !isDirty || preview.isPending : !name.trim() || preview.isPending}
-            onClick={runPreview}
-          >
-            {preview.isPending ? "Running preview…" : hasRun ? "Rerun Preview" : "Preview"}
-          </button>
-          {tasks && (
+          {hasRun && !isDirty ? (
             <button type="button" className="btn-primary" disabled={confirming || preview.isPending} onClick={onConfirm}>
               {confirming ? "Saving…" : "Save"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={!name.trim() || preview.isPending}
+              onClick={runPreview}
+            >
+              {preview.isPending ? "Running preview…" : hasRun ? "Rerun Preview" : "Preview"}
             </button>
           )}
         </div>

@@ -484,13 +484,18 @@ code { background: var(--code-bg); color: var(--code-text); padding: 1px 5px; bo
 .modal-toggle input { margin-top: 2px; width: 14px; height: 14px; accent-color: var(--accent); }
 .modal-toggle small { display: block; margin-top: 2px; color: var(--muted); font-weight: 400; font-size: 11.5px; line-height: 1.4; }
 
-.label-type-cards { display: flex; gap: 14px; }
+.label-type-cards { display: flex; flex-direction: column; gap: 10px; }
 .label-type-card {
-  flex: 1; display: flex; flex-direction: column; gap: 6px; text-align: left; cursor: pointer;
-  border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: var(--surface);
+  display: flex; align-items: flex-start; gap: 12px; text-align: left; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; background: var(--surface);
   font-family: inherit; color: var(--text); transition: border-color .12s ease, background .12s ease;
 }
 .label-type-card:hover, .label-type-card:focus-visible { border-color: var(--accent); background: var(--surface-hover, var(--surface)); }
+.label-type-card-icon {
+  flex: none; display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; color: var(--accent);
+}
+.label-type-card-body { display: flex; flex-direction: column; gap: 4px; }
 .label-type-card h3 { margin: 0; color: var(--heading); font: 700 14px "Poppins", "Avenir Next", Arial, sans-serif; }
 .label-type-card p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.4; }
 
