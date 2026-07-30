@@ -1,4 +1,5 @@
 const port = process.env.HUB_PORT ?? "4343";
+const readOnly = process.env.HUB_READ_ONLY === "true";
 
 function command(args: string[]) {
   return Bun.spawn({
@@ -14,7 +15,7 @@ const initialBuild = command(["bun", "run", "build:web"]);
 if (await initialBuild.exited) process.exitCode = 1;
 if (process.exitCode) process.exit();
 
-process.stdout.write(`Hub → http://localhost:${port}/\n`);
+process.stdout.write(`Hub → http://localhost:${port}/${readOnly ? " (read-only)" : ""}\n`);
 
 const server = command([
   "bun",
@@ -24,6 +25,7 @@ const server = command([
   "serve",
   "--port",
   port,
+  ...(readOnly ? ["--read-only"] : []),
 ]);
 const webBuilder = command(["bun", "run", "build:web", "--", "--watch"]);
 
