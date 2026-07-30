@@ -23,6 +23,12 @@ const serve = defineCommand({
       description: "Port to listen on",
       default: process.env.HUB_PORT ?? "4343",
     },
+    bind: {
+      type: "string",
+      description:
+        "Address to bind to, e.g. 127.0.0.1 to listen on loopback only (env HUB_BIND). Default: all interfaces",
+      default: process.env.HUB_BIND,
+    },
     "data-dir": {
       type: "string",
       description: "Directory for hub.db",
@@ -87,6 +93,7 @@ const serve = defineCommand({
 
     await startHubServer({
       port,
+      hostname: args.bind || undefined,
       store,
       auth,
       secretCipher,

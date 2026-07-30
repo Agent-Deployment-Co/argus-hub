@@ -767,6 +767,8 @@ function spaPlaceholderHtml(): string {
 
 export interface HubServeOptions {
   port: number;
+  /** Address to bind to. Omit to listen on all interfaces (Node's default). */
+  hostname?: string;
   store: HubStore;
   /** Omit (or pass HUB_NO_PASSWORD / --no-password) to run with no login at all. */
   auth?: AdminAuth;
@@ -793,9 +795,10 @@ export function startHubServer(opts: HubServeOptions): Promise<void> {
 
   return new Promise((resolve, reject) => {
     const server = serve(
-      { fetch: app.fetch, port: opts.port },
+      { fetch: app.fetch, port: opts.port, hostname: opts.hostname },
       () => {
-        process.stdout.write(`Hub listening on port ${opts.port}\n`);
+        const on = opts.hostname ? ` on ${opts.hostname}` : "";
+        process.stdout.write(`Hub listening on port ${opts.port}${on}\n`);
         if (opts.signal?.aborted) {
           server.close();
           return;
