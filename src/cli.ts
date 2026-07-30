@@ -33,6 +33,11 @@ const serve = defineCommand({
       description: "Read-only mode: disables all writes and MCP, and hides editing UI (env HUB_READ_ONLY)",
       default: process.env.HUB_READ_ONLY === "true",
     },
+    "no-password": {
+      type: "boolean",
+      description: "Disable the admin password entirely: every route is open, no login/logout (env HUB_NO_PASSWORD)",
+      default: process.env.HUB_NO_PASSWORD === "true",
+    },
   },
   async run({ args }) {
     const secretKey = parseHubSecretKey(process.env.HUB_SECRET_KEY);
@@ -47,11 +52,17 @@ const serve = defineCommand({
       ?.split(",")
       .map((h) => h.trim().toLowerCase())
       .filter(Boolean);
-    const auth = createAdminAuth(process.env.ADMIN_PASSWORD, insecureCookieHosts);
+    const noPassword = args["no-password"];
+    const auth = noPassword ? undefined : createAdminAuth(process.env.ADMIN_PASSWORD, insecureCookieHosts);
     const store = await openHubStore(args["data-dir"]);
 
-    if (!process.env.ADMIN_PASSWORD) {
-      process.stdout.write(`Admin password: ${auth.password}\n`);
+    if (noPassword) {
+      process.stderr.write(
+        "WARNING: --no-password is set. The Hub is running with no login required — anyone who can " +
+          "reach this server can view and change all data. Only use this on a network you trust.\n",
+      );
+    } else if (!process.env.ADMIN_PASSWORD) {
+      process.stdout.write(`Admin password: ${auth!.password}\n`);
     }
 
     const ac = new AbortController();

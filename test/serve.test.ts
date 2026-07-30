@@ -1166,9 +1166,10 @@ describe("read-only mode", () => {
   test("GET /healthz reports readOnly", async () => {
     const { store } = await openTestEnv();
     try {
-      expect(await (await createHubApp(store).request("/healthz")).json()).toEqual({ ok: true, readOnly: false });
+      expect(await (await createHubApp(store).request("/healthz")).json())
+        .toEqual({ ok: true, readOnly: false, noPassword: true });
       expect(await (await createHubApp(store, undefined, { readOnly: true }).request("/healthz")).json())
-        .toEqual({ ok: true, readOnly: true });
+        .toEqual({ ok: true, readOnly: true, noPassword: true });
     } finally {
       await store.close();
     }
@@ -1263,6 +1264,45 @@ describe("read-only mode", () => {
         .filter((key) => !exempt.has(key));
       expect(offenders).toEqual([]);
       expect(app.routes.some((r) => r.path === "/mcp" || r.path.startsWith("/mcp/"))).toBe(false);
+    } finally {
+      await store.close();
+    }
+  });
+});
+
+describe("no-password mode", () => {
+  test("GET /healthz reports noPassword based on whether auth is configured", async () => {
+    const { store } = await openTestEnv();
+    try {
+      expect(await (await createHubApp(store).request("/healthz")).json())
+        .toEqual({ ok: true, readOnly: false, noPassword: true });
+      expect(await (await createHubApp(store, createAdminAuth("secret")).request("/healthz")).json())
+        .toEqual({ ok: true, readOnly: false, noPassword: false });
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("no /login, /logout, or session gate is mounted without auth", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const app = createHubApp(store) as Hono;
+      expect(app.routes.some((r) => r.path === "/login")).toBe(false);
+      expect(app.routes.some((r) => r.path === "/logout")).toBe(false);
+
+      const res = await app.request("/api/users");
+      expect(res.status).toBe(200);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("SPA shell is served without a session cookie when auth is undefined", async () => {
+    const { store } = await openTestEnv();
+    try {
+      const app = createHubApp(store);
+      const res = await app.request("/");
+      expect(res.status).not.toBe(302);
     } finally {
       await store.close();
     }

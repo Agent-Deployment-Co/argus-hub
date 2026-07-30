@@ -91,9 +91,11 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
   // ---- Health check (no auth) ---------------------------------------------------
   //
   // Always mounted, even in read-only mode — it's the one route the SPA can reliably call at
-  // startup to learn its own mode (see web/src/lib/read-only.tsx).
+  // startup to learn its own mode (see web/src/lib/read-only.tsx). `noPassword` mirrors whether
+  // `auth` was configured at all — with no admin auth there's no session to log out of, so the
+  // SPA hides the sign-out affordance (see web/src/lib/read-only.tsx / Layout.tsx).
 
-  app.get("/healthz", (c) => c.json({ ok: true, readOnly }));
+  app.get("/healthz", (c) => c.json({ ok: true, readOnly, noPassword: !auth }));
 
   // ---- Auth (login / logout / dashboard) — only wired when auth is configured ----
 
@@ -753,7 +755,8 @@ function spaPlaceholderHtml(): string {
 export interface HubServeOptions {
   port: number;
   store: HubStore;
-  auth: AdminAuth;
+  /** Omit (or pass HUB_NO_PASSWORD / --no-password) to run with no login at all. */
+  auth?: AdminAuth;
   secretCipher?: SecretCipher;
   /** See `HubAppOptions.readOnly`. Default false. */
   readOnly?: boolean;

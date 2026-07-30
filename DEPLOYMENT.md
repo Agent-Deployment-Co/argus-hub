@@ -84,3 +84,14 @@ environment) to disable every write — settings, secrets, groups, labels, task-
 updates — and MCP entirely, for a shared/demo instance that should only be viewed. This doesn't
 change the admin-password login requirement: if `ADMIN_PASSWORD` is set, reads still require it
 exactly as they do today.
+
+---
+
+## No-password mode
+
+Add `--no-password` (or set `HUB_NO_PASSWORD=true`) to remove the admin-password login
+requirement entirely: `/login` and `/logout` aren't mounted, every route is open, and the SPA
+hides the sign-out button. The server prints a warning to stderr at startup as a reminder. Only
+use this on a network you trust (e.g. behind a VPN/Tailscale, or `localhost`-only) — anyone who
+can reach the port can view and change all data. It composes with `--read-only` if you want an
+open, view-only instance.
