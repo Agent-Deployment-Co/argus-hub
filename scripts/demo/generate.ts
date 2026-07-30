@@ -44,9 +44,11 @@ import type {
 } from "../../src/store/hub-store.ts";
 import {
   DEMO_TEAM,
+  HUB_LABELS,
   PLUGIN_CATALOG,
   PLUGIN_MARKETPLACE,
   type FrictionProfile,
+  type HubLabelSeed,
   type PluginCatalogEntry,
   type ProjectScenario,
   type SessionTemplate,
@@ -86,12 +88,25 @@ export interface DemoMember {
   stats: { sessions: number; messages: number; tasks: number; invocations: number };
 }
 
+/** A hub-admin label applied to one task, keyed the way `HubStore.setTaskLabel` expects. */
+export interface TaskLabelAssignment {
+  clientId: string;
+  sessionId: string;
+  taskSeq: number;
+  labelNames: string[];
+}
+
 export interface DemoData {
   members: DemoMember[];
   /** The plugin world the team installs from — passed through for docs/reference; Hub sees only the
    *  observed skill invocations in the rows, not this catalog. */
   plugins: { marketplace: string; catalog: PluginCatalogEntry[] };
   stats: { sessions: number; messages: number; tasks: number; bySource: Record<string, number> };
+  /** Hub-level labels to create (see scenarios.ts `HUB_LABELS`) and which tasks to apply them to.
+   *  These are admin-created/applied (`hub_labels`/`hub_task_labels`), not part of the client's
+   *  `HubUploadRows` — `demo.ts` seeds them separately via `createLabel`/`setTaskLabel`. */
+  labels: HubLabelSeed[];
+  taskLabels: TaskLabelAssignment[];
 }
 
 export interface GenerateOptions {
@@ -470,6 +485,20 @@ function buildInteractionsAndTasks(
   return { interactions, tasks };
 }
 
+/** Which `HUB_LABELS` (if any) a hub admin would put on this task, derived from the same
+ *  outcome/frustration/signals the task was authored with in scenarios.ts. Pure function of the
+ *  task's content, so it stays deterministic without its own RNG draw. Most clean, no-friction
+ *  successes get nothing — a real admin doesn't label the boring ones either. */
+function labelsForTask(t: TaskFact): string[] {
+  const names: string[] = [];
+  const signals = t.signals ?? [];
+  if (t.outcome === "failure") names.push("Escalate");
+  else if (t.outcome === "unclear" || t.frustration === "high") names.push("Needs follow-up");
+  else if (t.frustration === "moderate") names.push("Good recovery");
+  if (signals.some((s) => /declin/i.test(s))) names.push("Blocked on write access");
+  return names;
+}
+
 // ---- Row serialization --------------------------------------------------------------------------
 
 /** Serialize one planned session's in-memory expansion into the client-mirror `Uploaded*` rows. */
@@ -641,6 +670,7 @@ export function generateDemoData(opts: GenerateOptions): DemoData {
   const bySource: Record<string, number> = {};
   let totalMessages = 0;
   let totalTasks = 0;
+  const taskLabels: TaskLabelAssignment[] = [];
 
   for (const plan of plans) {
     const messages = buildMessages(plan, opts.asOfMs, rng);
@@ -662,6 +692,15 @@ export function generateDemoData(opts: GenerateOptions): DemoData {
     dm.stats.tasks += tasks.length;
     dm.stats.invocations += built.invocations.length;
 
+    // taskRows[k].seq === k (the index within `tasks`), so it doubles as the taskSeq a hub label
+    // is keyed on.
+    tasks.forEach((t, taskSeq) => {
+      const labelNames = labelsForTask(t);
+      if (labelNames.length) {
+        taskLabels.push({ clientId: dm.clientId, sessionId: plan.sessionId, taskSeq, labelNames });
+      }
+    });
+
     bySource[plan.source] = (bySource[plan.source] ?? 0) + 1;
     totalMessages += messages.length;
     totalTasks += tasks.length;
@@ -672,5 +711,7 @@ export function generateDemoData(opts: GenerateOptions): DemoData {
     members,
     plugins: { marketplace: PLUGIN_MARKETPLACE, catalog: PLUGIN_CATALOG },
     stats: { sessions: plans.length, messages: totalMessages, tasks: totalTasks, bySource },
+    labels: HUB_LABELS,
+    taskLabels,
   };
 }
