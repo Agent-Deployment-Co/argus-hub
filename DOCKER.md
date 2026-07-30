@@ -112,6 +112,7 @@ environment variables → CLI flags. In a container, environment variables are t
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `HUB_PORT` | `4343` | Port the server listens on inside the container |
+| `HUB_BIND` | _(all interfaces)_ | Address to bind to inside the container, e.g. `127.0.0.1`. Rarely needed in Docker since the container's network namespace already isolates it — set `-p 127.0.0.1:4343:4343` on the host side instead for the equivalent effect |
 | `HUB_DATA_DIR` | `/data` | Directory for `hub.db` |
 | `HUB_SECRET_KEY` | _(required)_ | Canonical base64 encoding of exactly 32 random bytes. Encrypts task-provider API keys stored in SQLite |
 | `ADMIN_PASSWORD` | _(generated)_ | Pins the dashboard login password across container restarts. Without it, a new random password is generated — and printed — every time the container starts |

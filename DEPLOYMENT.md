@@ -77,6 +77,15 @@ launchctl load ~/Library/LaunchAgents/co.agentdeployment.argus-hub.plist
 
 ---
 
+## Binding to a specific address
+
+By default Hub listens on all interfaces. Add `--bind 127.0.0.1` (or set `HUB_BIND=127.0.0.1`) to
+listen on loopback only — for a deployment that should only be reachable through a reverse proxy
+or tunnel running on the same host, without relying on a host firewall rule to keep the port off
+the public interface.
+
+---
+
 ## Read-only mode
 
 Add `--read-only` to `ExecStart`/`ProgramArguments` (or set `HUB_READ_ONLY=true` in the unit's
