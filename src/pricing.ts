@@ -12,6 +12,10 @@ const DEFAULTS: Record<string, Price> = {
   opus: { input: 15, output: 75, cacheRead: 1.5, cacheWrite5m: 18.75, cacheWrite1h: 30 },
   sonnet: { input: 3, output: 15, cacheRead: 0.3, cacheWrite5m: 3.75, cacheWrite1h: 6 },
   haiku: { input: 1, output: 5, cacheRead: 0.1, cacheWrite5m: 1.25, cacheWrite1h: 2 },
+  fable: { input: 10, output: 50, cacheRead: 1, cacheWrite5m: 12.5, cacheWrite1h: 20 },
+  "gpt-5.6-sol": { input: 5, output: 30, cacheRead: 0.5, cacheWrite5m: 0, cacheWrite1h: 0 },
+  "gpt-5.6-terra": { input: 2, output: 12, cacheRead: 0.2, cacheWrite5m: 0, cacheWrite1h: 0 },
+  "gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite5m: 0, cacheWrite1h: 0 },
   "gpt-5.5": { input: 5, output: 30, cacheRead: 0.5, cacheWrite5m: 0, cacheWrite1h: 0 },
   "gpt-5.4": { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite5m: 0, cacheWrite1h: 0 },
   "gpt-5.4-mini": { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite5m: 0, cacheWrite1h: 0 },
@@ -27,12 +31,22 @@ const DEFAULTS: Record<string, Price> = {
 
 const unpriced = new Set<string>();
 
+/** Placeholders clients send when they couldn't determine the model. They aren't models, so they
+ *  never resolve to a price and reporting them as "unpriced models" is noise, not a pricing gap. */
+const NOT_A_MODEL = new Set(["", "(unknown)", "unknown"]);
+
 function priceFor(model: string, usage?: Usage): Price | null {
   const m = model.toLowerCase();
+  if (NOT_A_MODEL.has(m.trim())) return null;
   if (m.includes("opus")) return DEFAULTS.opus!;
   if (m.includes("sonnet")) return DEFAULTS.sonnet!;
   if (m.includes("haiku")) return DEFAULTS.haiku!;
+  // Fable and Mythos share a price; Mythos is the Project Glasswing twin of Fable.
+  if (m.includes("fable") || m.includes("mythos")) return DEFAULTS.fable!;
   if (m.includes("codex-mini")) return DEFAULTS["codex-mini"]!;
+  if (m.includes("gpt-5.6-sol")) return DEFAULTS["gpt-5.6-sol"]!;
+  if (m.includes("gpt-5.6-terra")) return DEFAULTS["gpt-5.6-terra"]!;
+  if (m.includes("gpt-5.6-luna")) return DEFAULTS["gpt-5.6-luna"]!;
   if (m.includes("gpt-5.5")) return DEFAULTS["gpt-5.5"]!;
   if (m.includes("gpt-5.4-mini") || m.includes("gpt-5.4 mini")) return DEFAULTS["gpt-5.4-mini"]!;
   if (m.includes("gpt-5.4")) return DEFAULTS["gpt-5.4"]!;
