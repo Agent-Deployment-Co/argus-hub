@@ -384,6 +384,7 @@ export interface TaskListItem {
   outcomeReason?: string;
   frustration?: string;
   signals?: string[];
+  flagged: boolean;
   labels: TaskListItemLabel[];
 }
 

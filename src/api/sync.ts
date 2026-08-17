@@ -19,11 +19,13 @@ import type { Context } from "hono";
 // v22 added session/task labels as two new local-only tables (not uploaded). No row shape changes.
 // v23 added is_hidden to resolved_sessions (local-only UI state); the upload query does not select
 // this column. No row shape changes.
-// NOTE (still v23, no client store bump): the client now additionally uploads the v21 title/summary
-// columns on each session and the v22 applied labels as a new `rows.labels` array. Both are additive
-// and OPTIONAL on the wire — older v23 clients omit them and still ingest — so HUB_MAX stays 23.
+// v24 added the local-only resolved_secret_findings table and v25 added its scan-version stamp;
+// neither is uploaded. The client task rows can additionally carry an additive flagged boolean.
+// The client additionally uploads the v21 title/summary columns on each session and the v22 applied
+// labels as a new `rows.labels` array. Both are additive and OPTIONAL on the wire. The flagged task
+// marker is also optional, so older clients still ingest.
 export const HUB_MIN_CLIENT_SCHEMA_VERSION = 10;
-export const HUB_MAX_CLIENT_SCHEMA_VERSION = 23;
+export const HUB_MAX_CLIENT_SCHEMA_VERSION = 25;
 
 const CLIENT_ID_HEADER = "X-Argus-Client";
 

@@ -239,6 +239,7 @@ export function Tasks() {
                   {t.labels.map((l) => (
                     <span key={l.labelId} className="pill label-pill">{l.name}</span>
                   ))}
+                  {t.flagged && <span className="pill task-failure">Credential warning</span>}
                   {frust && <span className={`pill ${frust.cls}`}>{frust.label}</span>}
                   <span className={`pill ${outcome.cls}`}>{outcome.label}</span>
                   <span className="task-item-tokens">

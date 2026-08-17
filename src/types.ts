@@ -133,6 +133,8 @@ export interface TaskFact {
   frustration?: string;
   signals?: string[];
   outcomeReason?: string;
+  /** True when a synced local secret-scan finding belongs to this task. */
+  flagged?: boolean;
   position: { originKey: string; recordIndex: number; itemIndex: number; byteOffset?: number };
 }
 

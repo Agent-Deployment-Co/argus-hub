@@ -19,6 +19,7 @@ export interface TaskListItem {
   outcomeReason?: string;
   frustration?: string;
   signals?: string[];
+  flagged: boolean;
   labels: TaskListItemLabel[];
 }
 
@@ -65,6 +66,7 @@ function listItem(row: HubTaskRow): TaskListItem {
     outcomeReason: t.outcomeReason,
     frustration: t.frustration,
     signals: t.signals,
+    flagged: t.flagged === true,
     labels: [],
   };
 }

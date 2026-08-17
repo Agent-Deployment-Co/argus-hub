@@ -70,6 +70,8 @@ export interface UploadedTask {
   source: string;
   ts: number | null;
   task_json: string;
+  /** Client-derived marker: a local secret-scan finding belongs to this task. Optional for older clients. */
+  flagged?: boolean;
 }
 
 export interface UploadedInteraction {
@@ -233,6 +235,21 @@ function run(db: Database, sql: string, params: unknown[] = []): Promise<RunResu
       else resolve(this);
     });
   });
+}
+
+/** Preserve the existing task JSON when an older or malformed payload cannot be enriched. The
+ *  normal client payload is a TaskFact object; the guard keeps ingest backward-compatible with
+ *  the store's intentionally light row-shape validation. */
+function withTaskFlag(taskJson: string, flagged: boolean): string {
+  try {
+    const task = JSON.parse(taskJson) as unknown;
+    if (task && typeof task === "object" && !Array.isArray(task)) {
+      return JSON.stringify({ ...(task as Record<string, unknown>), flagged });
+    }
+  } catch {
+    // Keep the original JSON. Existing ingest accepts opaque task_json values.
+  }
+  return taskJson;
 }
 
 function exec(db: Database, sql: string): Promise<void> {
@@ -1229,7 +1246,8 @@ export class HubStore {
           "resolved_tasks",
           ["org_id", "client_id", "session_id", "seq", "source", "ts", "task_json"],
           rows.tasks.filter((t) => sessionIds.has(t.session_id)).map((t) => [
-            orgId, clientId, t.session_id, t.seq, t.source, t.ts, t.task_json,
+            orgId, clientId, t.session_id, t.seq, t.source, t.ts,
+            withTaskFlag(t.task_json, t.flagged === true),
           ]),
         );
 

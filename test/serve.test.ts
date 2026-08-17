@@ -745,7 +745,7 @@ async function syncWithTask(
   env: TestEnv,
   email: string,
   sessionId: string,
-  task: { outcome?: string; frustration?: string; description?: string; signals?: string[]; disposition?: string },
+  task: { outcome?: string; frustration?: string; description?: string; signals?: string[]; disposition?: string; flagged?: boolean },
 ): Promise<string> {
   const app = createHubApp(env.store);
   const clientId = env.clientFor(email);
@@ -755,6 +755,7 @@ async function syncWithTask(
     seq: 0,
     source: "claude",
     ts: 1_000_000,
+    flagged: task.flagged,
     task_json: JSON.stringify({
       id: `${sessionId}-task-0`,
       source: "claude",
@@ -837,6 +838,18 @@ describe("GET /api/tasks", () => {
       expect(body.rows[0]!.project).toBe("/Users/you/proj");
       expect(body.rows[0]!.outcome).toBe("success");
       expect(body.rows[0]!.frustration).toBe("none");
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("returns the synced credential warning flag on a task", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncWithTask(env, "alice@example.com", "flagged-task-sess", { flagged: true });
+      const body = await (await app.request("/api/tasks")).json() as { rows: Array<{ flagged: boolean }> };
+      expect(body.rows[0]!.flagged).toBe(true);
     } finally {
       await env.store.close();
     }
