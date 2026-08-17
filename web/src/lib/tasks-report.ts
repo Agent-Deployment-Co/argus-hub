@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { TaskReport } from "../types";
 import { sanitizedSource, type FilterValues } from "./filters";
 
-function taskReportQueryKey(filters: FilterValues) {
+function taskReportQueryKey(filters: FilterValues, flagged: boolean) {
   return [
     "task-report",
     filters.since ?? null,
@@ -10,10 +10,11 @@ function taskReportQueryKey(filters: FilterValues) {
     sanitizedSource(filters.source),
     filters.userId ?? null,
     filters.groupId ?? null,
+    flagged,
   ] as const;
 }
 
-function taskReportUrl(filters: FilterValues): string {
+function taskReportUrl(filters: FilterValues, flagged: boolean): string {
   const params = new URLSearchParams();
   if (filters.since) params.set("since", filters.since);
   if (filters.until) params.set("until", filters.until);
@@ -21,11 +22,12 @@ function taskReportUrl(filters: FilterValues): string {
   if (source) params.set("source", source);
   if (filters.userId) params.set("user", filters.userId);
   if (filters.groupId) params.set("group", filters.groupId);
+  if (flagged) params.set("flagged", "1");
   return `/api/tasks/report?${params.toString()}`;
 }
 
-async function fetchTaskReport(filters: FilterValues): Promise<TaskReport> {
-  const res = await fetch(taskReportUrl(filters));
+async function fetchTaskReport(filters: FilterValues, flagged: boolean): Promise<TaskReport> {
+  const res = await fetch(taskReportUrl(filters, flagged));
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error ?? `Failed to load data (${res.status})`);
@@ -33,10 +35,10 @@ async function fetchTaskReport(filters: FilterValues): Promise<TaskReport> {
   return res.json();
 }
 
-export function useTaskReportQuery(filters: FilterValues) {
+export function useTaskReportQuery(filters: FilterValues, flagged = false) {
   return useQuery({
-    queryKey: taskReportQueryKey(filters),
-    queryFn: () => fetchTaskReport(filters),
+    queryKey: taskReportQueryKey(filters, flagged),
+    queryFn: () => fetchTaskReport(filters, flagged),
     staleTime: 30_000,
     placeholderData: keepPreviousData,
   });

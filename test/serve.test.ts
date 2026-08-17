@@ -855,6 +855,57 @@ describe("GET /api/tasks", () => {
     }
   });
 
+  test("stores the flag in its own column, leaving task_json exactly as uploaded", async () => {
+    const env = await openTestEnv();
+    try {
+      await syncWithTask(env, "alice@example.com", "verbatim-sess", { flagged: true });
+      const orgId = (await env.store.getDefaultOrgId())!;
+      const rows = await env.store.readTaskFacts({ orgId });
+      expect(rows[0]!.flagged).toBe(true);
+      // A row fact, so it must not have been folded into the uploaded TaskFact.
+      expect("flagged" in (rows[0]!.task as unknown as Record<string, unknown>)).toBe(false);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("counts flagged tasks and narrows to them with ?flagged=1", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncWithTask(env, "alice@example.com", "flag-a", { flagged: true, description: "Rotate the key" });
+      await syncWithTask(env, "alice@example.com", "flag-b", { description: "Update the docs" });
+
+      const all = await (await app.request("/api/tasks")).json() as {
+        total: number; flaggedTotal: number;
+      };
+      expect(all.total).toBe(2);
+      expect(all.flaggedTotal).toBe(1);
+
+      const narrowed = await (await app.request("/api/tasks?flagged=1")).json() as {
+        total: number; flaggedTotal: number; rows: Array<{ description: string }>;
+      };
+      expect(narrowed.total).toBe(1);
+      // With the filter on, the count equals the total — same convention as the outcome counts.
+      expect(narrowed.flaggedTotal).toBe(1);
+      expect(narrowed.rows.map((r) => r.description)).toEqual(["Rotate the key"]);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("an unrecognized flagged value leaves the list unnarrowed", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncWithTask(env, "alice@example.com", "flag-loose", { description: "Update the docs" });
+      const body = await (await app.request("/api/tasks?flagged=maybe")).json() as { total: number };
+      expect(body.total).toBe(1);
+    } finally {
+      await env.store.close();
+    }
+  });
+
   test("?user= scopes tasks to one user", async () => {
     const env = await openTestEnv();
     const app = createHubApp(env.store);
@@ -1129,6 +1180,31 @@ describe("GET /api/tasks/report", () => {
       expect(body.byUser).toEqual([]);
       expect(body.bySource).toEqual([{ key: "claude", label: "claude", total: 2, success: 1, failure: 1, successRate: 0.5, frustrationRate: 0.5 }]);
       expect(body.topSignals).toEqual([{ signal: "no access", count: 1 }]);
+    } finally {
+      await env.store.close();
+    }
+  });
+
+  test("applies the flagged filter to the task quality report", async () => {
+    const env = await openTestEnv();
+    const app = createHubApp(env.store);
+    try {
+      await syncWithTask(env, "alice@example.com", "flagged-report", {
+        flagged: true,
+        outcome: "failure",
+      });
+      await syncWithTask(env, "alice@example.com", "unflagged-report", {
+        outcome: "success",
+      });
+
+      const res = await app.request(`/api/tasks/report?${WIDE_RANGE}&flagged=1`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as {
+        totals: { total: number };
+        outcomes: { total: number; success: number; failure: number };
+      };
+      expect(body.totals.total).toBe(1);
+      expect(body.outcomes).toMatchObject({ total: 1, success: 0, failure: 1 });
     } finally {
       await env.store.close();
     }

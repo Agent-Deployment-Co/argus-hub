@@ -27,6 +27,7 @@ import {
   parseGroupScope as parseGroupScopeFrom,
   parseGroupIdScope as parseGroupIdScopeFrom,
   parseOutcomeFilter as parseOutcomeFilterFrom,
+  parseFlaggedFilter as parseFlaggedFilterFrom,
   parseIntOr,
   DEFAULT_LIMIT,
   MAX_LIMIT,
@@ -58,6 +59,7 @@ const parseUserScope = (c: Context) => parseUserScopeFrom((k) => c.req.query(k))
 const parseGroupScope = (c: Context) => parseGroupScopeFrom((k) => c.req.query(k));
 const parseGroupIdScope = (c: Context) => parseGroupIdScopeFrom((k) => c.req.query(k));
 const parseOutcomeFilter = (c: Context) => parseOutcomeFilterFrom((k) => c.req.query(k));
+const parseFlaggedFilter = (c: Context) => parseFlaggedFilterFrom((k) => c.req.query(k));
 
 function requestHost(c: Context): string | undefined {
   return c.req.header("Host") ?? new URL(c.req.url).host;
@@ -576,6 +578,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
         offset: 0,
         limit: DEFAULT_LIMIT,
         counts: { success: 0, failure: 0, unknown: 0 },
+        flaggedTotal: 0,
       });
     }
 
@@ -594,6 +597,7 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
       offset: Math.max(0, parseIntOr(c.req.query("offset"), 0)),
       q: c.req.query("q") || undefined,
       outcomes,
+      flagged: parseFlaggedFilter(c),
     };
     const result = buildTaskList(taskRows, params);
     const labelsByKey = await store.listLabelsForTasks(
@@ -618,7 +622,13 @@ export function createHubApp(store: HubStore, auth?: AdminAuth, options: HubAppO
 
     const userId = parseUserScope(c);
     const groupId = parseGroupIdScope(c);
-    const report = await buildTaskQualityReport(store, { orgId, userId, groupId }, query, new Date());
+    const report = await buildTaskQualityReport(
+      store,
+      { orgId, userId, groupId },
+      query,
+      new Date(),
+      { flagged: parseFlaggedFilter(c) },
+    );
     if (!report) return c.json({ error: "No data yet." }, 503);
     return c.json(report);
   });

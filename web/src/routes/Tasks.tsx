@@ -30,11 +30,13 @@ interface TaskFilters {
   since: string;
   until: string;
   source: string;
+  flagged: boolean;
 }
 
 async function fetchTasks(f: TaskFilters): Promise<TaskListResponse> {
   const params = new URLSearchParams({ limit: "100", since: f.since, until: f.until });
   if (f.q) params.set("q", f.q);
+  if (f.flagged) params.set("flagged", "1");
   if (f.outcome.length) params.set("outcome", f.outcome.join(","));
   if (f.user) params.set("user", f.user);
   if (f.group) params.set("group", f.group);
@@ -89,20 +91,24 @@ export function Tasks() {
   const since = search.since ?? DEFAULT_SINCE();
   const until = search.until ?? DEFAULT_UNTIL();
   const source = search.source ?? "";
+  const flagged = search.flagged === true;
   const [draft, setDraft] = useState(q);
   const [openId, setOpenId] = useState<string | null>(null);
   const query = useQuery({
-    queryKey: ["tasks", q, outcome, user, group, since, until, source],
-    queryFn: () => fetchTasks({ q, outcome, user, group, since, until, source }),
+    queryKey: ["tasks", q, outcome, user, group, since, until, source, flagged],
+    queryFn: () => fetchTasks({ q, outcome, user, group, since, until, source, flagged }),
     staleTime: 30_000,
   });
-  const reportQuery = useTaskReportQuery({ since, until, source, userId: user, groupId: group });
+  const reportQuery = useTaskReportQuery({ since, until, source, userId: user, groupId: group }, flagged);
   const report = reportQuery.data;
 
   const toggleOutcome = (key: string) => {
     const next = outcome.includes(key) ? outcome.filter((o: string) => o !== key) : [...outcome, key];
     navigate({ to: ".", search: { ...search, outcome: next.length ? next : undefined }, replace: true });
   };
+
+  const toggleFlagged = () =>
+    navigate({ to: ".", search: { ...search, flagged: flagged ? undefined : true }, replace: true });
 
   const patchFilters = (
     patch: Partial<{ since: string; until: string; source: string; userId: string; groupId: string }>,
@@ -145,7 +151,7 @@ export function Tasks() {
         loading={query.isFetching}
         onChange={patchFilters}
         onReset={() => { setDraft(""); navigate({ to: ".", search: {}, replace: true }); }}
-        resettable={isFilterActive(search, { since: DEFAULT_SINCE(), until: DEFAULT_UNTIL() }) || !!q || outcome.length > 0}
+        resettable={isFilterActive(search, { since: DEFAULT_SINCE(), until: DEFAULT_UNTIL() }) || !!q || outcome.length > 0 || flagged}
       />
       <div className="page-head">
         <h1>Tasks</h1>
@@ -174,6 +180,26 @@ export function Tasks() {
       <div className="page-head">
         <h2>Task list</h2>
       </div>
+      {/* The credential signal needs its own reachable surface: a pill on a row only helps someone
+          already scrolling to that row. Rendered while the filter is on even at zero, so narrowing to
+          an empty set never strands the user without a way back. */}
+      {(query.data && query.data.flaggedTotal > 0) || flagged ? (
+        <div className="rec rec-flagged warning">
+          <div className="rec-title">
+            {query.data?.flaggedTotal === 1
+              ? "1 task may have exposed a credential"
+              : `${query.data?.flaggedTotal ?? 0} tasks may have exposed a credential`}
+          </div>
+          <div className="rec-detail">
+            Someone's session text looked like it held an API key, token, or private key. The details
+            stay on their machine, so ask them to rotate it. Dismissing the warning in their own Argus
+            hides their banner, not this one.
+          </div>
+          <button type="button" className="rec-action" onClick={toggleFlagged}>
+            {flagged ? "Show all tasks" : "Show only these"}
+          </button>
+        </div>
+      ) : null}
       <div className="task-filters">
         <div className="task-filters-outcomes" role="group" aria-label="Filter by outcome">
           {OUTCOME_OPTIONS.map((opt) => (
@@ -239,7 +265,14 @@ export function Tasks() {
                   {t.labels.map((l) => (
                     <span key={l.labelId} className="pill label-pill">{l.name}</span>
                   ))}
-                  {t.flagged && <span className="pill task-failure">Credential warning</span>}
+                  {t.flagged && (
+                    <span
+                      className="pill task-failure"
+                      title="This task's session text looked like it held a credential. Details stay on the user's machine; dismissing the warning there doesn't clear this."
+                    >
+                      Credential warning
+                    </span>
+                  )}
                   {frust && <span className={`pill ${frust.cls}`}>{frust.label}</span>}
                   <span className={`pill ${outcome.cls}`}>{outcome.label}</span>
                   <span className="task-item-tokens">

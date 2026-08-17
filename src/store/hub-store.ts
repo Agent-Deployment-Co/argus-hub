@@ -19,7 +19,7 @@ import { emptyFrictionTotals, foldFriction, HIGH_TOKEN_GROWTH_RATIO } from "../h
 import type { LlmConfigField, LlmProvider } from "../llm/types.ts";
 import type { EncryptedSecret } from "../secrets.ts";
 
-export const HUB_SCHEMA_VERSION = 5;
+export const HUB_SCHEMA_VERSION = 6;
 export const HUB_APPLICATION_ID = 0x48554200; // "HUB\0"
 
 // ---- Raw row types (mirrors client argus.db resolved_* column shapes) -------------------
@@ -235,21 +235,6 @@ function run(db: Database, sql: string, params: unknown[] = []): Promise<RunResu
       else resolve(this);
     });
   });
-}
-
-/** Preserve the existing task JSON when an older or malformed payload cannot be enriched. The
- *  normal client payload is a TaskFact object; the guard keeps ingest backward-compatible with
- *  the store's intentionally light row-shape validation. */
-function withTaskFlag(taskJson: string, flagged: boolean): string {
-  try {
-    const task = JSON.parse(taskJson) as unknown;
-    if (task && typeof task === "object" && !Array.isArray(task)) {
-      return JSON.stringify({ ...(task as Record<string, unknown>), flagged });
-    }
-  } catch {
-    // Keep the original JSON. Existing ingest accepts opaque task_json values.
-  }
-  return taskJson;
 }
 
 function exec(db: Database, sql: string): Promise<void> {
@@ -546,11 +531,19 @@ const CREATE_HUB_SCHEMA_SQL = `
     source     TEXT NOT NULL,
     ts         INTEGER,
     task_json  TEXT NOT NULL,
+    -- Client-derived credential marker (Argus #327/#335): 1 when a local secret-scan finding landed
+    -- in one of this task's interactions. Its own column, not a key folded into task_json, so
+    -- "which work touched a credential" is an indexed filter and a countable rollup rather than a
+    -- JSON probe — and so task_json stays exactly what the client uploaded. 0 for clients that
+    -- predate the field, which is indistinguishable from "scanned, nothing found" and is fine:
+    -- both mean "nothing to flag".
+    flagged    INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (org_id, client_id, session_id, seq),
     FOREIGN KEY (org_id, client_id, session_id) REFERENCES resolved_sessions(org_id, client_id, session_id) ON DELETE CASCADE
   );
   CREATE INDEX resolved_tasks_source ON resolved_tasks(org_id, source);
   CREATE INDEX resolved_tasks_ts     ON resolved_tasks(org_id, ts);
+  CREATE INDEX resolved_tasks_flagged ON resolved_tasks(org_id, flagged);
 
   CREATE TABLE resolved_interactions (
     org_id           TEXT NOT NULL,
@@ -625,6 +618,13 @@ const HUB_MIGRATIONS: Record<number, string> = {
   3: HUB_LABELS_DDL,
   // v4 → v5: organization-scoped task LLM settings and encrypted secrets.
   4: ORGANIZATION_LLM_SETTINGS_DDL,
+  // v5 → v6: the per-task credential marker synced from clients (Argus #327/#335). Existing rows
+  // default to 0 (nothing flagged), and fill in as each client re-uploads — the client's content
+  // digest includes which tasks its findings flag, so a newly-flagged session re-syncs on its own.
+  5: `
+    ALTER TABLE resolved_tasks ADD COLUMN flagged INTEGER NOT NULL DEFAULT 0;
+    CREATE INDEX resolved_tasks_flagged ON resolved_tasks(org_id, flagged);
+  `,
 };
 
 // ---- DB open / init ---------------------------------------------------------------------
@@ -798,6 +798,9 @@ export interface HubTaskRow {
   /** The disposition of the interaction this task opened ("completed" | "interrupted" |
    *  "incomplete" | "error"), or null when no matching interaction was found. */
   disposition: string | null;
+  /** Client-derived: a local secret-scan finding landed in this task. A row fact, not part of the
+   *  uploaded `task` — the client derives it at upload time and never stores it on the TaskFact. */
+  flagged: boolean;
 }
 
 export interface TaskLlmProviderConfig {
@@ -1244,10 +1247,12 @@ export class HubStore {
         await insertRows(
           this.db,
           "resolved_tasks",
-          ["org_id", "client_id", "session_id", "seq", "source", "ts", "task_json"],
+          ["org_id", "client_id", "session_id", "seq", "source", "ts", "task_json", "flagged"],
+          // task_json is stored exactly as uploaded; the credential marker rides in its own column.
+          // Absent (older client) is stored as 0, same as an explicit false.
           rows.tasks.filter((t) => sessionIds.has(t.session_id)).map((t) => [
-            orgId, clientId, t.session_id, t.seq, t.source, t.ts,
-            withTaskFlag(t.task_json, t.flagged === true),
+            orgId, clientId, t.session_id, t.seq, t.source, t.ts, t.task_json,
+            t.flagged === true ? 1 : 0,
           ]),
         );
 
@@ -2221,10 +2226,11 @@ export class HubStore {
       const rows = await all<{
         task_json: string; project: string; client_id: string; session_id: string; seq: number;
         user_id: string | null; display_name: string | null; disposition: string | null;
+        flagged: number;
       }>(
         this.db,
         `SELECT t.task_json AS task_json, s.project AS project, t.client_id AS client_id,
-                t.session_id AS session_id, t.seq AS seq,
+                t.session_id AS session_id, t.seq AS seq, t.flagged AS flagged,
                 c.user_id AS user_id, u.display_name AS display_name, i.disposition AS disposition
          FROM resolved_tasks t
          JOIN resolved_sessions s ON s.org_id = t.org_id AND s.client_id = t.client_id AND s.session_id = t.session_id
@@ -2253,6 +2259,7 @@ export class HubStore {
         userId: r.user_id,
         displayName: r.display_name,
         disposition: r.disposition,
+        flagged: r.flagged === 1,
       }));
     });
   }
@@ -2636,13 +2643,24 @@ export class HubStore {
   // window. Mirrors the friction half of readHealthRollups but public and without the
   // per-project breakdown / token-growth pass that dashboard reporting also needs.
 
-  async readWindowFrictionRollup(scope: HubScope, query: ResolvedQuery): Promise<FrictionTotals> {
+  async readWindowFrictionRollup(
+    scope: HubScope,
+    query: ResolvedQuery,
+    options: { flagged?: boolean } = {},
+  ): Promise<FrictionTotals> {
     const expanded = await this.expandScope(scope);
     if (expanded.empty) return emptyFrictionTotals();
     return this.schedule(async () => {
       const filters = buildHubFilters(expanded, query, {
         sourceColumn: "m.source", dateColumn: "m.date", cwdColumn: "m.cwd", tableAlias: "m",
       }, { excludeArchived: true });
+      const flaggedCondition =
+        "EXISTS (SELECT 1 FROM resolved_tasks ft " +
+        "WHERE ft.org_id = m.org_id AND ft.client_id = m.client_id AND " +
+        "ft.session_id = m.session_id AND ft.flagged = 1)";
+      const messageWhere = options.flagged
+        ? `${filters.messageWhere} AND ${flaggedCondition}`
+        : filters.messageWhere;
       const sessions = await all<{
         org_id: string; client_id: string; session_id: string;
         fi: number | null; fr: number | null; fc: number | null; ft: number | null;
@@ -2653,7 +2671,7 @@ export class HubStore {
                 s.friction_compactions AS fc, s.friction_turns AS ft
          FROM resolved_usage m JOIN resolved_sessions s
            ON s.org_id = m.org_id AND s.client_id = m.client_id AND s.session_id = m.session_id
-         ${filters.messageWhere}
+         ${messageWhere}
          GROUP BY m.org_id, m.client_id, m.session_id`,
         filters.messageParams,
       );

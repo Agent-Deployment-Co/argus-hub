@@ -24,7 +24,14 @@ per-user dashboard page; `query_activity`'s `user` filter has no dashboard equiv
 is always team-wide there), so it's the only way to get a per-user usage/cost view.
 
 `query_tasks` adds `q` (search over task description/project), `outcome` (comma list of
-`success`/`failure`/`unknown`), `limit` (default 50, max 200), and `offset`.
+`success`/`failure`/`unknown`), `flagged` (pass `1` for only tasks carrying a credential warning),
+`limit` (default 50, max 200), and `offset`. Every row carries `flagged`, and the response carries
+`flaggedTotal` for the filtered set, so an agent can answer "which work may have exposed a
+credential" without paging the whole list. See "Credential warnings" in the README for what that
+flag does and doesn't tell you.
+
+`query_task_quality` accepts the same optional `flagged=1` filter when its report should cover only
+tasks carrying a credential warning.
 
 `query_users` takes an optional `group` filter (matches groupId or groupName) instead of the
 shared filter set — use it to look up a `userId` before scoping other tools to one person.

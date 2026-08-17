@@ -133,8 +133,9 @@ export interface TaskFact {
   frustration?: string;
   signals?: string[];
   outcomeReason?: string;
-  /** True when a synced local secret-scan finding belongs to this task. */
-  flagged?: boolean;
+  // The credential marker is deliberately NOT here. It's a row fact the client derives at upload
+  // time (resolved_tasks.flagged / HubTaskRow.flagged), not part of the TaskFact the client stores,
+  // and keeping it off this type is what lets task_json stay exactly what was uploaded.
   position: { originKey: string; recordIndex: number; itemIndex: number; byteOffset?: number };
 }
 

@@ -62,7 +62,8 @@ Argus Hub's dashboard runs in your browser at `http://hub.internal:4343`, the sa
 
 - **Activity** is the home view: usage and cost over time, org-wide or scoped to a user or group.
 - **Tasks** are the things people asked agents to do, each with a judged outcome, frustration and
-  interrupted rates, and top failure signals.
+  interrupted rates, and top failure signals. Work whose session text looked like it held a
+  credential carries a warning (see [Credential warnings](#credential-warnings)).
 - **Tools** shows tool, skill, and MCP server usage across the org.
 - **Team** is a per-user summary — sessions, total tokens, estimated cost, last-sync time — with
   optional grouping for reporting.
@@ -70,6 +71,26 @@ Argus Hub's dashboard runs in your browser at `http://hub.internal:4343`, the sa
   itself — and applies them to tasks from the Tasks tab.
 - **[Export](docs/export.md)** downloads the full dataset as a Snowflake-ready zip.
 - **[MCP](docs/MCP.md)** lets an agent query pooled usage data and manage task labels directly.
+
+### Credential warnings
+
+Argus scans each session's own text locally for things that look like exposed credentials (API keys,
+tokens, private key blocks). Those findings never leave the user's machine. What syncs is one boolean
+per task: whether a finding landed in that piece of work. The Tasks view counts them, offers a filter
+to just those tasks, and marks each one.
+
+Three things to know before acting on it:
+
+- **You get no detail, by design.** Not the kind of credential, not a redacted hint, not which prompt.
+  The right next step is to ask that person to look at their own Argus and rotate what they find.
+- **A dismissal on their machine does not clear the warning here.** Dismissing means "I've seen these
+  findings" and silences one person's banner. This flag is the org's record that the work touched a
+  credential, so it stays until a rescan finds something different. It is not an inbox to clear.
+- **It is precision-first, not exhaustive.** A missed obfuscated key is preferable to a warning nobody
+  trusts, so treat the count as a floor rather than a complete audit.
+
+Clients that predate the scanner report nothing, which is indistinguishable from "scanned, nothing
+found" — both mean there is nothing to flag.
 
 | Tasks | Tools |
 | --- | --- |
@@ -100,7 +121,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup details and the full command li
 - Uploaded payloads are resolved usage rows, session rows (including title/summary), tasks,
   interaction metadata, tool/MCP invocations, and labels — merged directly into `hub.db`. The
   client's raw `argus.db` never leaves the developer's machine. **Not** sent: prompt/response
-  text, or any BYO model API keys configured on the client.
+  text, secret-scan findings, or any BYO model API keys configured on the client. Each task does
+  carry one derived boolean saying whether a finding landed in it — never the category, the redacted
+  hint, or the dismissal state (see [Credential warnings](#credential-warnings)).
 
 See [SECURITY.md](SECURITY.md) to report a vulnerability.
 

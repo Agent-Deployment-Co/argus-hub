@@ -39,6 +39,7 @@ const routeTree = rootRoute.addChildren([
       search: Record<string, unknown>,
     ): {
       q?: string; outcome?: string[]; user?: string; group?: string; since?: string; until?: string; source?: string;
+      flagged?: true;
     } => {
       const outcome = Array.isArray(search.outcome)
         ? search.outcome.filter((v): v is string => typeof v === "string")
@@ -48,6 +49,11 @@ const routeTree = rootRoute.addChildren([
       return {
         q: typeof search.q === "string" && search.q.length > 0 ? search.q : undefined,
         outcome: outcome.length > 0 ? outcome : undefined,
+        // Present-or-absent, never `false` in the URL, so a shared link reads as the filter it is.
+        flagged:
+          search.flagged === true || search.flagged === 1 || search.flagged === "1" || search.flagged === "true"
+            ? true
+            : undefined,
         user: typeof search.user === "string" && search.user.length > 0 ? search.user : undefined,
         group: str(search.group),
         since: str(search.since),
