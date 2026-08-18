@@ -156,6 +156,25 @@ export function Tasks() {
       <div className="page-head">
         <h1>Tasks</h1>
       </div>
+      {/* Keep the credential signal directly under the page heading so it is visible before the
+          quality report panels. */}
+      {query.data && query.data.flaggedTotal > 0 ? (
+        <div className="rec rec-flagged warning">
+          <div className="rec-title">
+            {query.data?.flaggedTotal === 1
+              ? "1 task may have exposed a credential"
+              : `${query.data?.flaggedTotal ?? 0} tasks may have exposed a credential`}
+          </div>
+          <div className="rec-detail">
+            Someone's session text looked like it held an API key, token, or private key. The details
+            stay on their machine, so ask them to rotate it. Dismissing the warning in their own Argus
+            hides their banner, not this one.
+          </div>
+          <button type="button" className="rec-action" onClick={toggleFlagged}>
+            {flagged ? "Show all tasks" : "Show only these"}
+          </button>
+        </div>
+      ) : null}
       {reportQuery.isPending ? (
         <div className="center-state">Loading…</div>
       ) : reportQuery.isError ? (
@@ -180,26 +199,6 @@ export function Tasks() {
       <div className="page-head">
         <h2>Task list</h2>
       </div>
-      {/* The credential signal needs its own reachable surface: a pill on a row only helps someone
-          already scrolling to that row. Rendered while the filter is on even at zero, so narrowing to
-          an empty set never strands the user without a way back. */}
-      {(query.data && query.data.flaggedTotal > 0) || flagged ? (
-        <div className="rec rec-flagged warning">
-          <div className="rec-title">
-            {query.data?.flaggedTotal === 1
-              ? "1 task may have exposed a credential"
-              : `${query.data?.flaggedTotal ?? 0} tasks may have exposed a credential`}
-          </div>
-          <div className="rec-detail">
-            Someone's session text looked like it held an API key, token, or private key. The details
-            stay on their machine, so ask them to rotate it. Dismissing the warning in their own Argus
-            hides their banner, not this one.
-          </div>
-          <button type="button" className="rec-action" onClick={toggleFlagged}>
-            {flagged ? "Show all tasks" : "Show only these"}
-          </button>
-        </div>
-      ) : null}
       <div className="task-filters">
         <div className="task-filters-outcomes" role="group" aria-label="Filter by outcome">
           {OUTCOME_OPTIONS.map((opt) => (
