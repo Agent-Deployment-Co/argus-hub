@@ -60,18 +60,20 @@ export async function buildActivityReport(
  *  ("No data yet." for both REST and MCP callers). */
 export async function buildTaskQualityReport(
   store: HubStore, scope: HubScope, query: ResolvedQuery, now: Date,
+  options: { flagged?: boolean } = {},
 ): Promise<TaskReport | null> {
   const { since, until } = resolveWindow(query, now);
   const currentQuery = { ...query, since, until };
 
-  const [rows, friction, totals] = await Promise.all([
+  const [allRows, friction, totals] = await Promise.all([
     store.readTaskFacts(scope, currentQuery),
-    store.readWindowFrictionRollup(scope, currentQuery),
+    store.readWindowFrictionRollup(scope, currentQuery, { flagged: options.flagged }),
     store.readActivityTotals(scope, currentQuery),
   ]);
 
   if (totals.sessions === 0) return null;
 
+  const rows = options.flagged ? allRows.filter((row) => row.flagged) : allRows;
   return assembleTaskReport({ since, until, rows, friction, nowMs: now.getTime() });
 }
 

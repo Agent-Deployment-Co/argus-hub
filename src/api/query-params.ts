@@ -74,3 +74,12 @@ export function parseOutcomeFilter(get: QueryGetter): TaskOutcomeFilter[] | stri
   }
   return values.length ? (values as TaskOutcomeFilter[]) : undefined;
 }
+
+/** Parse the `flagged` param, which narrows the task list to tasks carrying a credential warning.
+ *  Present-and-truthy (`1`/`true`) turns it on; anything else leaves the list unnarrowed. A filter,
+ *  not a tri-state: there's no "only unflagged" view to ask for. */
+export function parseFlaggedFilter(get: QueryGetter): boolean | undefined {
+  const raw = get("flagged")?.trim().toLowerCase();
+  if (!raw) return undefined;
+  return raw === "1" || raw === "true" ? true : undefined;
+}

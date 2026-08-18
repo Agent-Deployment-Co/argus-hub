@@ -19,6 +19,7 @@ export interface TaskListItem {
   outcomeReason?: string;
   frustration?: string;
   signals?: string[];
+  flagged: boolean;
   labels: TaskListItemLabel[];
 }
 
@@ -34,6 +35,11 @@ export interface TaskListResponse {
   offset: number;
   limit: number;
   counts: TaskListCounts;
+  /** How many tasks in the filtered set carry a credential warning — the number that makes the
+   *  signal reachable ("N tasks may contain exposed credentials") instead of only visible to
+   *  someone already scrolling the list. Counted the same way as `counts`, so it reflects the
+   *  active filters; with `flagged` on it equals `total`. */
+  flaggedTotal: number;
 }
 
 export type TaskOutcomeFilter = "success" | "failure" | "unknown";
@@ -45,6 +51,8 @@ export interface TaskListParams {
   /** When set, only rows classifying to one of these outcomes are returned. The top-of-page
    *  counts are computed from this same filtered set, so they reflect the active filters. */
   outcomes?: TaskOutcomeFilter[];
+  /** When true, narrow to tasks carrying a credential warning. */
+  flagged?: boolean;
 }
 
 // Labels aren't populated here: buildTaskList works over the full (unpaged) filtered set, but
@@ -65,6 +73,8 @@ function listItem(row: HubTaskRow): TaskListItem {
     outcomeReason: t.outcomeReason,
     frustration: t.frustration,
     signals: t.signals,
+    // A row fact, not part of the uploaded TaskFact — the client derives it at upload time.
+    flagged: row.flagged,
     labels: [],
   };
 }
@@ -99,15 +109,18 @@ export function buildTaskList(rows: HubTaskRow[], params: TaskListParams): TaskL
   const allowed = params.outcomes?.length ? new Set(params.outcomes) : null;
   const counts: TaskListCounts = { success: 0, failure: 0, unknown: 0 };
   const items: TaskListItem[] = [];
+  let flaggedTotal = 0;
   for (const row of rows) {
     if (term && !row.task.description.toLowerCase().includes(term) && !row.project.toLowerCase().includes(term)) continue;
     const outcome = classifyOutcome(row.task.outcome);
     if (allowed && !allowed.has(outcome)) continue;
+    if (params.flagged && !row.flagged) continue;
     counts[outcome]++;
+    if (row.flagged) flaggedTotal++;
     items.push(listItem(row));
   }
   const total = items.length;
   const offset = Math.max(0, params.offset);
   const page = items.slice(offset, offset + params.limit);
-  return { rows: page, total, offset, limit: params.limit, counts };
+  return { rows: page, total, offset, limit: params.limit, counts, flaggedTotal };
 }

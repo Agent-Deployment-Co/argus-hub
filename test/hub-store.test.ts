@@ -318,6 +318,8 @@ describe("schema", () => {
        DROP TABLE organization_llm_secrets;
        DROP TABLE organization_llm_provider_configs;
        DROP TABLE organization_task_llm;
+       DROP INDEX resolved_tasks_flagged;
+       ALTER TABLE resolved_tasks DROP COLUMN flagged;
        PRAGMA user_version = 1;`);
     await closeRaw(raw);
 
@@ -387,6 +389,8 @@ describe("schema", () => {
       DROP TABLE organization_llm_secrets;
       DROP TABLE organization_llm_provider_configs;
       DROP TABLE organization_task_llm;
+      DROP INDEX resolved_tasks_flagged;
+      ALTER TABLE resolved_tasks DROP COLUMN flagged;
       PRAGMA user_version = 4;
     `);
     await closeRaw(before);

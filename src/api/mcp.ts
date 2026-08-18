@@ -13,6 +13,7 @@ import { parseBearerToken } from "./sync.ts";
 import { VERSION } from "../version.ts";
 import {
   parseResolvedQuery, parseUserScope, parseGroupScope, parseGroupIdScope, parseOutcomeFilter,
+  parseFlaggedFilter,
   parseIntOr, DEFAULT_LIMIT, MAX_LIMIT, VALID_SOURCES, UNGROUPED_SENTINEL, type QueryGetter,
 } from "./query-params.ts";
 import { buildActivityReport, buildTaskQualityReport, buildUserRoster } from "./reports.ts";
@@ -86,15 +87,17 @@ const TOOLS: Tool[] = [
   {
     name: "query_tasks",
     description:
-      "Flat, paged list of extracted tasks (description, outcome, frustration, signals) plus " +
-      "outcome counts. Answers 'show me the failed tasks last week' / 'what did people ask agents " +
-      "to do'.",
+      "Flat, paged list of extracted tasks (description, outcome, frustration, signals, whether a " +
+      "credential warning applies) plus outcome counts and a flagged total. Answers 'show me the " +
+      "failed tasks last week' / 'what did people ask agents to do' / 'which work may have exposed " +
+      "a credential'.",
     inputSchema: {
       type: "object",
       properties: {
         ...SHARED_PROPERTIES,
         q: { type: "string", description: "Search over task description/project." },
         outcome: { type: "string", description: "Comma list of success|failure|unknown to filter to." },
+        flagged: { type: "string", description: "Pass \"1\" to return only tasks carrying a credential warning." },
         limit: { type: "number", description: `Max rows to return (default ${DEFAULT_LIMIT}, max ${MAX_LIMIT}).` },
         offset: { type: "number", description: "Row offset for paging (default 0)." },
       },
@@ -106,7 +109,13 @@ const TOOLS: Tool[] = [
       "Outcomes and friction rolled up for a window: success/frustration/interrupted rates, an " +
       "outcomes-over-time daily series, quality by user/source/project, and top failure signals. " +
       "Answers 'how *well* is agent work going'. Defaults to the last 30 days.",
-    inputSchema: { type: "object", properties: SHARED_PROPERTIES },
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...SHARED_PROPERTIES,
+        flagged: { type: "string", description: "Pass \"1\" to report only tasks carrying a credential warning." },
+      },
+    },
   },
   {
     name: "query_tool_usage",
@@ -193,6 +202,7 @@ async function handleQueryTasks(store: HubStore, args: Record<string, unknown> |
     return toolJson({
       rows: [], total: 0, offset: 0, limit: DEFAULT_LIMIT,
       counts: { success: 0, failure: 0, unknown: 0 },
+      flaggedTotal: 0,
     });
   }
 
@@ -211,6 +221,7 @@ async function handleQueryTasks(store: HubStore, args: Record<string, unknown> |
     offset: Math.max(0, parseIntOr(get("offset"), 0)),
     q: get("q") || undefined,
     outcomes,
+    flagged: parseFlaggedFilter(get),
   };
   const result = buildTaskList(taskRows, params);
   const labelsByKey = await store.listLabelsForTasks(
@@ -231,7 +242,13 @@ async function handleQueryTaskQuality(store: HubStore, args: Record<string, unkn
 
   const userId = parseUserScope(get);
   const groupId = parseGroupIdScope(get);
-  const report = await buildTaskQualityReport(store, { orgId, userId, groupId }, query, new Date());
+  const report = await buildTaskQualityReport(
+    store,
+    { orgId, userId, groupId },
+    query,
+    new Date(),
+    { flagged: parseFlaggedFilter(get) },
+  );
   if (!report) return toolError("No data yet.");
   return toolJson(report);
 }

@@ -384,6 +384,7 @@ export interface TaskListItem {
   outcomeReason?: string;
   frustration?: string;
   signals?: string[];
+  flagged: boolean;
   labels: TaskListItemLabel[];
 }
 
@@ -400,4 +401,6 @@ export interface TaskListResponse {
   offset: number;
   limit: number;
   counts: TaskListCounts;
+  /** Tasks in the filtered set carrying a credential warning. Equals `total` when `flagged=1`. */
+  flaggedTotal: number;
 }

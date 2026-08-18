@@ -297,6 +297,7 @@ describe("tools/call query_tasks", () => {
       const result = (body as { result: { content: Array<{ text: string }> } }).result;
       expect(JSON.parse(result.content[0]!.text)).toEqual({
         rows: [], total: 0, offset: 0, limit: 50, counts: { success: 0, failure: 0, unknown: 0 },
+        flaggedTotal: 0,
       });
     } finally {
       await env.store.close();
